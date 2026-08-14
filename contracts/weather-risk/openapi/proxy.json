@@ -1,0 +1,36 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "k-skill hosted Weather Risk proxy subset",
+    "version": "weather-risk-query-context/v1",
+    "description": "Clean-room route allowlist for the hosted proxy. The proxy injects its own service credential upstream and exposes no client credential parameter."
+  },
+  "paths": {
+    "/v1/ask-seoul/weather-risk/bundle": {"get": {"operationId": "getWeatherRiskBundleThroughProxy", "responses": {"200": {"description": "proxied bundle"}, "400": {"$ref": "#/components/responses/Problem400"}, "401": {"$ref": "#/components/responses/Problem401"}, "403": {"$ref": "#/components/responses/Problem403"}, "404": {"$ref": "#/components/responses/Problem404"}, "409": {"$ref": "#/components/responses/Problem409"}, "422": {"$ref": "#/components/responses/Problem422"}, "429": {"$ref": "#/components/responses/Problem429"}, "500": {"$ref": "#/components/responses/Problem500"}, "503": {"$ref": "#/components/responses/Problem503"}}}},
+    "/v1/ask-seoul/weather-risk/product": {"get": {"operationId": "getWeatherRiskProductThroughProxy", "responses": {"200": {"description": "proxied product"}, "400": {"$ref": "#/components/responses/Problem400"}, "401": {"$ref": "#/components/responses/Problem401"}, "403": {"$ref": "#/components/responses/Problem403"}, "404": {"$ref": "#/components/responses/Problem404"}, "409": {"$ref": "#/components/responses/Problem409"}, "422": {"$ref": "#/components/responses/Problem422"}, "429": {"$ref": "#/components/responses/Problem429"}, "500": {"$ref": "#/components/responses/Problem500"}, "503": {"$ref": "#/components/responses/Problem503"}}}},
+    "/v1/ask-seoul/weather-risk/data": {
+      "get": {
+        "operationId": "getWeatherRiskDataThroughProxy",
+        "parameters": [
+          {"name": "product_row_id", "in": "query", "schema": {"type": "string"}},
+          {"name": "place_id", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^seoul_admd_[0-9]{10}$"}},
+          {"name": "forecast_at", "in": "query", "schema": {"type": "string"}},
+          {"name": "risk_labels", "in": "query", "schema": {"type": "string"}},
+          {"name": "from", "in": "query", "schema": {"type": "string"}},
+          {"name": "to", "in": "query", "schema": {"type": "string"}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100}},
+          {"name": "cursor", "in": "query", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "proxied current data page"},
+          "400": {"$ref": "#/components/responses/Problem400"}, "401": {"$ref": "#/components/responses/Problem401"}, "403": {"$ref": "#/components/responses/Problem403"}, "404": {"$ref": "#/components/responses/Problem404"}, "409": {"$ref": "#/components/responses/Problem409"}, "422": {"$ref": "#/components/responses/Problem422"}, "429": {"$ref": "#/components/responses/Problem429"}, "500": {"$ref": "#/components/responses/Problem500"}, "503": {"$ref": "#/components/responses/Problem503"}
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "Problem400": {"description": "bad request or proxied invalid request"}, "Problem401": {"description": "proxied authentication failure"}, "Problem403": {"description": "proxied scope failure"}, "Problem404": {"description": "proxied unknown product"}, "Problem409": {"description": "proxied cursor mismatch"}, "Problem422": {"description": "proxied query availability failure"}, "Problem429": {"description": "rate limited"}, "Problem500": {"description": "upstream internal failure"}, "Problem503": {"description": "upstream not configured or not ready"}
+    }
+  }
+}

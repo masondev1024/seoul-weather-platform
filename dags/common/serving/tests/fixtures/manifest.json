@@ -1,0 +1,93 @@
+{
+  "nodes": {
+    "model.ask_seoul.gold_weather_place_current_outlook": {
+      "resource_type": "model",
+      "name": "gold_weather_place_current_outlook",
+      "description": "지금 이 장소의 가장 가까운 예보.",
+      "columns": {
+        "product_row_id": {"description": "행 식별자(장소)."},
+        "place_id": {"description": "서울 121 장소 코드."},
+        "forecast_at": {"description": ""}
+      },
+      "config": {
+        "meta": {
+          "serving": {
+            "enabled": true,
+            "external": true,
+            "product_id": "weather_place_current_outlook",
+            "product_question": "지금 이 장소의 가장 가까운 기상 예보는 무엇입니까?",
+            "grain": "place_id마다 한 행.",
+            "primary_key": ["product_row_id"],
+            "publication_mode": "snapshot",
+            "zero_policy": "fail",
+            "publication_trigger": {"schedule_cron": "10 * * * *"},
+            "event_time": "forecast_at",
+            "usage_patterns": [
+              {
+                "pattern_id": "hottest_places_now",
+                "question_ko": "지금 가장 더운 장소는?",
+                "axes": "장소 랭킹 — 기온 DESC",
+                "requires": ["select_columns", "sort"],
+                "verified_rows": 10,
+                "verified_at": "2026-07-30T09:00:00Z",
+                "verified_publication_id": "fixture-pub-1",
+                "sql": "-- :n=10\nSELECT place_id FROM gold_weather_place_current_outlook ORDER BY temperature DESC LIMIT :n"
+              },
+              {
+                "pattern_id": "missing_sql_dropped",
+                "question_ko": "sql 없는 선언은 게시되지 않아야 한다"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "model.ask_seoul.gold_citydata_ppltn_dow_hour": {
+      "resource_type": "model",
+      "name": "gold_citydata_ppltn_dow_hour",
+      "description": "요일×시간 혼잡 롤업.",
+      "config": {
+        "meta": {
+          "serving": {
+            "enabled": true,
+            "external": false,
+            "product_id": "citydata_ppltn_dow_hour",
+            "product_question": "이 장소는 무슨 요일 몇 시에 붐빕니까?",
+            "grain": "장소×요일×시간마다 한 행.",
+            "primary_key": ["area_cd", "day_of_week", "hour_of_day"],
+            "publication_mode": "append",
+            "zero_policy": "retain_last_good",
+            "publication_trigger": {"trigger_type": "asset", "max_interval_minutes": 90},
+            "event_time": "event_at",
+            "reliability": {"sample_count_field": "base_n", "minimum_sample_count": 30, "insufficient_sample_policy": "suppress_row"}
+          }
+        }
+      }
+    },
+    "model.ask_seoul.gold_weather_internal_scratch": {
+      "resource_type": "model",
+      "name": "gold_weather_internal_scratch",
+      "config": {
+        "meta": {
+          "serving": {
+            "enabled": false,
+            "external": false,
+            "product_id": "weather_internal_scratch",
+            "product_question": "내부 확인용?",
+            "grain": "한 행.",
+            "primary_key": ["id"],
+            "publication_mode": "snapshot",
+            "zero_policy": "allow",
+            "publication_trigger": {"schedule_cron": "0 * * * *"}
+          }
+        }
+      }
+    },
+    "test.ask_seoul.not_null_product_row_id": {
+      "resource_type": "test",
+      "name": "not_null_gold_weather_place_current_outlook_product_row_id",
+      "attached_node": "model.ask_seoul.gold_weather_place_current_outlook",
+      "test_metadata": {"name": "not_null", "kwargs": {"column_name": "product_row_id"}}
+    }
+  }
+}

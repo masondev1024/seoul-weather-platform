@@ -1,0 +1,61 @@
+version: 2
+
+unit_tests:
+  - name: hourly_outlook_uses_latest_issue_without_cross_issue_backfill
+    description: >-
+      같은 장소·예보시각에 여러 발표본이 있으면 최신 발표본 하나만 사용하며,
+      최신 발표본에서 빠진 위험 category를 과거 발표본으로 보충하지 않는다.
+    model: gold_weather_place_hourly_outlook
+    config:
+      tags: [ask_seoul_weather_risk_query_availability_unit]
+    given:
+      - input: ref('gold_weather_forecast_by_place_serving')
+        format: sql
+        rows: |
+          select
+              cast('seoul_admd_1111051500' as varchar) as place_id,
+              cast('청운효자동' as varchar) as place_name,
+              cast('[]' as varchar) as alias_names,
+              cast('1111051500' as varchar) as admin_dong_code,
+              cast('청운효자동' as varchar) as admin_dong,
+              cast('11110' as varchar) as gu_code,
+              cast('종로구' as varchar) as gu,
+              cast(37.584 as double) as latitude,
+              cast(126.970 as double) as longitude,
+              cast(evidence.category as varchar) as category,
+              cast(evidence.issued_at as timestamp(6)) as issued_at,
+              timestamp '2026-08-13 00:00:00' as forecast_at,
+              cast(evidence.fcst_value_raw as varchar) as fcst_value_raw,
+              cast(evidence.fcst_value_num as double) as fcst_value_num,
+              cast(evidence.collected_at as timestamp(6)) as collected_at,
+              cast('raw/weather/unit.json' as varchar) as raw_object_key,
+              cast('unit-payload' as varchar) as payload_hash,
+              cast('unit-run' as varchar) as dag_run_id
+          from (
+              values
+                  ('TMP', timestamp '2026-08-08 23:00:00', '99', cast(99.0 as double), timestamp '2026-08-08 14:00:00'),
+                  ('WSD', timestamp '2026-08-08 23:00:00', '9', cast(9.0 as double), timestamp '2026-08-08 14:00:00'),
+                  ('PTY', timestamp '2026-08-08 23:00:00', '1', cast(null as double), timestamp '2026-08-08 14:00:00'),
+                  ('PCP', timestamp '2026-08-08 23:00:00', '10mm', cast(10.0 as double), timestamp '2026-08-08 14:00:00'),
+                  ('SNO', timestamp '2026-08-08 23:00:00', '5cm', cast(5.0 as double), timestamp '2026-08-08 14:00:00'),
+                  ('TMP', timestamp '2026-08-12 02:00:00', '25', cast(25.0 as double), timestamp '2026-08-12 02:00:00'),
+                  ('WSD', timestamp '2026-08-12 02:00:00', '2', cast(2.0 as double), timestamp '2026-08-12 02:00:00'),
+                  ('PTY', timestamp '2026-08-12 02:00:00', '0', cast(null as double), timestamp '2026-08-12 02:00:00'),
+                  ('PCP', timestamp '2026-08-12 02:00:00', '강수없음', cast(null as double), timestamp '2026-08-12 02:00:00')
+          ) as evidence(category, issued_at, fcst_value_raw, fcst_value_num, collected_at)
+    expect:
+      rows:
+        - place_id: seoul_admd_1111051500
+          forecast_at: "2026-08-13 00:00:00"
+          forecast_category_count: 4
+          forecast_issued_at_min: "2026-08-12 02:00:00"
+          forecast_issued_at_max: "2026-08-12 02:00:00"
+          forecast_collected_at_max: "2026-08-12 11:00:00"
+          risk_evidence_collected_category_count: 4
+          risk_evidence_collected_at_min: "2026-08-12 11:00:00"
+          risk_evidence_collected_at_max: "2026-08-12 11:00:00"
+          temp_c: 25.0
+          wind_ms: 2.0
+          pty_code: "0"
+          pcp_raw: 강수없음
+          sno_raw: null

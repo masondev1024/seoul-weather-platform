@@ -1,0 +1,117 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ASK Seoul Weather Risk origin subset",
+    "version": "weather-risk-query-context/v1",
+    "description": "Clean-room, read-only contract subset. It specifies observable responses only; it does not implement Worker, D1, quota, or authentication behavior."
+  },
+  "paths": {
+    "/skill/v1/bundles/seoul-weather-risk": {
+      "get": {
+        "operationId": "getWeatherRiskBundle",
+        "responses": {"200": {"description": "single-product bundle"}, "401": {"$ref": "#/components/responses/Problem401"}, "403": {"$ref": "#/components/responses/Problem403"}, "500": {"$ref": "#/components/responses/Problem500"}, "503": {"$ref": "#/components/responses/Problem503"}}
+      }
+    },
+    "/skill/v1/products/weather_place_risk_window": {
+      "get": {
+        "operationId": "getWeatherRiskProduct",
+        "responses": {"200": {"description": "the weather_place_risk_window product"}, "401": {"$ref": "#/components/responses/Problem401"}, "403": {"$ref": "#/components/responses/Problem403"}, "404": {"$ref": "#/components/responses/Problem404"}, "500": {"$ref": "#/components/responses/Problem500"}, "503": {"$ref": "#/components/responses/Problem503"}}
+      }
+    },
+    "/skill/v1/products/weather_place_risk_window/data": {
+      "get": {
+        "operationId": "getWeatherRiskData",
+        "security": [{"BearerApiKey": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/ProductRowId"},
+          {"$ref": "#/components/parameters/PlaceId"},
+          {"$ref": "#/components/parameters/ForecastAt"},
+          {"$ref": "#/components/parameters/RiskLabels"},
+          {"$ref": "#/components/parameters/From"},
+          {"$ref": "#/components/parameters/To"},
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"}
+        ],
+        "responses": {
+          "200": {"description": "a covered, fresh data page", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DataPage"}}}},
+          "400": {"$ref": "#/components/responses/Problem400"},
+          "401": {"$ref": "#/components/responses/Problem401"},
+          "403": {"$ref": "#/components/responses/Problem403"},
+          "404": {"$ref": "#/components/responses/Problem404"},
+          "409": {"$ref": "#/components/responses/Problem409"},
+          "422": {"$ref": "#/components/responses/Problem422"},
+          "429": {"$ref": "#/components/responses/Problem429"},
+          "500": {"$ref": "#/components/responses/Problem500"},
+          "503": {"$ref": "#/components/responses/Problem503"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerApiKey": {"type": "http", "scheme": "bearer"}
+    },
+    "parameters": {
+      "ProductRowId": {"name": "product_row_id", "in": "query", "schema": {"type": "string"}},
+      "PlaceId": {"name": "place_id", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^seoul_admd_[0-9]{10}$"}},
+      "ForecastAt": {"name": "forecast_at", "in": "query", "schema": {"type": "string"}},
+      "RiskLabels": {"name": "risk_labels", "in": "query", "schema": {"type": "string"}},
+      "From": {"name": "from", "in": "query", "schema": {"type": "string"}, "description": "Must be supplied with to; date, KST-naive datetime, or RFC3339 instant."},
+      "To": {"name": "to", "in": "query", "schema": {"type": "string"}, "description": "Must be supplied with from; date, KST-naive datetime, or RFC3339 instant."},
+      "Limit": {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100}},
+      "Cursor": {"name": "cursor", "in": "query", "schema": {"type": "string"}, "description": "Opaque base64url cursor v2; reuse only for unchanged publication and normalized query."}
+    },
+    "schemas": {
+      "QueryContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schema_version", "place_id", "requested_from_at", "requested_to_at", "available_from_at", "available_to_at", "snapshot_as_of_hour", "forecast_collected_at_min", "forecast_collected_at_max", "source_population_revision", "publication_id", "coverage_status", "freshness_state", "zero_result_reason"],
+        "properties": {
+          "schema_version": {"const": "weather-risk-query-context/v1"},
+          "place_id": {"type": "string", "pattern": "^seoul_admd_[0-9]{10}$"},
+          "requested_from_at": {"type": "string"},
+          "requested_to_at": {"type": "string"},
+          "available_from_at": {"type": "string"},
+          "available_to_at": {"type": "string"},
+          "snapshot_as_of_hour": {"type": "string"},
+          "forecast_collected_at_min": {"type": "string"},
+          "forecast_collected_at_max": {"type": "string"},
+          "source_population_revision": {"const": "kma_admin_dong_grid_20260325:9b34417b1418be6877e614c113a18e93f078de745f763858e13ed0e896a687ea"},
+          "publication_id": {"type": "string", "minLength": 1},
+          "coverage_status": {"const": "covered"},
+          "freshness_state": {"const": "fresh"},
+          "zero_result_reason": {"type": ["string", "null"]}
+        }
+      },
+      "DataPage": {
+        "type": "object",
+        "required": ["bundle_id", "product_id", "publication_id", "row_count", "limit", "time_axis", "query_context", "has_more", "next_cursor", "usage", "rows"],
+        "properties": {
+          "bundle_id": {"const": "seoul-weather-risk"},
+          "product_id": {"const": "weather_place_risk_window"},
+          "publication_id": {"type": "string", "minLength": 1},
+          "row_count": {"type": "integer", "minimum": 0},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+          "time_axis": {"const": "forecast_at"},
+          "query_context": {"$ref": "#/components/schemas/QueryContext"},
+          "has_more": {"type": "boolean"},
+          "next_cursor": {"type": ["string", "null"]},
+          "usage": {"type": "object", "required": ["used", "daily_quota"], "properties": {"used": {"type": "integer", "minimum": 0}, "daily_quota": {"type": "integer", "minimum": 1}}},
+          "rows": {"type": "array", "items": {"type": "object"}}
+        }
+      },
+      "Problem": {"type": "object", "required": ["title", "detail", "code"], "properties": {"title": {"type": "string"}, "detail": {"type": "string"}, "code": {"type": "string"}}}
+    },
+    "responses": {
+      "Problem400": {"description": "invalid request or exhausted/malformed cursor", "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}},
+      "Problem401": {"description": "missing API key", "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}},
+      "Problem403": {"description": "API key lacks scope", "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}},
+      "Problem404": {"description": "unknown product", "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}},
+      "Problem409": {"description": "cursor publication or query mismatch", "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}},
+      "Problem422": {"description": "requested range is outside current complete availability", "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}},
+      "Problem429": {"description": "rate limited", "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}},
+      "Problem500": {"description": "data query contract or execution failure", "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}},
+      "Problem503": {"description": "product or availability evidence is not ready", "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}}
+    }
+  }
+}

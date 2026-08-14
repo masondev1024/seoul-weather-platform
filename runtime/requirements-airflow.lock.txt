@@ -1,0 +1,14 @@
+# Direct runtime dependencies observed in the pinned Airflow image.
+# The complete transitive runtime is fixed by runtime/toolchain.lock.json's image digest.
+apache-airflow==3.2.2
+apache-airflow-providers-standard==1.13.1
+boto3==1.43.0
+botocore==1.43.0
+croniter==6.2.2
+pandas==2.3.3
+pendulum==3.2.0
+pyarrow==24.0.0
+pyiceberg==0.11.1
+PyYAML==6.0.3
+requests==2.34.2
+trino==0.338.0

@@ -1,0 +1,11 @@
+{
+  "400": {"title": "invalid cursor", "detail": "use the next_cursor from the previous response without modification", "code": "invalid_cursor"},
+  "401": {"title": "API key missing", "detail": "an API key is required", "code": "api_key_missing"},
+  "403": {"title": "API key forbidden", "detail": "the API key lacks the required scope", "code": "api_key_forbidden"},
+  "404": {"title": "unknown product", "detail": "the requested product is not in the weather-risk bundle", "code": "unknown_product", "product_id": "weather_place_risk_window"},
+  "409": {"title": "cursor expired", "detail": "publication or normalized query changed; restart at the first page", "code": "cursor_query_mismatch", "publication_id": "publication-example-20260814"},
+  "422": {"title": "query window unavailable", "detail": "requested time range is outside the current publication's complete availability window", "code": "query_window_unavailable", "product_id": "weather_place_risk_window", "publication_id": "publication-example-20260814", "place_id": "seoul_admd_1171065000"},
+  "429": {"title": "rate limited", "detail": "daily quota is exhausted", "code": "rate_limited"},
+  "500": {"title": "data query failed", "detail": "the current publication could not be queried", "code": "data_query_failed"},
+  "503": {"title": "product not ready", "detail": "current publication availability evidence is not ready", "code": "product_not_ready", "product_id": "weather_place_risk_window", "blockers": ["query_availability_evidence_unavailable"]}
+}

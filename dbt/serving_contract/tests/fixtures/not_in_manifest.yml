@@ -1,0 +1,22 @@
+version: 2
+
+# A valid-looking declaration for a model that does NOT exist in fixtures/manifest.json.
+# Used to exercise the model_not_in_manifest rule (only fires when a manifest is supplied).
+
+models:
+  - name: gold_ghost_model
+    columns:
+      - name: id
+        tests: [not_null, unique]
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: ghost_model
+          product_question: 존재하지 않는 모델?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger: {schedule_cron: "0 * * * *"}

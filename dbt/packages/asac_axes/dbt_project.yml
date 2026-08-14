@@ -1,0 +1,42 @@
+name: "asac_axes"
+version: "0.1.0"
+config-version: 2
+
+# 공용 dbt 패키지 (issue #48): 시간축/공간축 매크로 + 서울 행정동 crosswalk/경계 seed.
+# 모델은 없다 — 소비 프로젝트가 packages.yml(local) 로 참조해 매크로/seed 만 쓴다.
+
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+
+# 행안부/통계청 코드는 반드시 varchar (선행 0 보존, 숫자 오인 방지).
+seeds:
+  asac_axes:
+    +quote_columns: false
+    seoul_admin_dong_crosswalk:
+      +column_types:
+        admin_dong_code: varchar
+        gu_code: varchar
+        stat_dong_code: varchar
+        stat_gu_code: varchar
+        gu: varchar
+        admin_dong: varchar
+        latitude: double
+        longitude: double
+        snapshot_ref: varchar
+    seoul_admin_dong_boundary:
+      +column_types:
+        sigungu: varchar
+        sigungu_code: varchar
+        dong: varchar
+        dong_code: varchar
+        boundary_wkt: varchar
+        admin_dong_code: varchar
+        gu_code: varchar
+    seoul_gu_boundary:
+      +column_types:
+        sigungu: varchar
+        sigungu_eng: varchar
+        sigungu_code: varchar
+        boundary_wkt: varchar
+        gu_code: varchar

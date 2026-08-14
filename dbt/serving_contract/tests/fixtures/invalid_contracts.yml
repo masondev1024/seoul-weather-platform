@@ -1,0 +1,381 @@
+version: 2
+
+# Each model triggers at least one specific rule. Validated WITHOUT a manifest, so
+# primary_key existence is checked against the yml columns and manifest-membership is
+# not applied here (that rule has its own fixture).
+
+models:
+  # required_field_missing: product_question / grain / primary_key / publication_mode ... 누락
+  - name: bad_missing_required
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: bad_missing_required
+
+  # external_enabled_conflict: external=true, enabled=false
+  - name: bad_external_conflict
+    columns:
+      - name: id
+        tests: [not_null, unique]
+    config:
+      meta:
+        serving:
+          enabled: false
+          external: true
+          product_id: bad_external_conflict
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: retain_last_good
+          publication_trigger: {schedule_cron: "0 * * * *"}
+
+  # invalid_enum_value: publication_mode=replace, zero_policy=skip
+  - name: bad_enum
+    columns:
+      - name: id
+        tests: [not_null, unique]
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: bad_enum
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: replace
+          zero_policy: skip
+          publication_trigger: {schedule_cron: "0 * * * *"}
+
+  # primary_key_not_a_column + primary_key_evidence_missing
+  - name: bad_primary_key
+    columns:
+      - name: real_col
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: bad_primary_key
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [ghost_col]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger: {schedule_cron: "0 * * * *"}
+
+  # excluded_field_present: estimated_rows / api_path
+  - name: bad_excluded
+    columns:
+      - name: id
+        tests: [not_null, unique]
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: bad_excluded
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger: {schedule_cron: "0 * * * *"}
+          estimated_rows: 5000
+          api_path: /data/bad_excluded
+
+  # legacy_double_declaration: meta.serving_tier alongside meta.serving
+  - name: bad_double_decl
+    columns:
+      - name: id
+        tests: [not_null, unique]
+    config:
+      meta:
+        serving_tier: d1_direct
+        refresh: 1시간
+        serving:
+          enabled: true
+          external: false
+          product_id: bad_double_decl
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger: {schedule_cron: "0 * * * *"}
+
+  # publication_trigger_invalid: cron + asset 동시
+  - name: bad_trigger
+    columns:
+      - name: id
+        tests: [not_null, unique]
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: bad_trigger
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger:
+            schedule_cron: "0 * * * *"
+            trigger_type: asset
+            max_interval_minutes: 30
+
+  # conditional_required_missing (v1.1): event_time 선언했는데 freshness_slo_minutes 누락
+  - name: bad_missing_freshness_slo
+    columns:
+      - name: id
+        tests: [not_null, unique]
+      - name: observed_at
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: bad_missing_freshness_slo
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger: {schedule_cron: "0 * * * *"}
+          event_time: observed_at
+
+  # invalid_field_format: product_id 대문자·하이픈
+  - name: bad_pid_format
+    columns:
+      - name: id
+        tests: [not_null, unique]
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: Bad-ID
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger: {schedule_cron: "0 * * * *"}
+
+  # partial_policy_invalid: min_publish_ratio 범위 밖
+  - name: bad_partial
+    columns:
+      - name: id
+        tests: [not_null, unique]
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: bad_partial
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger: {schedule_cron: "0 * * * *"}
+          partial_policy: {min_publish_ratio: 1.5}
+
+  # reliability_invalid: 키 누락 + 잘못된 정책
+  - name: bad_reliability
+    columns:
+      - name: id
+        tests: [not_null, unique]
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: bad_reliability
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger: {schedule_cron: "0 * * * *"}
+          reliability:
+            insufficient_sample_policy: drop
+
+  # product_id_duplicate: 아래 둘이 같은 product_id
+  - name: bad_dup_a
+    columns:
+      - name: id
+        tests: [not_null, unique]
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: dup_product
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger: {schedule_cron: "0 * * * *"}
+  - name: bad_dup_b
+    columns:
+      - name: id
+        tests: [not_null, unique]
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: dup_product
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger: {schedule_cron: "0 * * * *"}
+  # usage_pattern_* — v1.3 (#600/#638): 필수 누락, 스펙 밖 필드, requires 어휘 오타, 중복 id.
+  - name: bad_usage_patterns
+    columns:
+      - name: id
+        tests: [not_null, unique]
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: bad_usage_patterns
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger: {schedule_cron: "0 * * * *"}
+          usage_patterns:
+            - pattern_id: missing_sql            # sql 누락 → usage_pattern_required_missing
+              question_ko: 질의 없는 선언?
+            - pattern_id: typo_fields
+              sql: "SELECT 1"
+              requires: [sort, order_by]          # order_by 는 어휘 밖 → usage_pattern_requires_unknown
+              insight_sample: 오타 필드            # → usage_pattern_unknown_field
+            - pattern_id: typo_fields             # 모델 안 중복 → usage_pattern_duplicate
+              sql: "SELECT 2"
+              verified_rows: ten                  # 정수 아님 → usage_pattern_invalid
+
+  # public_projection_* — malformed shape, missing required projection fields,
+  # unknown physical columns, and internal/secret column exposure.
+  - name: bad_public_projection
+    columns:
+      - name: id
+        tests: [not_null, unique]
+      - name: event_at
+      - name: request_id
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: bad_public_projection
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger: {schedule_cron: "0 * * * *"}
+          event_time: event_at
+          freshness_slo_minutes: 60
+          public_projection:
+            schema_version: "1.0"
+            columns: [request_id, ghost_column]
+            aliases: {}
+
+  # column_vocabulary_*: malformed ids, missing parent ids, malformed terms,
+  # duplicate codes, and conflicting declarations for one vocabulary id.
+  - name: bad_column_vocabulary
+    columns:
+      - name: id
+        tests: [not_null, unique]
+      - name: malformed_id
+        config:
+          meta:
+            vocabulary_id: weather-sky_code
+      - name: terms_without_id
+        config:
+          meta:
+            vocabulary_terms:
+              - {code: "1", label_ko: 맑음}
+      - name: malformed_term
+        config:
+          meta:
+            vocabulary_id: weather:sky_code
+            vocabulary_terms:
+              - {code: "", label_ko: 맑음}
+      - name: duplicate_term
+        config:
+          meta:
+            vocabulary_id: traffic:flow_value_quality
+            vocabulary_terms:
+              - {code: available, label_ko: 원천 값 있음}
+              - {code: available, label_ko: 중복 코드}
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: bad_column_vocabulary
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger: {schedule_cron: "0 * * * *"}
+
+  - name: bad_column_vocabulary_conflict_a
+    columns:
+      - name: id
+        tests: [not_null, unique]
+      - name: flow_quality
+        config:
+          meta:
+            vocabulary_id: traffic:flow_value_quality
+            vocabulary_terms:
+              - {code: available, label_ko: 원천 값 있음}
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: bad_column_vocabulary_conflict_a
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger: {schedule_cron: "0 * * * *"}
+
+  - name: bad_column_vocabulary_conflict_b
+    columns:
+      - name: id
+        tests: [not_null, unique]
+      - name: flow_quality
+        config:
+          meta:
+            vocabulary_id: traffic:flow_value_quality
+            vocabulary_terms:
+              - {code: available, label_ko: 원천 값 존재}
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: bad_column_vocabulary_conflict_b
+          product_question: 질문?
+          grain: 한 행.
+          primary_key: [id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger: {schedule_cron: "0 * * * *"}

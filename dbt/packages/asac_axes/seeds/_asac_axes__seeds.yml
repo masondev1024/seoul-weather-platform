@@ -1,0 +1,42 @@
+version: 2
+
+# asac_axes seed 자체 검증. 소비 프로젝트가 `dbt test --select asac_axes` 로 실행.
+# 공용 제네릭 테스트(in_seoul_bbox, axis_coverage)의 사용 예시이기도 하다.
+
+seeds:
+  - name: seoul_admin_dong_crosswalk
+    description: "서울 행정동 crosswalk — 행안부10(canonical) ↔ 통계청7/5(alias)."
+    columns:
+      - name: admin_dong_code
+        description: "행안부 행정동 코드 10자리 (canonical key)."
+        tests:
+          - not_null
+          - unique
+      - name: longitude
+        tests:
+          - in_seoul_bbox:
+              arguments:
+                kind: lon
+      - name: latitude
+        tests:
+          - in_seoul_bbox:
+              arguments:
+                kind: lat
+
+  - name: seoul_admin_dong_boundary
+    description: "행정동 경계 + 행안부 코드 부가. 일부(재편 동)는 admin_dong_code 공란."
+    columns:
+      - name: admin_dong_code
+        # 미매칭(상일동, 일원2동) 2행 존재(용신동은 2026-07-23 수동 backfill) → 커버리지 게이트 0.98
+        tests:
+          - axis_coverage:
+              arguments:
+                min_ratio: 0.98
+
+  - name: seoul_gu_boundary
+    description: "자치구 경계 + 행안부 gu_code 5자리."
+    columns:
+      - name: gu_code
+        tests:
+          - not_null
+          - unique

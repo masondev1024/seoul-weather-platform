@@ -1,0 +1,5 @@
+# Paths excluded from Airflow DAG-file scanning at the dags root.
+# Syntax: regexp (default), matched against paths relative to this directory.
+# plugins/ holds callback modules (mounted as /opt/airflow/plugins, ASK-Seoul#23)
+# — importable, but never a DAG entry file.
+plugins/

@@ -1,0 +1,44 @@
+version: 2
+
+# bronze 원천은 ASAC-DAG(#154)가 적재한 Iceberg 테이블(행안부 행정동 마스터).
+# 도메인 프로젝트 관례(database=target.database, schema=env_var)를 따르되,
+# 공용 패키지라 소비 프로젝트가 어디서든 오버라이드할 수 있게 var()로 한 겹 감싼다.
+# 기본값은 전용 common 스키마(iceberg_dev.common / iceberg.common) — 공유 마스터의 집(#154 코멘트).
+# 카탈로그는 dev/prod 분기, 스키마는 dev/prod 공통 이름(COMMON_SCHEMA, 기본 common).
+# 카탈로그 기본값은 target.database — profiles.yml 이 이미 target 별로 카탈로그를
+# 해석하므로(prod→TRINO_ICEBERG_CATALOG, dev→TRINO_DEV_ICEBERG_CATALOG) 여기서 다시
+# 고르면 안 된다. 과거 TRINO_DEV_ICEBERG_CATALOG 를 기본값으로 두는 바람에 prod 빌드가
+# dev 카탈로그(iceberg_dev.common)를 읽었다(#368).
+sources:
+  - name: axes_bronze
+    description: >
+      공통 공간축 원천 bronze Iceberg 테이블. ASAC-DAG 가 행안부 행정동 마스터를 적재한다.
+      코드·명칭의 canonical 원천이며, seed(crosswalk)는 좌표 보조 및 source 부재 환경 폴백.
+    database: "{{ var('axes_bronze_catalog', target.database) }}"
+    schema: "{{ var('axes_bronze_schema', env_var('COMMON_SCHEMA', 'common')) }}"
+    tables:
+      - name: admin_dong_master
+        identifier: bronze_admin_dong_master
+        description: >
+          행안부 행정동 마스터(전국 법정동↔행정동 연계). 전 컬럼 varchar(collected_at 만 timestamp).
+          grain = (revision_date, admin_dong_code, beop_dong_code). 서울 최신 개정(2025-04-01)
+          769행 = 행정동 426 + 자치구 25 + 시 1(집계행은 admin_dong_code 끝 5자리가 00000).
+        columns:
+          - name: revision_date
+            description: 개정 일자(YYYY-MM-DD). 최신 스냅샷 선별 키.
+            tests:
+              - not_null
+          - name: sido_nm
+            description: 시도명(서울 필터 축).
+            tests:
+              - not_null
+          - name: sgg_nm
+            description: 시군구명(자치구).
+          - name: admin_dong_nm
+            description: 행정동명.
+          - name: admin_dong_code
+            description: 행안부 행정동 10자리 — canonical 키.
+            tests:
+              - not_null
+          - name: stat_region_cd
+            description: 통계청 지역 코드(alias).

@@ -1,0 +1,5 @@
+version: 2
+
+seeds:
+  - name: weather_place_grid_mapping
+    description: K-Skill 및 Weather serving이 공유하는 427개 compatibility place와 KMA grid 매핑이다.

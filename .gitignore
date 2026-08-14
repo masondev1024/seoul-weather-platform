@@ -1,0 +1,51 @@
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+*.crt
+*.key
+*.p12
+*.pem
+*.pfx
+credentials/
+secrets/
+.aws/
+.gcp/
+.wrangler/
+
+# Codex / OMX local artifacts
+.omc/
+.omx/
+.superpowers/
+
+# Python
+.pytest_cache/
+**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+node_modules/
+coverage/
+dist/
+build/
+
+# dbt and pipeline generated output
+**/dbt_packages/
+**/logs/
+**/target/
+**/.user.yml
+
+# Local runtime state
+airflow.db
+*.sqlite
+*.sqlite3
+
+# Local-only ASK Seoul records
+LessonRun.md
+engineering-decision-log.md
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

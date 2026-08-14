@@ -1,0 +1,28 @@
+{
+  "bundle_id": "seoul-weather-risk",
+  "product_id": "weather_place_risk_window",
+  "publication_id": "publication-example-20260814",
+  "row_count": 0,
+  "limit": 100,
+  "time_axis": "forecast_at",
+  "query_context": {
+    "schema_version": "weather-risk-query-context/v1",
+    "place_id": "seoul_admd_1171065000",
+    "requested_from_at": "2026-08-14 09:00:00",
+    "requested_to_at": "2026-08-14 23:59:59",
+    "available_from_at": "2026-08-14 09:00:00",
+    "available_to_at": "2026-08-15 08:00:00",
+    "snapshot_as_of_hour": "2026-08-14 09:00:00",
+    "forecast_collected_at_min": "2026-08-14 08:00:00",
+    "forecast_collected_at_max": "2026-08-14 08:05:00",
+    "source_population_revision": "kma_admin_dong_grid_20260325:9b34417b1418be6877e614c113a18e93f078de745f763858e13ed0e896a687ea",
+    "publication_id": "publication-example-20260814",
+    "coverage_status": "covered",
+    "freshness_state": "fresh",
+    "zero_result_reason": "no_upcoming_weather_risk_candidate"
+  },
+  "has_more": false,
+  "next_cursor": null,
+  "usage": {"used": 1, "daily_quota": 1000},
+  "rows": []
+}

@@ -1,0 +1,34 @@
+{
+  "schema_version": "weather-toolchain/v1",
+  "observed_at": "2026-08-14",
+  "tools": {
+    "python": {
+      "version": "3.11.15",
+      "evidence": "running Airflow image label and read-only python --version"
+    },
+    "airflow": {
+      "version": "3.2.2",
+      "image_repository": "elt-infra-airflow",
+      "image_digest": "sha256:a5070b84a84e487391abce4c2ce354f50625d18f5cb9c1c47c6a27ec248d6512",
+      "evidence": "running Airflow image label and read-only airflow version"
+    },
+    "dbt_core": {
+      "version": "1.10.22",
+      "evidence": "fixed DBT CI lock and running Airflow dbt virtualenv"
+    },
+    "dbt_adapter": {
+      "name": "dbt-trino",
+      "version": "1.10.2",
+      "evidence": "fixed DBT CI lock and running Airflow dbt virtualenv"
+    },
+    "node": {
+      "version": "24.15.0",
+      "evidence": "local contract validation environment"
+    }
+  },
+  "notes": [
+    "The deployment dbt executable is /home/airflow/dbt-venv/bin/dbt and is not on the container default PATH.",
+    "The host dbt-core 1.12.0 installation is observation-only and is not the validation contract.",
+    "No credential values are stored in this lock."
+  ]
+}

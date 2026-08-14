@@ -1,0 +1,168 @@
+# Machine-readable Serving Contract schema (v1).
+#
+# Single source for the STRUCTURAL rules of ASAC-DAG docs/contracts/serving-contract-v1.md.
+# The validator (serving_contract/validator.py) loads this file and drives required/optional/
+# excluded/enum checks from it; cross-model and semantic rules are coded in validator.py.
+#
+# Keep this file and the ASAC-DAG doc in lockstep. On any change, bump `schema_version`
+# and update the doc per its §8 version policy.
+
+schema_version: v1.16
+supported_contract_versions: [v1]
+
+# 조건부 필수 — `if_present` 필드를 선언한 모델은 `then_required` 필드도 선언해야 한다.
+# v1.1 event_time 규칙에 v1.9 freshness_field 규칙을 추가했다.
+conditional_required:
+  - if_present: event_time
+    then_required: freshness_slo_minutes
+  - if_present: freshness_field
+    then_required: freshness_slo_minutes
+  - if_present: empty_result_freshness
+    then_required: freshness_slo_minutes
+
+# meta.serving.* fields that MUST be present (non-empty) on every model declaring a
+# serving contract. Missing any of these => publication forbidden.
+required:
+  enabled:              {type: bool}
+  external:             {type: bool}
+  product_id:           {type: string, pattern: '^[a-z0-9_]+$'}
+  product_question:     {type: string, non_empty: true}
+  grain:                {type: string, non_empty: true}
+  primary_key:          {type: list, min_items: 1}
+  publication_mode:     {type: enum, allowed: [snapshot, upsert, append]}
+  zero_policy:          {type: enum, allowed: [fail, retain_last_good, allow, warn]}
+  publication_trigger:  {type: object}
+
+# Optional fields — absence is legal (validator applies the documented fallback).
+optional:
+  contract_version:       {type: enum, allowed: [v1]}
+  event_time:             {type: string}
+  freshness_field:        {type: string} # v1.9: event_time과 다른 실제 품질 신선도 축
+  # v1.13: zero_policy=allow 희소 상품이 0행일 때 상위 관계에서 freshness를 읽는 fail-closed 축
+  empty_result_freshness: {type: object}
+  # v1.16: sparse public product의 place-level query coverage evidence relation
+  query_availability:      {type: object}
+  # v1.14: public catalog에서 안전히 retire할 disabled·non-external product 선언
+  retire_on_publish:      {type: bool}
+  retention_or_horizon:   {type: string}
+  partial_policy:         {type: object}
+  freshness_slo_minutes:  {type: int, min: 1}
+  shape:                  {type: enum, allowed: [wide, rollup, event]}
+  # v1.10 (#706): 사람이 읽는 표시 메타. 화면(마켓플레이스 카탈로그·콘솔)이 제품을 뭐라
+  # 부르고 어떻게 소개할지의 정본이다. `description` 은 기계·API 소비자용 기술 서술이라
+  # 청중이 다르다 — 실측하면 "gold_citydata_ppltn_hourly — 장소별 시간 혼잡 인사이트…"
+  # 처럼 테이블명이 앞장서서 화면에 못 쓴다.
+  # optional 인 이유: 선언 시점에 23/54 제품만 쓰고 있었다. 필수로 하면 미선언 도메인이
+  # 즉시 게시 실패한다. 없으면 화면이 지금처럼 product_id 로 내려앉는다.
+  display:                {type: object}
+  reliability:            {type: object}
+  # v1.7: incremental 추가 — reader 가 event_time(워터마크) 이후 바뀐 그레인만 읽어
+  # partial INSERT OR REPLACE(그 PK 만 갱신, 나머지 D1 행 보존). 전체-테이블 parity 면제.
+  # merge/exact_set 은 전량(전체-parity 강제), incremental 은 부분(D1 쓰기 절약).
+  upsert_strategy:        {type: enum, allowed: [merge, exact_set, incremental]}
+  usage_patterns:         {type: list}   # v1.3 (#600/#638): 검증 질의 예시 — 항목 규칙은 usage_pattern_fields
+  public_projection:      {type: object} # v1.4: 물리 D1/public projection allowlist
+  public_primary_key:     {type: list, min_items: 1} # v1.8: rollup 후 공개 D1 grain의 PK override
+  source_evidence:        {type: list}   # v1.5 (#678): 공개 권리·출처 증거 — 항목 규칙은 source_evidence_fields
+  quality_coverage:       {type: object} # v1.8: distinct coverage 또는 명시적 not-applicable 근거
+
+# Defaults the Publisher applies when the field is absent (documentation of intent;
+# the validator does not require them but forbids illegal explicit values).
+defaults:
+  enabled: false
+  external: false
+  zero_policy: retain_last_good
+  contract_version: v1
+
+# Fields that MUST NOT appear under meta.serving — measured at runtime or owned by
+# the Gateway/Worker API contract (#476).
+excluded:
+  - estimated_rows
+  - estimated_daily_write_rows
+  - api_path
+  - allowed_filters
+  - default_limit
+  - max_limit
+  - pagination
+
+# Legacy meta keys (siblings of `serving` under config.meta). Presence of ANY of these
+# together with a meta.serving block is a double declaration and fails.
+legacy_meta_keys:
+  - serving_tier
+  - serving_gold_candidate
+  - external
+  - refresh
+
+# Nested enums validated when the owning optional object is present.
+nested_enums:
+  reliability.insufficient_sample_policy: [suppress_row, flag_degraded, allow]
+
+# publication_trigger must be EXACTLY one of these shapes.
+publication_trigger_shapes:
+  - required_keys: [schedule_cron]
+    forbidden_keys: [trigger_type, max_interval_minutes]
+  - required_keys: [trigger_type, max_interval_minutes]
+    forbidden_keys: [schedule_cron]
+    field_values:
+      trigger_type: asset
+
+# v1.3 (#600/#638 확정): usage_patterns 항목 규칙. sql 은 참조 구현(클라이언트 실행 대상 아님),
+# 전역 식별자는 (product_id, pattern_id) 쌍 — pattern_id 는 모델 안에서만 유일하면 된다.
+# requires 어휘는 11개 고정(#638 §1.1) — 오타가 그냥 통과되지 않게 하는 것이 이 블록의 목적.
+usage_pattern_fields:
+  required: [pattern_id, sql]
+  # v1.11 (#217/#192 P1·P3): param_defaults(기본값 — 미전달 시 게시자 상수로 bind) ·
+  # param_enum(허용값 — 밖이면 게이트웨이 400) · params(타입 선언 — array 는 ?,?,? 전개).
+  # 게시 경로는 d1_usage_patterns 가 아니라 **별도 표 d1_pattern_params** 다(공유 핸드오프
+  # 표는 컬럼 완전일치 검사라 컬럼 추가 금지 — ASAC-DAG#706 전례). 게이트웨이는 표가
+  # 없으면 강등하므로(전 파라미터 필수) 선언이 게시보다 앞서도 안전하다.
+  optional: [question_ko, axes, requires, verified_rows, verified_at,
+             verified_publication_id, allow_empty, insight_sample_ko, d1_table,
+             param_defaults, param_enum, params]
+  requires_allowed: [select_columns, sort, aggregate, group_by, having,
+                     join, subquery, window, filter_range, filter_set, filter_null]
+  # v1.12 (#217): param_defaults 값은 스칼라 또는 **상대 날짜** {rel, as} 다. 날짜/기간
+  # 파라미터를 정적 상수로 두면 낡으므로(어제의 :from 이 계속 나옴), 게이트웨이가 실행 시점
+  # KST '오늘' 기준으로 해석한다. rel = ^[+-]?\d+(d|w|M|y)$ · as ∈ {date,datetime,ym,year}.
+  param_default_relative_units: [d, w, M, y]
+  param_default_relative_as: [date, datetime, ym, year]
+  # params 항목이 가질 수 있는 키·값 (v1.11 — 게이트웨이 convertPattern 과 잠금)
+  param_spec_types: [string, number, array]
+  param_spec_items: [string, number]
+  param_spec_max_len_cap: 100
+
+# v1.5 (#678): source_evidence 는 D1 ``d1_catalog_sources``로 함께 게시되는
+# 권리/출처 정본이다. 미선언은 레거시 호환을 위해 허용하지만, 선언한 제품은 빈 목록이나
+# 모호한 재배포 범위를 허용하지 않는다.
+source_evidence_fields:
+  required: [source_id, source_url, license, license_url, redistribution, attribution, rights_checked_at]
+  redistribution_allowed: [allowed_with_attribution, prohibited, unknown]
+
+# v1.8 (#678): 정적 기대 집합과 현재 publication의 distinct coverage를 명확히 분리한다.
+# `measurement_scope=source_relation`은 공개 rollup에서 제거되는 원천 축을 게시 전 source relation에서
+# 측정한다. 고정 분모 자체가 성립하지 않는 동적 모집단은 수치를 꾸며내지 않고
+# `not_applicable_reason` 한 필드로 근거를 선언한다.
+quality_coverage_fields:
+  measured_required: [field, expected_distinct_count, minimum_ratio]
+  measured_optional: [measurement_scope]
+  measurement_scope_allowed: [published_rows, source_relation]
+  not_applicable_required: [not_applicable_reason]
+
+# v1.13: 행이 없는 희소 event 상품도 upstream이 정상 수집된 경우 freshness를 남긴다.
+# relation은 같은 manifest의 dbt model, field는 그 model의 실제 physical column이어야 한다.
+empty_result_freshness_fields:
+  required: [relation, field]
+
+query_availability_fields:
+  required: [relation]
+
+# v1.15: enabled=true·external=true·zero_policy=allow 공개 희소 상품은 위 freshness
+# fallback과 mcp_projection.empty_result(valid_empty)를 함께 선언해야 한다. 이 규칙은
+# Worker가 0행을 수집 실패와 혼동하지 않고, 과금 없이 설명 가능한 빈 결과로 반환하게 한다.
+
+# v1.10 (#706): display 하위 필드. 세 도메인(citydata·culture·transit)이 계약 밖에서
+# 이미 같은 네 키로 수렴해 있던 것을 그대로 승격했다 — 새 설계가 아니다.
+display_fields:
+  required: [title, summary]
+  optional: [caveat, use_cases]
+  title_max_len: 40      # 표·카드 제목 자리. 넘으면 화면이 자른다

@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: gold_weather_place_hourly_outlook
+    description: 주요 장소별 KMA 예보를 최신 issued_at 하나만 사용해 시간 단위 wide 형태로 제공한다.
+    columns:
+      - name: product_row_id
+        description: 장소와 예보 시각을 직렬화한 결정적 식별자다.
+        tests: [not_null, unique]
+      - name: forecast_collected_at_max
+        description: source forecast의 최신 KST collection timestamp다.
+        tests: [not_null]
+      - name: risk_evidence_collected_category_count
+        description: 위험 판정에 필요한 evidence category 수다.
+      - name: risk_evidence_collected_at_min
+        description: 위험 evidence의 가장 이른 KST collection timestamp다.
+      - name: risk_evidence_collected_at_max
+        description: 위험 evidence의 가장 늦은 KST collection timestamp다.

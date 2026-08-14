@@ -1,0 +1,96 @@
+version: 2
+
+models:
+  - name: silver_kma_vilage_fcst
+    description: 기존 소비자 호환용 최신 KMA 예보 snapshot으로 place·grid·발표·예보·항목 grain을 유지한다.
+    columns:
+      - name: source_id
+        description: 기상청 단기예보 원천 식별자다.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - kma_vilage_fcst
+      - name: place_id
+        description: 수집 요청에 사용한 장소 식별자다.
+        tests:
+          - not_null
+      - name: nx
+        description: KMA 격자 X 좌표다.
+        tests:
+          - not_null
+      - name: ny
+        description: KMA 격자 Y 좌표다.
+        tests:
+          - not_null
+      - name: category
+        description: KMA 예보 항목 코드다.
+        tests:
+          - not_null
+      - name: issued_at
+        description: base_date와 base_time에서 만든 KST 발표 시각이다.
+        tests:
+          - not_null
+      - name: forecast_at
+        description: fcst_date와 fcst_time에서 만든 KST 예보 대상 시각이다.
+        tests:
+          - not_null
+      - name: event_at
+        description: cross-domain event time이며 forecast_at과 같다.
+        tests:
+          - not_null
+      - name: time_bucket
+        description: forecast_at을 KST 시간 단위로 내린 호환 bucket이다.
+        tests:
+          - not_null
+      - name: fcst_value_raw
+        description: KMA 예보 값 원문이다.
+        tests:
+          - not_null
+      - name: fcst_value_num
+        description: 원문을 직접 double cast한 호환 수치이며 비수치 표현은 null이다.
+      - name: value_representation
+        description: 예보 값의 explicit_none·range·bare_numeric·정성 코드 등 표현 상태다.
+      - name: value_num
+        description: 표현 계약에 따라 파싱한 수치이며 bare_numeric은 별도 상태로 구분한다.
+      - name: value_lower_bound
+        description: 범위 표현의 포함 하한이며 해당 없으면 null이다.
+      - name: value_upper_bound
+        description: 범위 표현의 포함 상한이며 무상한 또는 해당 없으면 null이다.
+      - name: qualitative_code
+        description: PTY 또는 SKY 정성 코드 원문이며 해당 없으면 null이다.
+      - name: forecast_lead_hours
+        description: issued_at부터 forecast_at까지의 시간 차이다.
+      - name: raw_object_key
+        description: 선택 행의 R2 raw object lineage key다.
+        tests:
+          - not_null
+      - name: payload_hash
+        description: 선택 행의 raw payload 지문이다.
+        tests:
+          - not_null
+      - name: total_count
+        description: KMA 응답이 보고한 전체 item 수다.
+        tests:
+          - not_null
+      - name: item_count
+        description: 응답에서 파싱된 item 수다.
+        tests:
+          - not_null
+      - name: load_date
+        description: Bronze 적재 파티션 날짜다.
+        tests:
+          - not_null
+      - name: collected_at
+        description: 기존 호환 경로가 노출하는 수집 timestamp(6)다.
+        tests:
+          - not_null
+      - name: dag_run_id
+        description: 선택 행을 만든 Airflow 실행 식별자다.
+        tests:
+          - not_null
+      - name: request_id
+        description: 선택 행이 속한 API 요청 식별자다.
+      - name: request_params_json
+        description: secret 원문을 제외한 요청 조건 JSON이다.

@@ -1,0 +1,34 @@
+{
+  "schema_version": "source-refs/v1",
+  "locked_at": "2026-08-14",
+  "sources": [
+    {
+      "id": "airflow_weather",
+      "repository": "ASAC-DE-bigkk/ASAC-DAG",
+      "ref": "origin/dev",
+      "commit": "73ff5665ffd5526c59de8be2969cf65dffaf468b",
+      "license_status": "internal_private_snapshot_only"
+    },
+    {
+      "id": "weather_dbt",
+      "repository": "ASAC-DE-bigkk/ASAC-DBT",
+      "ref": "origin/dev",
+      "commit": "a64292d50bd8c2a19784388828de38d2b4a8c525",
+      "license_status": "internal_private_snapshot_only"
+    },
+    {
+      "id": "weather_origin_contract",
+      "repository": "ASAC-DE-bigkk/ASK-Seoul-Serving",
+      "ref": "origin/dev",
+      "commit": "efe393e7a925d5798867424993daf0dbe5d55902",
+      "license_status": "internal_private_snapshot_only"
+    },
+    {
+      "id": "kskill_runtime",
+      "repository": "NomaDamas/k-skill",
+      "ref": "upstream/dev",
+      "commit": "43edf3c0f1037a4e510b21de61e26965212b6620",
+      "license_status": "MIT_root_AGPL_proxy_boundary"
+    }
+  ]
+}

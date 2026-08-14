@@ -1,0 +1,44 @@
+{
+  "schema_version": "weather-place-artifact-handoff/v1",
+  "weather_dbt": {
+    "commit": "a64292d50bd8c2a19784388828de38d2b4a8c525",
+    "source_path": "domains/traffic_weather/seeds/weather/weather_place_grid_mapping.csv"
+  },
+  "kskill_runtime": {
+    "commit": "43edf3c0f1037a4e510b21de61e26965212b6620",
+    "expected_git_blob_oid": "7eb741c42f7701dc1d5f879de83a98cfc94132c3",
+    "target_paths": [
+      "seoul-weather-risk/references/admin-dong-place-map.json",
+      "packages/k-skill-cli/skills/seoul-weather-risk/references/admin-dong-place-map.json"
+    ]
+  },
+  "artifact": {
+    "path": "release/weather/snapshots/admin-dong-place-map.json",
+    "mapping_version": "kma_admin_dong_grid_20260325",
+    "sha256": "d0f99bd96aff19684ede2ec8700f9bf6086a2b48208166d91a37126b147aaf23",
+    "git_blob_oid": "7eb741c42f7701dc1d5f879de83a98cfc94132c3",
+    "location_count": 427,
+    "population_revision": "kma_admin_dong_grid_20260325:9b34417b1418be6877e614c113a18e93f078de745f763858e13ed0e896a687ea"
+  },
+  "commands": {
+    "generate_check": [
+      "python",
+      "-m",
+      "release.weather.generate_place_artifact",
+      "--source",
+      "dbt/domains/traffic_weather/seeds/weather/weather_place_grid_mapping.csv",
+      "--as-of",
+      "2026-08-09",
+      "--output",
+      "release/weather/snapshots/admin-dong-place-map.json",
+      "--check"
+    ],
+    "validate_handoff": [
+      "python",
+      "-m",
+      "release.weather.validate_place_artifact",
+      "--upstream-root",
+      "<fixed-k-skill-checkout>"
+    ]
+  }
+}

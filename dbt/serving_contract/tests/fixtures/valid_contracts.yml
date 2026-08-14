@@ -1,0 +1,84 @@
+version: 2
+
+# All models here are fully valid under Serving Contract v1. The validator must
+# return zero findings for this file (paired with fixtures/manifest.json).
+
+models:
+  - name: gold_weather_place_current_outlook
+    columns:
+      - name: product_row_id
+        tests: [not_null, unique]
+      - name: place_id
+        config:
+          meta:
+            vocabulary_id: fixture:place_kind
+            vocabulary_terms:
+              - {code: station, label_ko: 관측 지점}
+      - name: forecast_at
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: true
+          product_id: weather_place_current_outlook
+          product_question: 지금 이 장소의 가장 가까운 기상 예보는 무엇입니까?
+          grain: place_id마다 한 행입니다.
+          primary_key: [product_row_id]
+          publication_mode: snapshot
+          zero_policy: fail
+          publication_trigger:
+            schedule_cron: "10 * * * *"
+          event_time: forecast_at
+          freshness_slo_minutes: 90   # v1.1: event_time 선언 시 필수
+          shape: wide
+          # v1.3 (#600/#638): 검증 질의 예시 — 전 필드 정상 선언(모두 optional 허용 범위)
+          usage_patterns:
+            - pattern_id: hottest_places_now
+              question_ko: 지금 가장 더운 장소는?
+              axes: 장소 랭킹 — 기온 DESC
+              requires: [select_columns, sort]
+              verified_rows: 10
+              verified_at: "2026-07-30T09:00:00Z"
+              verified_publication_id: fixture-pub-1
+              allow_empty: false
+              insight_sample_ko: 여의도한강공원이 33.1도로 1위.
+              sql: |
+                -- :n=10
+                SELECT place_id FROM gold_weather_place_current_outlook
+                ORDER BY temperature DESC LIMIT :n
+            - pattern_id: minimal_pilot_shape
+              sql: "SELECT 1"   # transit 파일럿 최소형(#638 점진 적용) — 필수 2필드만으로 유효
+
+  # Internal-only (enabled true / external false), append, composite PK, rollup reliability, asset trigger.
+  - name: gold_citydata_ppltn_dow_hour
+    tests:
+      - dbt_utils.unique_combination_of_columns
+    columns:
+      - name: area_cd
+        tests: [not_null]
+      - name: day_of_week
+        tests: [not_null]
+      - name: hour_of_day
+        tests: [not_null]
+      - name: base_n
+    config:
+      meta:
+        serving:
+          enabled: true
+          external: false
+          product_id: citydata_ppltn_dow_hour
+          product_question: 이 장소는 무슨 요일 몇 시에 붐빕니까?
+          grain: 장소×요일×시간마다 한 행입니다.
+          primary_key: [area_cd, day_of_week, hour_of_day]
+          publication_mode: append
+          zero_policy: retain_last_good
+          publication_trigger:
+            trigger_type: asset
+            max_interval_minutes: 90
+          shape: rollup
+          partial_policy:
+            min_publish_ratio: 0.8
+          reliability:
+            sample_count_field: base_n
+            minimum_sample_count: 30
+            insufficient_sample_policy: flag_degraded

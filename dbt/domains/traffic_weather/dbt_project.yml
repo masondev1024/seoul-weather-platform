@@ -1,0 +1,64 @@
+name: asac_seoul
+version: "1.0.0"
+config-version: 2
+
+profile: asac_seoul
+
+flags:
+  require_certificate_validation: true
+  static_parser: false
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+packages-install-path: "{{ env_var('DBT_PACKAGES_INSTALL_PATH', 'dbt_packages') }}"
+
+target-path: target
+clean-targets:
+  - target
+  - dbt_packages
+  - logs
+
+models:
+  asac_seoul:
+    weather:
+      +materialized: table
+      +schema: "{{ env_var('WEATHER_SCHEMA', 'weather') }}"
+      +group: weather
+      transform:
+        silver:
+          +tags: ["ask_seoul_weather_transform_silver"]
+        place_mart:
+          +tags: ["ask_seoul_weather_transform_serving_place_mart"]
+        gold:
+          +tags: ["ask_seoul_weather_transform_serving_gold"]
+  asac_axes:
+    +schema: "{{ env_var('ASAC_AXES_SCHEMA', 'common') }}"
+    +tags: ["ask_seoul_weather_transform_asac_axes"]
+
+seeds:
+  asac_seoul:
+    weather:
+      +quote_columns: false
+      +schema: "{{ env_var('WEATHER_SCHEMA', 'weather') }}"
+      weather_place_grid_mapping:
+        +tags: ["ask_seoul_weather_transform_place_mapping"]
+        +column_types:
+          place_id: varchar
+          place_name: varchar
+          alias_names: varchar
+          gu: varchar
+          admin_dong: varchar
+          latitude: double
+          longitude: double
+          nx: integer
+          ny: integer
+          mapping_method: varchar
+          grid_distance_m: double
+          source_admin_code: varchar
+
+data_tests:
+  asac_seoul:
+    weather:
+      +group: weather

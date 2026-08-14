@@ -1,0 +1,27 @@
+{
+  "nodes": {
+    "model.ask_seoul.gold_weather_place_current_outlook": {
+      "resource_type": "model",
+      "name": "gold_weather_place_current_outlook",
+      "columns": {
+        "product_row_id": {"name": "product_row_id"},
+        "place_id": {"name": "place_id"},
+        "forecast_at": {"name": "forecast_at"}
+      }
+    },
+    "model.ask_seoul.gold_citydata_ppltn_dow_hour": {
+      "resource_type": "model",
+      "name": "gold_citydata_ppltn_dow_hour",
+      "columns": {
+        "area_cd": {"name": "area_cd"},
+        "day_of_week": {"name": "day_of_week"},
+        "hour_of_day": {"name": "hour_of_day"},
+        "base_n": {"name": "base_n"}
+      }
+    },
+    "seed.ask_seoul.some_seed": {
+      "resource_type": "seed",
+      "name": "some_seed"
+    }
+  }
+}

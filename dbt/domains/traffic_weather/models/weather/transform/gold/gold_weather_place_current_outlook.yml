@@ -1,0 +1,647 @@
+version: 2
+
+models:
+  - name: gold_weather_place_current_outlook
+    description: 장소마다 현재 KST 시 이후 가장 이른 예보 한 행을 제공해 지금의 예보 맥락을 빠르게 답하는 공개 Gold 모델입니다.
+    access: public
+    config:
+      contract:
+        enforced: true
+      meta:
+        serving:
+          enabled: true
+          external: true
+          product_id: weather_place_current_outlook
+          display:
+            title: 장소별 현재 날씨 전망
+            summary: 서울의 장소별로 현재 시점에 가장 가까운 기상 예보를 보여줍니다.
+            caveat: 기상청 예보이며 실제 관측값이나 기상특보가 아닙니다.
+            use_cases: ["장소 방문 전 날씨 확인"]
+          product_question: 지금 서울 주요 장소들의 기상 상태는 대체로 어떻습니까?
+          mcp_projection:
+            schema_version: mcp-product-projection/v1
+            currentness:
+              field: forecast_at
+              minimum: current_kst_hour
+            operation:
+              id: weather.get_current_outlook
+              approval_status: approved
+              execution_mode: catalog_only
+            question_examples:
+              - 서울역의 현재 예보 기온과 강수 가능성은 무엇인가요?
+              - 여의도공원의 가장 가까운 예보 대상 시각은 언제인가요?
+              - 이 장소에서 지금 참고할 날씨 예보는 무엇인가요?
+          grain: place_id마다 한 행 — 장소별 현재 예보 스냅샷.
+          primary_key: [product_row_id]
+          publication_mode: snapshot
+          zero_policy: fail
+          publication_trigger:
+            schedule_cron: "0 * * * *"
+          event_time: forecast_at
+          freshness_field: forecast_collected_at_max
+          freshness_slo_minutes: 240
+          shape: wide
+          source_evidence:
+            - {source_id: kma_vilage_fcst, source_url: https://www.data.go.kr/data/15084084/openapi.do, license: "공공누리 제1유형(출처표시)", license_url: https://www.kogl.or.kr/info/licenseType1.do, redistribution: allowed_with_attribution, attribution: 기상청, rights_checked_at: "2026-08-06"}
+          usage_patterns:
+            - {pattern_id: current_outlook_for_place, question_ko: "특정 장소의 현재 기준 가장 가까운 예보는 무엇입니까?", axes: "장소 필터 — 현재 예보 행 조회", requires: [select_columns, filter_set], allow_empty: true, verified_rows: 1, verified_at: "2026-08-05T14:39:11Z", verified_publication_id: "5179eeff3b6344d9aea4c694fb10b530", sql: "SELECT place_id, place_name, admin_dong, gu, forecast_at, temp_c, humidity_pct, wind_ms, precip_prob_pct, sky_label, pty_label, is_precipitating, forecast_lead_hours FROM gold_weather_place_current_outlook WHERE place_id = :place_id -- :place_id='seoul_admd_1117059000'"}
+            - {pattern_id: current_outlook_for_gu, question_ko: "특정 자치구의 장소별 현재 예보는 무엇입니까?", axes: "자치구 필터 — 장소명 ASC", requires: [select_columns, filter_set, sort], allow_empty: true, verified_rows: 16, verified_at: "2026-08-05T14:39:11Z", verified_publication_id: "5179eeff3b6344d9aea4c694fb10b530", sql: "SELECT place_id, place_name, admin_dong, gu, forecast_at, temp_c, precip_prob_pct, sky_label, pty_label, is_precipitating FROM gold_weather_place_current_outlook WHERE gu_code = :gu_code ORDER BY place_name LIMIT :n -- :gu_code='11170', :n=100", param_defaults: {n: 100}}
+            - {pattern_id: precipitating_places_now, question_ko: "현재 예보 기준 강수 형태가 있는 장소는 어디입니까?", axes: "강수 여부 필터 — 강수확률 DESC", requires: [select_columns, filter_set, sort], allow_empty: true, verified_rows: 50, verified_at: "2026-08-05T14:39:11Z", verified_publication_id: "5179eeff3b6344d9aea4c694fb10b530", sql: "SELECT place_id, place_name, gu, forecast_at, precip_prob_pct, pty_label, pcp_raw, sno_raw FROM gold_weather_place_current_outlook WHERE is_precipitating = true ORDER BY precip_prob_pct DESC NULLS LAST, place_name LIMIT :n -- :n=50", param_defaults: {n: 50}}
+            - {pattern_id: highest_precip_probability, question_ko: "현재 예보 기준 강수확률이 가장 높은 장소는 어디입니까?", axes: "강수확률 하한 필터 — 강수확률 DESC", requires: [select_columns, filter_range, sort], allow_empty: true, verified_rows: 50, verified_at: "2026-08-05T14:39:11Z", verified_publication_id: "5179eeff3b6344d9aea4c694fb10b530", sql: "SELECT place_id, place_name, gu, forecast_at, precip_prob_pct, pty_label, is_precipitating FROM gold_weather_place_current_outlook WHERE precip_prob_pct >= :min_precip_prob_pct ORDER BY precip_prob_pct DESC, place_name LIMIT :n -- :min_precip_prob_pct=0, :n=50", param_defaults: {min_precip_prob_pct: 0, n: 50}}
+            - {pattern_id: outlook_forecast_window, question_ko: "특정 예보 대상 시간 범위에 해당하는 장소의 현재 예보는 무엇입니까?", axes: "예보 대상 시각 범위 필터 — forecast_at ASC", requires: [select_columns, filter_range, sort], allow_empty: true, verified_rows: 100, verified_at: "2026-08-05T14:39:11Z", verified_publication_id: "5179eeff3b6344d9aea4c694fb10b530", sql: "SELECT place_id, place_name, gu, forecast_at, temp_c, precip_prob_pct, sky_label, pty_label FROM gold_weather_place_current_outlook WHERE forecast_at >= :from_at AND forecast_at < :to_at ORDER BY forecast_at ASC, place_name LIMIT :n -- :from_at='2026-08-04 00:00:00', :to_at='2026-08-05 00:00:00', :n=100", param_defaults: {from_at: { rel: "0d", as: date }, to_at: { rel: "+2d", as: datetime }, n: 100}}
+            - {pattern_id: hottest_places_now, question_ko: "현재 예보 기준 기온이 가장 높은 장소는 어디입니까?", axes: "기온 정렬 — temp_c DESC", requires: [select_columns, sort], allow_empty: true, verified_rows: 20, verified_at: "2026-08-05T14:39:11Z", verified_publication_id: "5179eeff3b6344d9aea4c694fb10b530", sql: "SELECT place_id, place_name, gu, forecast_at, temp_c, humidity_pct, precip_prob_pct FROM gold_weather_place_current_outlook ORDER BY temp_c DESC NULLS LAST, place_name LIMIT :n -- :n=20", param_defaults: {n: 20}}
+            - {pattern_id: strong_wind_places_now, question_ko: "현재 예보 기준 풍속이 높은 장소는 어디입니까?", axes: "풍속 하한 필터 — wind_ms DESC", requires: [select_columns, filter_range, sort], allow_empty: true, verified_rows: 50, verified_at: "2026-08-05T14:39:11Z", verified_publication_id: "5179eeff3b6344d9aea4c694fb10b530", sql: "SELECT place_id, place_name, gu, forecast_at, wind_ms, wind_dir_deg, sky_label, pty_label FROM gold_weather_place_current_outlook WHERE wind_ms >= :min_wind_ms ORDER BY wind_ms DESC, place_name LIMIT :n -- :min_wind_ms=0, :n=50", param_defaults: {min_wind_ms: 0, n: 50}}
+            - {pattern_id: forecast_category_coverage_overview, question_ko: "현재 장소 예보의 확인된 기상 카테고리 수별 장소 수는 얼마입니까?", axes: "예보 카테고리 수 집계 — 카테고리 수 ASC", requires: [select_columns, aggregate, group_by, sort], allow_empty: false, verified_rows: 1, verified_at: "2026-08-05T14:39:11Z", verified_publication_id: "5179eeff3b6344d9aea4c694fb10b530", sql: "SELECT forecast_category_count, count(*) AS place_count FROM gold_weather_place_current_outlook GROUP BY forecast_category_count ORDER BY forecast_category_count ASC"}
+            - pattern_id: "place_metric_ranking"
+              question_ko: "선택한 기상 지표(기온·습도·풍속·강수확률)와 정렬 방향으로 현재 예보 장소를 순위 매기면 어디입니까?"
+              axes: "지표·정렬 방향 스위치 — 선택 지표 값 순위"
+              verified_rows: 20
+              verified_at: "2026-08-10T11:10:00Z"
+              verified_publication_id: "5e7a691783b84bc5a1e685985ab3d4b7"
+              insight_sample_ko: "기온 내림차순 상위 20곳은 모두 29℃대이며 첫 행은 송파구 가락1동(29℃·습도 70%·풍속 4.2㎧). :metric=humidity면 관악구 난향동(습도 75%)이, :dir=asc면 은평구 갈현제1동(27℃)이 최상단으로 바뀜. 기존 hottest_places_now·strong_wind_places_now를 하나로 일반화하고 최저기온·습도 순위까지 열어줌."
+              sql: |
+                -- :metric=temp, :dir=desc, :n=20
+                SELECT place_id, place_name, admin_dong, gu, forecast_at, temp_c, humidity_pct, wind_ms, precip_prob_pct,
+                       CASE :metric WHEN 'temp' THEN temp_c WHEN 'humidity' THEN humidity_pct WHEN 'wind' THEN wind_ms WHEN 'precip' THEN precip_prob_pct END AS metric_value
+                FROM gold_weather_place_current_outlook
+                ORDER BY CASE WHEN :dir='asc' THEN CASE :metric WHEN 'temp' THEN temp_c WHEN 'humidity' THEN humidity_pct WHEN 'wind' THEN wind_ms WHEN 'precip' THEN precip_prob_pct END END ASC NULLS LAST,
+                         CASE WHEN :dir='desc' THEN CASE :metric WHEN 'temp' THEN temp_c WHEN 'humidity' THEN humidity_pct WHEN 'wind' THEN wind_ms WHEN 'precip' THEN precip_prob_pct END END DESC NULLS LAST,
+                         place_name
+                LIMIT :n
+              requires: [select_columns, sort]
+              allow_empty: false
+              param_defaults: { dir: "desc", n: 20 }
+              param_enum: { dir: [asc, desc] }
+            - pattern_id: "gu_weather_summary"
+              question_ko: "자치구별 현재 예보의 평균 기온·습도·풍속과 장소 수는 얼마입니까?"
+              axes: "자치구 집계 — 평균 기온 DESC"
+              verified_rows: 25
+              verified_at: "2026-08-10T11:10:00Z"
+              verified_publication_id: "5e7a691783b84bc5a1e685985ab3d4b7"
+              insight_sample_ko: "자치구 25곳 요약에서 평균 기온 최상단은 강남구(장소 22곳, 평균 29.0℃, 평균 습도 69.1%, 평균 풍속 4.2㎧, 최대 강수확률 0%)."
+              sql: |
+                SELECT gu_code, gu, count(*) AS place_count,
+                       round(avg(temp_c), 1) AS avg_temp_c, min(temp_c) AS min_temp_c, max(temp_c) AS max_temp_c,
+                       round(avg(humidity_pct), 1) AS avg_humidity_pct, round(avg(wind_ms), 2) AS avg_wind_ms,
+                       max(precip_prob_pct) AS max_precip_prob_pct
+                FROM gold_weather_place_current_outlook
+                GROUP BY gu_code, gu
+                ORDER BY avg_temp_c DESC, gu
+              requires: [select_columns, aggregate, group_by, sort]
+              allow_empty: false
+            - pattern_id: "muggy_places_threshold"
+              question_ko: "기온과 습도가 동시에 임계 이상인 무더운 장소는 어디입니까?"
+              axes: "기온·습도 임계 교차 필터 — 기온 DESC, 습도 DESC"
+              verified_rows: 50
+              verified_at: "2026-08-10T11:10:00Z"
+              verified_publication_id: "5e7a691783b84bc5a1e685985ab3d4b7"
+              insight_sample_ko: "기온 28℃·습도 60% 이상인 무더운 장소를 상한 50건까지 확인합니다."
+              sql: |
+                -- :min_temp_c=29, :min_humidity_pct=55, :n=50
+                SELECT place_id, place_name, admin_dong, gu, temp_c, humidity_pct, wind_ms, forecast_at
+                FROM gold_weather_place_current_outlook
+                WHERE temp_c >= :min_temp_c AND humidity_pct >= :min_humidity_pct
+                ORDER BY temp_c DESC, humidity_pct DESC, place_name
+                LIMIT :n
+              requires: [select_columns, filter_range, sort]
+              allow_empty: false
+              param_defaults: { min_temp_c: 28, min_humidity_pct: 60, n: 50 }
+            - pattern_id: "compare_named_places"
+              question_ko: "지정한 여러 장소명의 현재 예보를 한 번에 비교하면 어떻습니까?"
+              axes: "장소명 배열 다중 선택 — 장소명 ASC"
+              verified_rows: 3
+              verified_at: "2026-08-10T11:10:00Z"
+              verified_publication_id: "5e7a691783b84bc5a1e685985ab3d4b7"
+              insight_sample_ko: "요청한 3개 장소가 모두 반환되고 첫 행 송파구 가락1동은 29℃·습도 70%·맑음·강수없음(forecast_at 2026-08-08 20:00). 자치구가 다른 4곳을 넣어도 각 장소 행이 그대로 반환됨."
+              sql: |
+                -- :names=["잠실본동","가락1동","송파1동"]
+                SELECT place_id, place_name, admin_dong, gu, forecast_at, temp_c, humidity_pct, wind_ms, precip_prob_pct, sky_label, pty_label
+                FROM gold_weather_place_current_outlook
+                WHERE place_name IN (SELECT value FROM json_each(:names))
+                ORDER BY place_name
+              requires: [select_columns, filter_set, subquery]
+              allow_empty: false
+            - pattern_id: "outlook_collection_freshness"
+              question_ko: "현재 예보 수집이 가장 최근인(또는 가장 오래된) 장소는 어디입니까?"
+              axes: "수집 시각 정렬 방향 스위치 — 수집 시각 최신/최오래"
+              verified_rows: 20
+              verified_at: "2026-08-10T11:10:00Z"
+              verified_publication_id: "5e7a691783b84bc5a1e685985ab3d4b7"
+              insight_sample_ko: "수집 최신순 최상단은 서초구 내곡동(2026-08-08 09:32:16 수집). :dir=asc로 바꾸면 도봉구 도봉제1동(09:19:40)이 가장 오래 전 수집으로, 스냅샷 내 수집 지연 편차가 약 12분임을 보여줌."
+              sql: |
+                -- :dir=desc, :n=20
+                SELECT place_id, place_name, admin_dong, gu, forecast_collected_at_max, forecast_issued_at_max, forecast_at
+                FROM gold_weather_place_current_outlook
+                ORDER BY CASE WHEN :dir='asc' THEN forecast_collected_at_max END ASC,
+                         CASE WHEN :dir='desc' THEN forecast_collected_at_max END DESC,
+                         place_name
+                LIMIT :n
+              requires: [select_columns, sort]
+              allow_empty: false
+              param_defaults: { dir: "desc", n: 20 }
+              param_enum: { dir: [asc, desc] }
+            - pattern_id: "place_current_by_name_search"
+              question_ko: "장소명이나 별칭에 특정 문자열이 들어간 장소의 현재 예보는 무엇입니까?"
+              axes: "장소명·별칭 부분일치 검색 — 장소명 ASC"
+              verified_rows: 6
+              verified_at: "2026-08-10T11:10:00Z"
+              verified_publication_id: "5e7a691783b84bc5a1e685985ab3d4b7"
+              insight_sample_ko: "'잠실'로 검색하면 6곳이 잡히고 첫 행은 송파구 잠실2동(29℃·맑음·강수없음). '가락'은 3곳. place_id를 모르는 소비자가 이름만으로 현재 예보에 접근하는 경로."
+              sql: |
+                -- :q=잠실, :n=50
+                SELECT place_id, place_name, alias_names, admin_dong, gu, forecast_at, temp_c, humidity_pct, precip_prob_pct, sky_label, pty_label
+                FROM gold_weather_place_current_outlook
+                WHERE place_name LIKE '%' || :q || '%' OR alias_names LIKE '%' || :q || '%'
+                ORDER BY place_name
+                LIMIT :n
+              requires: [select_columns, filter_set, sort]
+              allow_empty: false
+              param_defaults: { n: 50 }
+            - pattern_id: "nearest_places_to_point"
+              question_ko: "지정한 위경도 좌표에서 가장 가까운 장소의 현재 예보는 무엇입니까?"
+              axes: "좌표 근접 정렬 — 제곱거리 ASC"
+              verified_rows: 10
+              verified_at: "2026-08-10T11:10:00Z"
+              verified_publication_id: "5e7a691783b84bc5a1e685985ab3d4b7"
+              insight_sample_ko: "좌표(37.5033, 127.0864)에서 가장 가까운 장소는 송파구 잠실본동(29℃·맑음·강수없음)으로 사실상 동일 좌표. 다른 좌표(37.49375, 127.107686)를 넣으면 가락1동이 최근접으로 바뀜."
+              sql: |
+                -- :lat=37.5033, :lon=127.0864, :n=10
+                SELECT place_id, place_name, admin_dong, gu, latitude, longitude, temp_c, humidity_pct, precip_prob_pct, sky_label, pty_label,
+                       (latitude - :lat) * (latitude - :lat) + (longitude - :lon) * (longitude - :lon) AS dist_sq
+                FROM gold_weather_place_current_outlook
+                ORDER BY dist_sq ASC, place_name
+                LIMIT :n
+              requires: [select_columns, sort]
+              allow_empty: false
+              param_defaults: { n: 10 }
+          public_projection:
+            schema_version: "1.1.0"
+            columns: [product_row_id, place_id, place_name, alias_names, admin_dong_code, admin_dong, gu_code, gu, latitude, longitude, forecast_at, forecast_category_count, forecast_issued_at_min, forecast_issued_at_max, forecast_collected_at_max, snapshot_as_of_hour, temp_c, humidity_pct, wind_ms, wind_dir_deg, precip_prob_pct, sky_code, sky_label, pty_code, pty_label, is_precipitating, pcp_raw, pcp_mm, sno_raw, sno_cm, forecast_lead_hours]
+        public_gold:
+          contract_version: "1.0"
+          documentation_language: ko-KR
+          owner: Weather 데이터 제품 운영팀
+          maturity: low
+          visibility: published_producer
+          contract_status: dev_pending
+          exposure_status: none_no_live_consumer
+          intended_consumer_types:
+            - analyst
+            - ai_catalog
+            - cross_domain_dbt
+            - rapidapi_serving
+          cross_domain_usage_examples:
+            - 특정 장소를 지금 방문 예정인 이용자에게 가장 가까운 예보 한 줄을 보여줄 때 사용합니다.
+            - 문화나 상권 등 장소 기반 도메인과 place_id로 결합해 지금 시각의 날씨 맥락을 보조 설명 변수로 사용합니다.
+          product_question: 지금 서울 주요 장소들의 기상 상태는 대체로 어떻습니까?
+          row_meaning: 한 장소의 현재(다음) 예보 대상 시각 한 행입니다.
+          grain: place_id마다 정확히 한 행입니다.
+          anchor_universe: gold_weather_place_hourly_outlook에서 빌드 시점 KST 현재 시 이상 예보가 존재하는 place_id 집합입니다. 매핑된 적 없는 장소는 포함되지 않습니다.
+          usage_guidance: place_id를 조인 축으로 사용하고, forecast_at은 매 빌드마다 달라질 수 있으므로 as-of 해석 시 forecast_issued_at_max와 함께 읽습니다.
+          do_not_use_for: 과거 예보 이력이나 실측 관측, 개인 위치 추정에 사용하지 않습니다.
+          semantic_caveats: forecast_at은 발표시각이 아니라 예보 대상 시각이며, current는 실측이 아니라 빌드 시점 KST 현재 시 이상 중 가장 이른 예보입니다. 이 모델은 매 실행마다 전체 재계산(full refresh)되므로 별도 late repair가 없습니다.
+          primary_key:
+            - product_row_id
+          column_order:
+            - product_row_id
+            - place_id
+            - place_name
+            - alias_names
+            - admin_dong_code
+            - admin_dong
+            - gu_code
+            - gu
+            - latitude
+            - longitude
+            - forecast_at
+            - forecast_category_count
+            - forecast_issued_at_min
+            - forecast_issued_at_max
+            - forecast_collected_at_max
+            - snapshot_as_of_hour
+            - temp_c
+            - humidity_pct
+            - wind_ms
+            - wind_dir_deg
+            - precip_prob_pct
+            - sky_code
+            - sky_label
+            - pty_code
+            - pty_label
+            - is_precipitating
+            - pcp_raw
+            - pcp_mm
+            - sno_raw
+            - sno_cm
+            - forecast_lead_hours
+            - representative_raw_object_key
+            - representative_payload_hash
+            - representative_dag_run_id
+          time:
+            canonical_timezone: Asia/Seoul
+            freshness_slo: weather_vilage_fcst_transform DAG의 매 스케줄된 빌드마다 KST 현재 시 이상 중 가장 이른 예보를 다시 계산하는 것을 목표로 합니다.
+            as_of_meaning: forecast_at은 빌드 시점 KST 현재 시 이상 중 가장 이른 예보 대상 시각이며 매 빌드마다 달라질 수 있습니다.
+            late_repair_policy: 이 모델은 매 실행마다 전체 재계산(table materialize)되므로 별도 late repair가 없고 다음 스케줄된 빌드가 곧 최신 반영입니다.
+            roles:
+              forecast_at:
+                time_role: event
+                timezone: Asia/Seoul
+              forecast_issued_at_min:
+                time_role: issue_min
+                timezone: Asia/Seoul
+              forecast_issued_at_max:
+                time_role: issue_max
+                timezone: Asia/Seoul
+              forecast_collected_at_max:
+                time_role: collection
+                timezone: Asia/Seoul
+          space:
+            enabled: false
+          metrics: {}
+          joins: {}
+          quality:
+            completeness_explanation: forecast_category_count로 이 예보시각에 실제로 확인된 카테고리 수를 확인하고, temp_c 등 개별 지표는 해당 카테고리가 결측이면 null입니다.
+            freshness_explanation: forecast_issued_at_min·forecast_issued_at_max(KMA 발표시각 범위)와 forecast_collected_at_max(수집시각)를 분리해 원천 발표 지연과 수집·빌드 지연을 각각 해석합니다.
+            coverage_explanation: gold_weather_place_hourly_outlook에서 매핑된 적 있는 place_id만 포함하므로 KMA 격자 전체가 아니라 부분 장소 커버리지입니다.
+            state_fields: {}
+          lineage:
+            source_relations:
+              - model.asac_seoul.gold_weather_place_hourly_outlook
+            identifiers:
+              as_of:
+                columns:
+                  - forecast_at
+              publication:
+                relation_level_only: true
+                columns: []
+              raw:
+                columns:
+                  - representative_raw_object_key
+              request:
+                relation_level_only: true
+                columns: []
+              run:
+                columns:
+                  - representative_dag_run_id
+          lifecycle:
+            status: active
+    columns:
+      - name: product_row_id
+        description: place_id를 그대로 쓴 결정적 제품 행 식별자입니다.
+        data_type: varchar
+        tests: [not_null, unique]
+        config:
+          meta:
+            semantic_role: primary_key
+            nullable: false
+            null_meaning: 공개 제품 기본 키이므로 null을 허용하지 않습니다.
+            unit: not_applicable
+      - name: place_id
+        description: 매핑된 장소의 안정 식별자입니다.
+        data_type: varchar
+        tests: [not_null, unique]
+        config:
+          meta:
+            semantic_role: join_key
+            nullable: false
+            null_meaning: natural grain이므로 null을 허용하지 않습니다.
+            unit: not_applicable
+      - name: place_name
+        description: 장소명입니다.
+        data_type: varchar
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: descriptive_attribute
+            nullable: false
+            null_meaning: 매핑된 장소는 이름을 보존하므로 null을 허용하지 않습니다.
+            unit: not_applicable
+      - name: alias_names
+        description: 장소의 별칭 목록입니다.
+        data_type: varchar
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: descriptive_attribute
+            nullable: false
+            null_meaning: 장소 매핑 seed가 별칭 필드를 항상 채우므로 null을 허용하지 않습니다.
+            unit: not_applicable
+      - name: admin_dong_code
+        description: 이 장소가 속한 행정동 10자리 코드입니다(장소 매핑에서 승계, 별도 공간 계약 없음).
+        data_type: varchar
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: spatial_reference
+            nullable: false
+            null_meaning: 매핑된 장소는 행정동 코드를 보존하므로 null을 허용하지 않습니다.
+            unit: not_applicable
+      - name: admin_dong
+        description: 행정동명입니다(장소 매핑에서 승계).
+        data_type: varchar
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: spatial_reference
+            nullable: false
+            null_meaning: 매핑된 장소는 행정동명을 보존하므로 null을 허용하지 않습니다.
+            unit: not_applicable
+      - name: gu_code
+        description: 자치구 5자리 코드입니다(장소 매핑에서 승계).
+        data_type: varchar
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: spatial_reference
+            nullable: false
+            null_meaning: 매핑된 장소는 자치구 코드를 보존하므로 null을 허용하지 않습니다.
+            unit: not_applicable
+            vocabulary_id: common:gu_code
+      - name: gu
+        description: 자치구명입니다(장소 매핑에서 승계).
+        data_type: varchar
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: spatial_reference
+            nullable: false
+            null_meaning: 매핑된 장소는 자치구명을 보존하므로 null을 허용하지 않습니다.
+            unit: not_applicable
+      - name: latitude
+        description: 장소의 위도입니다.
+        data_type: double
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: spatial_coordinate
+            nullable: false
+            null_meaning: 매핑된 장소는 좌표를 보존하므로 null을 허용하지 않습니다.
+            unit: degree
+      - name: longitude
+        description: 장소의 경도입니다.
+        data_type: double
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: spatial_coordinate
+            nullable: false
+            null_meaning: 매핑된 장소는 좌표를 보존하므로 null을 허용하지 않습니다.
+            unit: degree
+      - name: forecast_at
+        description: 예보 대상 서울 기준 시각(빌드 시점 현재 시 이상 중 가장 이른 것)입니다.
+        data_type: timestamp(6)
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: timestamp
+            nullable: false
+            null_meaning: 예보 대상 시각이 없는 행은 제품 grain을 만들 수 없습니다.
+            time_role: event
+            timezone: Asia/Seoul
+            unit: not_applicable
+      - name: forecast_category_count
+        description: 이 예보시각에 실제로 확인된 KMA 카테고리 수입니다.
+        data_type: bigint
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: analytical_value
+            nullable: false
+            null_meaning: 집계 값이므로 null을 허용하지 않습니다.
+            unit: not_applicable
+      - name: forecast_issued_at_min
+        description: 이 예보시각을 구성하는 카테고리들의 KMA 발표시각 중 가장 이른 값입니다.
+        data_type: timestamp(6)
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: timestamp
+            nullable: false
+            null_meaning: 발표시각이 없는 행은 최신 예보를 결정할 수 없습니다.
+            time_role: issue_min
+            timezone: Asia/Seoul
+            unit: not_applicable
+      - name: forecast_issued_at_max
+        description: 이 예보시각을 구성하는 카테고리들의 KMA 발표시각 중 가장 늦은 값입니다.
+        data_type: timestamp(6)
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: timestamp
+            nullable: false
+            null_meaning: 발표시각이 없는 행은 최신 예보를 결정할 수 없습니다.
+            time_role: issue_max
+            timezone: Asia/Seoul
+            unit: not_applicable
+      - name: forecast_collected_at_max
+        description: 이 예보시각을 구성하는 카테고리들의 수집시각 중 가장 늦은 값입니다.
+        data_type: timestamp(6)
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: timestamp
+            nullable: false
+            null_meaning: 수집시각이 없으면 적재 지연을 검증할 수 없습니다.
+            time_role: collection
+            timezone: Asia/Seoul
+            unit: not_applicable
+      - name: snapshot_as_of_hour
+        description: 현재 예보를 고를 때 기준으로 삼은 시각(KST, 시간 단위)입니다.
+        data_type: timestamp(6)
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: snapshot_time
+            visibility: public
+            nullable: false
+            null_meaning: 내부 build anchor가 없으면 현재 예보 선택을 재현할 수 없습니다.
+            time_role: build_anchor
+            timezone: Asia/Seoul
+            unit: not_applicable
+      - name: temp_c
+        description: 이 예보시각의 기온입니다.
+        data_type: double
+        config:
+          meta:
+            semantic_role: analytical_value
+            nullable: true
+            null_meaning: 해당 장소·예보시각에 TMP 카테고리가 없어 결측된 경우입니다.
+            unit: celsius
+      - name: humidity_pct
+        description: 이 예보시각의 상대습도입니다.
+        data_type: double
+        config:
+          meta:
+            semantic_role: analytical_value
+            nullable: true
+            null_meaning: 해당 장소·예보시각에 REH 카테고리가 없어 결측된 경우입니다.
+            unit: percent
+      - name: wind_ms
+        description: 이 예보시각의 풍속입니다.
+        data_type: double
+        config:
+          meta:
+            semantic_role: analytical_value
+            nullable: true
+            null_meaning: 해당 장소·예보시각에 WSD 카테고리가 없어 결측된 경우입니다.
+            unit: meter_per_second
+      - name: wind_dir_deg
+        description: 이 예보시각의 풍향입니다.
+        data_type: double
+        config:
+          meta:
+            semantic_role: analytical_value
+            nullable: true
+            null_meaning: 해당 장소·예보시각에 VEC 카테고리가 없어 결측된 경우입니다.
+            unit: degree
+      - name: precip_prob_pct
+        description: 이 예보시각의 강수확률입니다.
+        data_type: double
+        config:
+          meta:
+            semantic_role: analytical_value
+            nullable: true
+            null_meaning: 해당 장소·예보시각에 POP 카테고리가 없어 결측된 경우입니다.
+            unit: percent
+      - name: sky_code
+        description: KMA 하늘상태 코드입니다.
+        data_type: varchar
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['1', '3', '4']
+        config:
+          meta:
+            semantic_role: categorical_value
+            nullable: true
+            null_meaning: 해당 장소·예보시각에 SKY 카테고리가 없어 결측된 경우입니다.
+            unit: not_applicable
+            vocabulary_id: weather:sky_code
+            vocabulary_terms:
+              - {code: "1", label_ko: 맑음}
+              - {code: "3", label_ko: 구름 많음}
+              - {code: "4", label_ko: 흐림}
+      - name: sky_label
+        description: sky_code를 사람이 읽는 한국어로 표현한 서빙 라벨입니다.
+        data_type: varchar
+        config:
+          meta:
+            semantic_role: derived_label
+            nullable: true
+            null_meaning: sky_code가 없거나 알려진 값(1/3/4)에 해당하지 않는 경우입니다.
+            unit: not_applicable
+      - name: pty_code
+        description: KMA 강수형태 코드입니다.
+        data_type: varchar
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['0', '1', '2', '3', '4', '5', '6', '7']
+        config:
+          meta:
+            semantic_role: categorical_value
+            nullable: true
+            null_meaning: 해당 장소·예보시각에 PTY 카테고리가 없어 결측된 경우입니다.
+            unit: not_applicable
+            vocabulary_id: weather:pty_code
+            vocabulary_terms:
+              - {code: "0", label_ko: 없음}
+              - {code: "1", label_ko: 비}
+              - {code: "2", label_ko: 비 또는 눈}
+              - {code: "3", label_ko: 눈}
+              - {code: "4", label_ko: 소나기}
+              - {code: "5", label_ko: 빗방울}
+              - {code: "6", label_ko: 빗방울 또는 눈날림}
+              - {code: "7", label_ko: 눈날림}
+      - name: pty_label
+        description: pty_code를 사람이 읽는 한국어로 표현한 서빙 라벨입니다.
+        data_type: varchar
+        config:
+          meta:
+            semantic_role: derived_label
+            nullable: true
+            null_meaning: pty_code가 없거나 알려진 값(0~7)에 해당하지 않는 경우입니다.
+            unit: not_applicable
+      - name: is_precipitating
+        description: pty_code가 결측이 아니면서 '0'(없음)이 아닌지를 나타내는 파생 불리언입니다.
+        data_type: boolean
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: derived_flag
+            nullable: false
+            null_meaning: pty_code null 여부를 이미 판정에 포함하므로 이 컬럼 자체는 null이 없습니다.
+            unit: not_applicable
+      - name: pcp_raw
+        description: PCP(강수량) 예보 값의 원문입니다.
+        data_type: varchar
+        config:
+          meta:
+            semantic_role: source_value
+            nullable: true
+            null_meaning: PCP 카테고리가 없어 결측된 경우입니다.
+            unit: not_applicable
+      - name: pcp_mm
+        description: PCP 원문에서 숫자로 파싱 가능했던 강수량(mm)입니다.
+        data_type: double
+        config:
+          meta:
+            semantic_role: analytical_value
+            nullable: true
+            null_meaning: PCP 카테고리가 없거나 원문이 숫자로 파싱되지 않는 표현(범위·없음 등)인 경우입니다.
+            unit: millimeter
+      - name: sno_raw
+        description: SNO(적설) 예보 값의 원문입니다.
+        data_type: varchar
+        config:
+          meta:
+            semantic_role: source_value
+            nullable: true
+            null_meaning: SNO 카테고리가 없어 결측된 경우입니다.
+            unit: not_applicable
+      - name: sno_cm
+        description: SNO 원문에서 숫자로 파싱 가능했던 적설량(cm)입니다.
+        data_type: double
+        config:
+          meta:
+            semantic_role: analytical_value
+            nullable: true
+            null_meaning: SNO 카테고리가 없거나 원문이 숫자로 파싱되지 않는 표현(범위·없음 등)인 경우입니다.
+            unit: centimeter
+      - name: forecast_lead_hours
+        description: 발표 시각부터 예보 대상 시각까지의 시간 차이입니다.
+        data_type: bigint
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: derived_value
+            nullable: false
+            null_meaning: 발표와 예보 시각이 모두 있어야 하므로 null을 허용하지 않습니다.
+            unit: hour
+      - name: representative_raw_object_key
+        description: 이 행을 구성한 대표 원본 객체를 추적하는 안정 식별자입니다.
+        data_type: varchar
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: lineage_id
+            nullable: false
+            null_meaning: 원본 객체로 역추적할 수 없는 행은 공개하지 않습니다.
+      - name: representative_payload_hash
+        description: 이 행을 구성한 대표 원본 payload hash입니다.
+        data_type: varchar
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: lineage_id
+            nullable: false
+            null_meaning: payload hash가 없는 행은 공개하지 않습니다.
+      - name: representative_dag_run_id
+        description: 이 행을 구성한 대표 원본을 만든 수집 DAG 실행 식별자입니다.
+        data_type: varchar
+        tests: [not_null]
+        config:
+          meta:
+            semantic_role: lineage_id
+            nullable: false
+            null_meaning: 수집 실행으로 역추적할 수 없는 행은 공개하지 않습니다.

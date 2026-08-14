@@ -1,0 +1,15 @@
+selectors:
+  - name: ask_seoul_weather_d1_public_products
+    description: Weather D1 공개 producer 네 개만 선택한다.
+    definition:
+      union:
+        - {method: fqn, value: gold_weather_place_current_outlook, indirect_selection: empty}
+        - {method: fqn, value: gold_weather_place_precipitation_window, indirect_selection: empty}
+        - {method: fqn, value: gold_weather_place_risk_window, indirect_selection: empty}
+        - {method: fqn, value: gold_weather_place_forecast_change_daily, indirect_selection: empty}
+  - name: ask_seoul_weather_risk_query_availability
+    description: 비공개 Weather risk query-availability companion만 선택한다.
+    definition:
+      method: fqn
+      value: gold_weather_place_risk_query_availability
+      indirect_selection: empty

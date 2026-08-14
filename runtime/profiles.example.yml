@@ -1,0 +1,12 @@
+asac_seoul:
+  target: ci
+  outputs:
+    ci:
+      type: trino
+      method: none
+      host: "{{ env_var('TRINO_HOST', '127.0.0.1') }}"
+      port: 8080
+      user: weather_ci
+      database: iceberg_dev
+      schema: weather
+      threads: 1

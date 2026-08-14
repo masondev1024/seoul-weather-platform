@@ -1,0 +1,3 @@
+dbt-core==1.10.22
+dbt-trino==1.10.2
+pytest==8.4.2

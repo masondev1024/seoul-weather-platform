@@ -1,0 +1,55 @@
+version: 2
+
+models:
+  - name: dim_admin_dong
+    description: >
+      서울 행정동 차원(view). canonical 코드·명칭은 bronze source(행안부 마스터, axes_bronze.admin_dong_master),
+      좌표는 seoul_admin_dong_crosswalk seed 를 admin_dong_code(행안부 10자리)로 left join 해 보조.
+      grain = 서울 최신 개정 revision 의 행정동 단위(distinct admin_dong_code). 좌표 없는 행 소수 허용(seed 미매칭).
+    columns:
+      - name: admin_dong_code
+        description: 행안부 행정동 10자리 — canonical 키.
+        tests:
+          - not_null
+          - unique
+      - name: admin_dong
+        description: 행정동명(공통축 표기).
+      - name: gu_code
+        description: 행안부 자치구 5자리(admin_dong_code 앞 5자리).
+        tests:
+          - not_null
+      - name: gu
+        description: 자치구명(sgg_nm).
+      - name: stat_region_cd
+        description: 통계청 지역 코드(alias).
+      - name: revision_date
+        description: 원천 개정 일자(최신 스냅샷).
+      - name: latitude
+        description: 행정동 중심 위도(crosswalk seed 보조, null 허용).
+      - name: longitude
+        description: 행정동 중심 경도(crosswalk seed 보조, null 허용).
+
+  - name: dim_beop_admin_link
+    description: >
+      서울 법정동↔행정동 링크(view). axes_bronze.admin_dong_master 최신 revision 에서
+      집계행(행정동/법정동 코드 끝 5자리 '00000') 제외. 법정동 주소 기반 도메인(commerce 등)의
+      행정동 공통축 조인 다리. grain = (beop_dong_code, admin_dong_code) 쌍 — 다대다
+      실증(743쌍: 법정동 467, 행정동 426)이라 단일 컬럼 unique 는 두지 않고
+      쌍 유일성은 singular 테스트(assert_dim_beop_admin_link_pair_unique)로 계약.
+    columns:
+      - name: beop_dong_code
+        description: 법정동 코드 10자리.
+        tests:
+          - not_null
+      - name: beop_dong_nm
+        description: 법정동명.
+      - name: admin_dong_code
+        description: 행안부 행정동 10자리 — dim_admin_dong 조인 키.
+        tests:
+          - not_null
+      - name: admin_dong
+        description: 행정동명(공통축 표기, dim_admin_dong 관례).
+      - name: gu_code
+        description: 행안부 자치구 5자리(admin_dong_code 앞 5자리).
+      - name: revision_date
+        description: 원천 개정 일자(최신 스냅샷).

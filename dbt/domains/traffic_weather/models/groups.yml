@@ -1,0 +1,6 @@
+version: 2
+
+groups:
+  - name: weather
+    owner:
+      name: ASAC Weather

@@ -1,0 +1,362 @@
+version: 2
+
+models:
+  - name: gold_weather_place_risk_query_availability
+    description: >-
+      dim_weather_place의 mapped place 427개마다 위험 판정 입력이 연속 complete인
+      향후 KST hourly 구간을 보존하는 비공개 query-availability companion이다.
+    access: private
+    config:
+      materialized: table
+      meta:
+        grain: place_id마다 정확히 한 행
+        row_meaning: filtered risk 0행을 위험 후보 없음과 판정 불가로 구분하는 입력 evidence
+        population_relation: dim_weather_place
+        expected_distinct_place_count: 427
+        source_relation: gold_weather_place_hourly_outlook
+    columns:
+      - name: place_id
+        description: mapped place 식별자
+        data_type: varchar
+        tests: [not_null, unique]
+      - name: snapshot_as_of_hour
+        description: run에서 고정한 KST 기준 hourly timestamp
+        data_type: timestamp(6)
+        tests: [not_null]
+      - name: available_from_at
+        description: complete prefix 첫 KST hourly slot; prefix가 없으면 NULL
+        data_type: timestamp(6)
+        config: {meta: {nullable: true}}
+      - name: available_to_at
+        description: complete prefix 마지막 KST hourly slot; 닫힌 구간 끝
+        data_type: timestamp(6)
+        config: {meta: {nullable: true}}
+      - name: forecast_collected_at_min
+        description: complete prefix에서 가장 오래된 forecast collection timestamp
+        data_type: timestamp(6)
+        config: {meta: {nullable: true}}
+      - name: forecast_collected_at_max
+        description: complete prefix에서 가장 최신 forecast collection timestamp
+        data_type: timestamp(6)
+        config: {meta: {nullable: true}}
+      - name: expected_forecast_hour_count
+        description: global horizon의 expected KST hourly slot 수
+        data_type: bigint
+        tests: [not_null]
+      - name: observed_forecast_hour_count
+        description: expected horizon 중 required evidence가 complete인 slot 수
+        data_type: bigint
+        tests: [not_null]
+      - name: availability_status
+        description: complete 또는 incomplete
+        data_type: varchar
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [complete, incomplete]
+      - name: source_population_revision
+        description: kma_admin_dong_grid_20260325 prefix와 canonical mapped-place SHA-256 revision
+        data_type: varchar
+        tests: [not_null]
+
+unit_tests:
+  - name: risk_query_availability_complete_prefix
+    description: anchor부터 global horizon까지 complete하면 전체 구간과 freshness bounds를 반환한다.
+    model: gold_weather_place_risk_query_availability
+    config:
+      tags: [ask_seoul_weather_risk_query_availability_unit]
+    overrides:
+      vars:
+        weather_serving_as_of_hour: "2026-08-12 00:00:00"
+    given:
+      - input: ref('dim_weather_place')
+        format: sql
+        rows: |
+          select
+              cast('place_a' as varchar) as place_id,
+              cast('종로1가' as varchar) as admin_dong,
+              cast('종로구' as varchar) as gu
+      - input: ref('gold_weather_place_hourly_outlook')
+        format: sql
+        rows: |
+          select
+              cast('place_a' as varchar) as place_id,
+              timestamp '2026-08-12 00:00:00' as forecast_at,
+              cast(5 as bigint) as risk_evidence_collected_category_count,
+              timestamp '2026-08-11 20:00:00' as risk_evidence_collected_at_min,
+              timestamp '2026-08-11 20:05:00' as risk_evidence_collected_at_max,
+              cast(25.0 as double) as temp_c,
+              cast(2.0 as double) as wind_ms,
+              cast('0' as varchar) as pty_code,
+              cast('강수없음' as varchar) as pcp_raw,
+              cast('적설없음' as varchar) as sno_raw
+          union all
+          select
+              'place_a', timestamp '2026-08-12 01:00:00', cast(5 as bigint),
+              timestamp '2026-08-11 20:10:00', timestamp '2026-08-11 20:15:00',
+              cast(26.0 as double), cast(2.5 as double), '0', '강수없음', '적설없음'
+          union all
+          select
+              'place_a', timestamp '2026-08-12 02:00:00', cast(5 as bigint),
+              timestamp '2026-08-11 20:20:00', timestamp '2026-08-11 20:25:00',
+              cast(27.0 as double), cast(3.0 as double), '0', '강수없음', '적설없음'
+    expect:
+      rows:
+        - place_id: place_a
+          snapshot_as_of_hour: "2026-08-12 00:00:00"
+          available_from_at: "2026-08-12 00:00:00"
+          available_to_at: "2026-08-12 02:00:00"
+          forecast_collected_at_min: "2026-08-11 20:00:00"
+          forecast_collected_at_max: "2026-08-11 20:25:00"
+          expected_forecast_hour_count: 3
+          observed_forecast_hour_count: 3
+          availability_status: complete
+          source_population_revision: kma_admin_dong_grid_20260325:638f0e8260b47eeb0335126a87a8a38e7b456da872bf0ea7e28eecf427610e32
+
+  - name: risk_query_availability_confirmed_three_hour_tail_keeps_hourly_prefix_complete
+    description: KMA가 두 번 연속 3시간 간격으로 전환하면 그 이후는 hourly prefix 범위 밖으로 두고 앞선 1시간 구간만 complete로 증명한다.
+    model: gold_weather_place_risk_query_availability
+    config:
+      tags: [ask_seoul_weather_risk_query_availability_unit]
+    overrides:
+      vars:
+        weather_serving_as_of_hour: "2026-08-12 00:00:00"
+    given:
+      - input: ref('dim_weather_place')
+        format: sql
+        rows: |
+          select
+              cast('place_a' as varchar) as place_id,
+              cast('종로1가' as varchar) as admin_dong,
+              cast('종로구' as varchar) as gu
+      - input: ref('gold_weather_place_hourly_outlook')
+        format: sql
+        rows: |
+          select
+              cast('place_a' as varchar) as place_id,
+              timestamp '2026-08-12 00:00:00' as forecast_at,
+              cast(5 as bigint) as risk_evidence_collected_category_count,
+              timestamp '2026-08-11 20:00:00' as risk_evidence_collected_at_min,
+              timestamp '2026-08-11 20:05:00' as risk_evidence_collected_at_max,
+              cast(25.0 as double) as temp_c,
+              cast(2.0 as double) as wind_ms,
+              cast('0' as varchar) as pty_code,
+              cast('강수없음' as varchar) as pcp_raw,
+              cast('적설없음' as varchar) as sno_raw
+          union all
+          select
+              'place_a', timestamp '2026-08-12 01:00:00', cast(5 as bigint),
+              timestamp '2026-08-11 20:10:00', timestamp '2026-08-11 20:15:00',
+              cast(26.0 as double), cast(2.5 as double), '0', '강수없음', '적설없음'
+          union all
+          select
+              'place_a', timestamp '2026-08-12 02:00:00', cast(5 as bigint),
+              timestamp '2026-08-11 20:20:00', timestamp '2026-08-11 20:25:00',
+              cast(27.0 as double), cast(3.0 as double), '0', '강수없음', '적설없음'
+          union all
+          select
+              'place_a', timestamp '2026-08-12 05:00:00', cast(5 as bigint),
+              timestamp '2026-08-11 20:30:00', timestamp '2026-08-11 20:35:00',
+              cast(28.0 as double), cast(3.5 as double), '0', '강수없음', '적설없음'
+          union all
+          select
+              'place_a', timestamp '2026-08-12 08:00:00', cast(5 as bigint),
+              timestamp '2026-08-11 20:40:00', timestamp '2026-08-11 20:45:00',
+              cast(29.0 as double), cast(4.0 as double), '0', '강수없음', '적설없음'
+    expect:
+      rows:
+        - place_id: place_a
+          snapshot_as_of_hour: "2026-08-12 00:00:00"
+          available_from_at: "2026-08-12 00:00:00"
+          available_to_at: "2026-08-12 02:00:00"
+          forecast_collected_at_min: "2026-08-11 20:00:00"
+          forecast_collected_at_max: "2026-08-11 20:25:00"
+          expected_forecast_hour_count: 3
+          observed_forecast_hour_count: 3
+          availability_status: complete
+          source_population_revision: kma_admin_dong_grid_20260325:638f0e8260b47eeb0335126a87a8a38e7b456da872bf0ea7e28eecf427610e32
+
+  - name: risk_query_availability_first_slot_missing
+    description: anchor slot이 없으면 이후 complete slot이 있어도 prefix bounds는 NULL이다.
+    model: gold_weather_place_risk_query_availability
+    config:
+      tags: [ask_seoul_weather_risk_query_availability_unit]
+    overrides:
+      vars:
+        weather_serving_as_of_hour: "2026-08-12 00:00:00"
+    given:
+      - input: ref('dim_weather_place')
+        format: sql
+        rows: |
+          select
+              cast('place_a' as varchar) as place_id,
+              cast('종로1가' as varchar) as admin_dong,
+              cast('종로구' as varchar) as gu
+      - input: ref('gold_weather_place_hourly_outlook')
+        format: sql
+        rows: |
+          select
+              cast('place_a' as varchar) as place_id,
+              timestamp '2026-08-12 01:00:00' as forecast_at,
+              cast(5 as bigint) as risk_evidence_collected_category_count,
+              timestamp '2026-08-11 20:10:00' as risk_evidence_collected_at_min,
+              timestamp '2026-08-11 20:15:00' as risk_evidence_collected_at_max,
+              cast(26.0 as double) as temp_c,
+              cast(2.5 as double) as wind_ms,
+              cast('0' as varchar) as pty_code,
+              cast('강수없음' as varchar) as pcp_raw,
+              cast('적설없음' as varchar) as sno_raw
+          union all
+          select
+              'place_a', timestamp '2026-08-12 02:00:00', cast(5 as bigint),
+              timestamp '2026-08-11 20:20:00', timestamp '2026-08-11 20:25:00',
+              cast(27.0 as double), cast(3.0 as double), '0', '강수없음', '적설없음'
+    expect:
+      rows:
+        - place_id: place_a
+          snapshot_as_of_hour: "2026-08-12 00:00:00"
+          available_from_at: null
+          available_to_at: null
+          forecast_collected_at_min: null
+          forecast_collected_at_max: null
+          expected_forecast_hour_count: 3
+          observed_forecast_hour_count: 2
+          availability_status: incomplete
+          source_population_revision: kma_admin_dong_grid_20260325:638f0e8260b47eeb0335126a87a8a38e7b456da872bf0ea7e28eecf427610e32
+
+  - name: risk_query_availability_middle_gap_truncates_prefix
+    description: middle gap 뒤의 complete slot은 available_to_at을 연장하지 않는다.
+    model: gold_weather_place_risk_query_availability
+    config:
+      tags: [ask_seoul_weather_risk_query_availability_unit]
+    overrides:
+      vars:
+        weather_serving_as_of_hour: "2026-08-12 00:00:00"
+    given:
+      - input: ref('dim_weather_place')
+        format: sql
+        rows: |
+          select
+              cast('place_a' as varchar) as place_id,
+              cast('종로1가' as varchar) as admin_dong,
+              cast('종로구' as varchar) as gu
+      - input: ref('gold_weather_place_hourly_outlook')
+        format: sql
+        rows: |
+          select
+              cast('place_a' as varchar) as place_id,
+              timestamp '2026-08-12 00:00:00' as forecast_at,
+              cast(5 as bigint) as risk_evidence_collected_category_count,
+              timestamp '2026-08-11 20:00:00' as risk_evidence_collected_at_min,
+              timestamp '2026-08-11 20:05:00' as risk_evidence_collected_at_max,
+              cast(25.0 as double) as temp_c,
+              cast(2.0 as double) as wind_ms,
+              cast('0' as varchar) as pty_code,
+              cast('강수없음' as varchar) as pcp_raw,
+              cast('적설없음' as varchar) as sno_raw
+          union all
+          select
+              'place_a', timestamp '2026-08-12 02:00:00', cast(5 as bigint),
+              timestamp '2026-08-11 20:20:00', timestamp '2026-08-11 20:25:00',
+              cast(27.0 as double), cast(3.0 as double), '0', '강수없음', '적설없음'
+    expect:
+      rows:
+        - place_id: place_a
+          snapshot_as_of_hour: "2026-08-12 00:00:00"
+          available_from_at: "2026-08-12 00:00:00"
+          available_to_at: "2026-08-12 00:00:00"
+          forecast_collected_at_min: "2026-08-11 20:00:00"
+          forecast_collected_at_max: "2026-08-11 20:05:00"
+          expected_forecast_hour_count: 3
+          observed_forecast_hour_count: 2
+          availability_status: incomplete
+          source_population_revision: kma_admin_dong_grid_20260325:638f0e8260b47eeb0335126a87a8a38e7b456da872bf0ea7e28eecf427610e32
+
+  - name: risk_query_availability_required_evidence_missing
+    description: required category evidence count가 4이면 값과 freshness bounds가 있어도 incomplete다.
+    model: gold_weather_place_risk_query_availability
+    config:
+      tags: [ask_seoul_weather_risk_query_availability_unit]
+    overrides:
+      vars:
+        weather_serving_as_of_hour: "2026-08-12 00:00:00"
+    given:
+      - input: ref('dim_weather_place')
+        format: sql
+        rows: |
+          select
+              cast('place_a' as varchar) as place_id,
+              cast('종로1가' as varchar) as admin_dong,
+              cast('종로구' as varchar) as gu
+      - input: ref('gold_weather_place_hourly_outlook')
+        format: sql
+        rows: |
+          select
+              cast('place_a' as varchar) as place_id,
+              timestamp '2026-08-12 00:00:00' as forecast_at,
+              cast(4 as bigint) as risk_evidence_collected_category_count,
+              timestamp '2026-08-11 20:00:00' as risk_evidence_collected_at_min,
+              timestamp '2026-08-11 20:05:00' as risk_evidence_collected_at_max,
+              cast(25.0 as double) as temp_c,
+              cast(2.0 as double) as wind_ms,
+              cast('0' as varchar) as pty_code,
+              cast('강수없음' as varchar) as pcp_raw,
+              cast('적설없음' as varchar) as sno_raw
+    expect:
+      rows:
+        - place_id: place_a
+          snapshot_as_of_hour: "2026-08-12 00:00:00"
+          available_from_at: null
+          available_to_at: null
+          forecast_collected_at_min: null
+          forecast_collected_at_max: null
+          expected_forecast_hour_count: 1
+          observed_forecast_hour_count: 0
+          availability_status: incomplete
+          source_population_revision: kma_admin_dong_grid_20260325:638f0e8260b47eeb0335126a87a8a38e7b456da872bf0ea7e28eecf427610e32
+
+  - name: risk_query_availability_raw_no_precip_numeric_null_complete
+    description: PCP/SNO raw no-event evidence가 있으면 numeric NULL이어도 complete다.
+    model: gold_weather_place_risk_query_availability
+    config:
+      tags: [ask_seoul_weather_risk_query_availability_unit]
+    overrides:
+      vars:
+        weather_serving_as_of_hour: "2026-08-12 00:00:00"
+    given:
+      - input: ref('dim_weather_place')
+        format: sql
+        rows: |
+          select
+              cast('place_a' as varchar) as place_id,
+              cast('종로1가' as varchar) as admin_dong,
+              cast('종로구' as varchar) as gu
+      - input: ref('gold_weather_place_hourly_outlook')
+        format: sql
+        rows: |
+          select
+              cast('place_a' as varchar) as place_id,
+              timestamp '2026-08-12 00:00:00' as forecast_at,
+              cast(5 as bigint) as risk_evidence_collected_category_count,
+              timestamp '2026-08-11 20:00:00' as risk_evidence_collected_at_min,
+              timestamp '2026-08-11 20:05:00' as risk_evidence_collected_at_max,
+              cast(25.0 as double) as temp_c,
+              cast(2.0 as double) as wind_ms,
+              cast('0' as varchar) as pty_code,
+              cast('강수없음' as varchar) as pcp_raw,
+              cast(null as double) as pcp_mm,
+              cast('적설없음' as varchar) as sno_raw,
+              cast(null as double) as sno_cm
+    expect:
+      rows:
+        - place_id: place_a
+          snapshot_as_of_hour: "2026-08-12 00:00:00"
+          available_from_at: "2026-08-12 00:00:00"
+          available_to_at: "2026-08-12 00:00:00"
+          forecast_collected_at_min: "2026-08-11 20:00:00"
+          forecast_collected_at_max: "2026-08-11 20:05:00"
+          expected_forecast_hour_count: 1
+          observed_forecast_hour_count: 1
+          availability_status: complete
+          source_population_revision: kma_admin_dong_grid_20260325:638f0e8260b47eeb0335126a87a8a38e7b456da872bf0ea7e28eecf427610e32

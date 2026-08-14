@@ -1,0 +1,3 @@
+# Airflow 3.x uses glob syntax for DAG ignore files.
+# common/ 은 import 전용 패키지 — DAG 파일 스캔에서 제외한다.
+**

@@ -1,0 +1,21 @@
+{
+  "artifact": "seoul-weather-risk",
+  "exported_at": "2026-08-10",
+  "source": {
+    "repository": "https://github.com/ASAC-DE-bigkk/k-skill",
+    "ref": "feat/552-natural-query-qa",
+    "commit": "131abc37ed43bac7362ed64ceffa16adcd6fe674"
+  },
+  "transformations": [
+    "standalone SKILL.md frontmatter and direct Python command export",
+    "successful X-Request-Id response header preservation",
+    "data-only fast query path for repeated natural-language questions"
+  ],
+  "hash_normalization": "lf",
+  "files": {
+    "SKILL.md": "2821725267b044cb2d85021676a96a89145de86c82b0e7dee0c8aaa38da3bb2e",
+    "NOTICE": "1ad0105ff3c47eb9335b028c5ad6444577be06a4b5097ab86aa00c3f3dc30817",
+    "scripts/seoul_weather_risk.py": "f86bfcd55f67cd5b248570623da9092d0d0a7adaf937f8f58137e9618985dce5",
+    "references/admin-dong-place-map.json": "d0f99bd96aff19684ede2ec8700f9bf6086a2b48208166d91a37126b147aaf23"
+  }
+}

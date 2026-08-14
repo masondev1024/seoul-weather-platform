@@ -1,0 +1,25 @@
+version: 2
+
+sources:
+  - name: weather_bronze
+    description: ASAC-DAG가 적재한 기상청 단기예보 Bronze와 collection manifest다.
+    config:
+      tags: ["ask_seoul_weather_transform_source"]
+    database: "{{ target.database }}"
+    schema: "{{ env_var('ASK_SEOUL_SCHEMA', 'ask_seoul') }}"
+    loaded_at_field: collected_at
+    freshness:
+      warn_after:
+        count: "{{ env_var('ASK_SEOUL_REPORT_WEATHER_FRESHNESS_WARN_MINUTES', '240') | int }}"
+        period: minute
+      error_after:
+        count: "{{ env_var('ASK_SEOUL_REPORT_WEATHER_FRESHNESS_ERROR_MINUTES', '360') | int }}"
+        period: minute
+    tables:
+      - name: kma_vilage_fcst
+        identifier: bronze_kma_vilage_fcst
+        description: KMA getVilageFcst Bronze 원천이다.
+      - name: collection_run_manifest
+        identifier: bronze_collection_run_manifest
+        description: 원천별 발행 가능 상태를 기록한 Bronze collection manifest다.
+        loaded_at_field: event_at

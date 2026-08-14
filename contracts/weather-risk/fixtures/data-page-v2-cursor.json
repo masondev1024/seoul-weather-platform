@@ -1,0 +1,28 @@
+{
+  "bundle_id": "seoul-weather-risk",
+  "product_id": "weather_place_risk_window",
+  "publication_id": "publication-example-20260814",
+  "row_count": 1,
+  "limit": 100,
+  "time_axis": "forecast_at",
+  "query_context": {
+    "schema_version": "weather-risk-query-context/v1",
+    "place_id": "seoul_admd_1171065000",
+    "requested_from_at": "2026-08-14 09:00:00",
+    "requested_to_at": "2026-08-14 23:59:59",
+    "available_from_at": "2026-08-14 09:00:00",
+    "available_to_at": "2026-08-15 08:00:00",
+    "snapshot_as_of_hour": "2026-08-14 09:00:00",
+    "forecast_collected_at_min": "2026-08-14 08:00:00",
+    "forecast_collected_at_max": "2026-08-14 08:05:00",
+    "source_population_revision": "kma_admin_dong_grid_20260325:9b34417b1418be6877e614c113a18e93f078de745f763858e13ed0e896a687ea",
+    "publication_id": "publication-example-20260814",
+    "coverage_status": "covered",
+    "freshness_state": "fresh",
+    "zero_result_reason": null
+  },
+  "has_more": true,
+  "next_cursor": "eyJ2IjoyLCJwdWJsaWNhdGlvbl9pZCI6InB1YmxpY2F0aW9uLWV4YW1wbGUtMjAyNjA4MTQiLCJxdWVyeV9maW5nZXJwcmludCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYiLCJmb3JlY2FzdF9hdCI6IjIwMjYtMDgtMTQgMTA6MDA6MDAiLCJwcm9kdWN0X3Jvd19pZCI6InNlb3VsX2FkbWRfMTE3MTA2NTAwMHwyMDI2LTA4LTE0VDEwOjAwOjAwKzA5OjAwIn0",
+  "usage": {"used": 2, "daily_quota": 1000},
+  "rows": [{"product_row_id": "seoul_admd_1171065000|2026-08-14T10:00:00+09:00", "place_id": "seoul_admd_1171065000", "forecast_at": "2026-08-14 10:00:00", "risk_labels": "강풍후보"}]
+}

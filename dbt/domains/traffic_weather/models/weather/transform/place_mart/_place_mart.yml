@@ -1,0 +1,9 @@
+version: 2
+
+models:
+  - name: silver_weather_forecast_by_admin_dong_serving
+    description: 공개 Weather 제품을 위한 bounded place forecast working set이다.
+  - name: dim_weather_place
+    description: compatibility place mapping에서 파생한 장소 dimension이다.
+  - name: gold_weather_forecast_by_place_serving
+    description: public Weather product가 읽는 bounded place serving projection이다.

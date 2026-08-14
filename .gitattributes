@@ -1,0 +1,2 @@
+# Keep fixed-source content hashes stable across Windows and Linux checkouts.
+* text=auto eol=lf

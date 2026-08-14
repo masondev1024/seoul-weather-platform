@@ -1,0 +1,1654 @@
+{
+  "schema_version": "source-inventory/v1",
+  "generated_from": "provenance/source-refs.lock.json",
+  "status": "fixed_ref_inventory_ready",
+  "counts": {
+    "airflow_weather": 141,
+    "weather_dbt": 88,
+    "weather_origin_contract": 3,
+    "total": 232
+  },
+  "entries": [
+    {
+      "source_id": "airflow_weather",
+      "source_path": ".airflowignore",
+      "target_path": "dags/.airflowignore",
+      "scope": "airflow_scan_contract",
+      "reason": "Preserve the fixed-source DAG scan exclusion contract."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/.airflowignore",
+      "target_path": "dags/common/.airflowignore",
+      "scope": "airflow_scan_contract",
+      "reason": "Keep the common import package out of DAG-file scanning."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/.airflowignore",
+      "target_path": "dags/domains/weather/.airflowignore",
+      "scope": "airflow_scan_contract",
+      "reason": "Keep Weather support packages and tests out of DAG-file scanning."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/bronze_run_manifest.py",
+      "target_path": "dags/domains/weather/bronze_run_manifest.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Preserve the deprecated Weather run-manifest import compatibility facade used by the selected regression suite."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common_admin_dong_bronze.py",
+      "target_path": "dags/common_admin_dong_bronze.py",
+      "scope": "airflow_weather_entrypoint",
+      "reason": "Weather vertical-slice DAG entrypoint at the fixed source commit."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/__init__.py",
+      "target_path": "dags/common/__init__.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/assets.py",
+      "target_path": "dags/common/assets.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/collection_slots/__init__.py",
+      "target_path": "dags/common/collection_slots/__init__.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/collection_slots/activation.py",
+      "target_path": "dags/common/collection_slots/activation.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/collection_slots/contract.py",
+      "target_path": "dags/common/collection_slots/contract.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/collection_slots/due_reconciler.py",
+      "target_path": "dags/common/collection_slots/due_reconciler.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/collection_slots/materializer.py",
+      "target_path": "dags/common/collection_slots/materializer.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/collection_slots/receipts.py",
+      "target_path": "dags/common/collection_slots/receipts.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/discord/__init__.py",
+      "target_path": "dags/common/discord/__init__.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/discord/guard.py",
+      "target_path": "dags/common/discord/guard.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/discord/notify.py",
+      "target_path": "dags/common/discord/notify.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/errors/__init__.py",
+      "target_path": "dags/common/errors/__init__.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/errors/airflow.py",
+      "target_path": "dags/common/errors/airflow.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/errors/problem.py",
+      "target_path": "dags/common/errors/problem.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/errors/sink.py",
+      "target_path": "dags/common/errors/sink.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/errors/types.py",
+      "target_path": "dags/common/errors/types.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/http/__init__.py",
+      "target_path": "dags/common/http/__init__.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/http/auth.py",
+      "target_path": "dags/common/http/auth.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/http/contract.py",
+      "target_path": "dags/common/http/contract.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/http/core.py",
+      "target_path": "dags/common/http/core.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/http/errors.py",
+      "target_path": "dags/common/http/errors.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/http/limits.py",
+      "target_path": "dags/common/http/limits.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/http/seoul.py",
+      "target_path": "dags/common/http/seoul.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/masters/__init__.py",
+      "target_path": "dags/common/masters/__init__.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/masters/admin_dong.py",
+      "target_path": "dags/common/masters/admin_dong.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/ops/__init__.py",
+      "target_path": "dags/common/ops/__init__.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/ops/contract.py",
+      "target_path": "dags/common/ops/contract.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/ops/product_observability.py",
+      "target_path": "dags/common/ops/product_observability.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/ops/run_sink.py",
+      "target_path": "dags/common/ops/run_sink.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/pools.py",
+      "target_path": "dags/common/pools.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/raw_manifest.py",
+      "target_path": "dags/common/raw_manifest.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/raw_path.py",
+      "target_path": "dags/common/raw_path.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/raw_write.py",
+      "target_path": "dags/common/raw_write.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/runmetrics.py",
+      "target_path": "dags/common/runmetrics.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/runtime_guard.py",
+      "target_path": "dags/common/runtime_guard.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/security/__init__.py",
+      "target_path": "dags/common/security/__init__.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/security/redaction.py",
+      "target_path": "dags/common/security/redaction.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/__init__.py",
+      "target_path": "dags/common/serving/__init__.py",
+      "scope": "airflow_weather_serving_dependency",
+      "reason": "Part of the complete fixed-SHA common/serving publication compatibility slice imported by Weather serving DAGs."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/content_identity.py",
+      "target_path": "dags/common/serving/content_identity.py",
+      "scope": "airflow_weather_serving_dependency",
+      "reason": "Part of the complete fixed-SHA common/serving publication compatibility slice imported by Weather serving DAGs."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/contract.py",
+      "target_path": "dags/common/serving/contract.py",
+      "scope": "airflow_weather_serving_dependency",
+      "reason": "Part of the complete fixed-SHA common/serving publication compatibility slice imported by Weather serving DAGs."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/d1_client.py",
+      "target_path": "dags/common/serving/d1_client.py",
+      "scope": "airflow_weather_serving_dependency",
+      "reason": "Part of the complete fixed-SHA common/serving publication compatibility slice imported by Weather serving DAGs."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/dag_factory.py",
+      "target_path": "dags/common/serving/dag_factory.py",
+      "scope": "airflow_weather_serving_dependency",
+      "reason": "Part of the complete fixed-SHA common/serving publication compatibility slice imported by Weather serving DAGs."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/gate.py",
+      "target_path": "dags/common/serving/gate.py",
+      "scope": "airflow_weather_serving_dependency",
+      "reason": "Part of the complete fixed-SHA common/serving publication compatibility slice imported by Weather serving DAGs."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/pattern_audit.py",
+      "target_path": "dags/common/serving/pattern_audit.py",
+      "scope": "airflow_weather_serving_dependency",
+      "reason": "Part of the complete fixed-SHA common/serving publication compatibility slice imported by Weather serving DAGs."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/pattern_verify.py",
+      "target_path": "dags/common/serving/pattern_verify.py",
+      "scope": "airflow_weather_serving_dependency",
+      "reason": "Part of the complete fixed-SHA common/serving publication compatibility slice imported by Weather serving DAGs."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/publisher.py",
+      "target_path": "dags/common/serving/publisher.py",
+      "scope": "airflow_weather_serving_dependency",
+      "reason": "Part of the complete fixed-SHA common/serving publication compatibility slice imported by Weather serving DAGs."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/README.md",
+      "target_path": "dags/common/serving/README.md",
+      "scope": "airflow_weather_serving_dependency",
+      "reason": "Part of the complete fixed-SHA common/serving publication compatibility slice imported by Weather serving DAGs."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/runtime.py",
+      "target_path": "dags/common/serving/runtime.py",
+      "scope": "airflow_weather_serving_dependency",
+      "reason": "Part of the complete fixed-SHA common/serving publication compatibility slice imported by Weather serving DAGs."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/tests/__init__.py",
+      "target_path": "dags/common/serving/tests/__init__.py",
+      "scope": "airflow_weather_serving_test",
+      "reason": "Secretless test or fixture for the complete Weather serving publication compatibility slice."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/tests/conftest.py",
+      "target_path": "dags/common/serving/tests/conftest.py",
+      "scope": "airflow_weather_serving_test",
+      "reason": "Secretless test or fixture for the complete Weather serving publication compatibility slice."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/tests/fixtures/manifest.json",
+      "target_path": "dags/common/serving/tests/fixtures/manifest.json",
+      "scope": "airflow_weather_serving_test",
+      "reason": "Secretless test or fixture for the complete Weather serving publication compatibility slice."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/tests/test_content_identity.py",
+      "target_path": "dags/common/serving/tests/test_content_identity.py",
+      "scope": "airflow_weather_serving_test",
+      "reason": "Secretless test or fixture for the complete Weather serving publication compatibility slice."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/tests/test_contract.py",
+      "target_path": "dags/common/serving/tests/test_contract.py",
+      "scope": "airflow_weather_serving_test",
+      "reason": "Secretless test or fixture for the complete Weather serving publication compatibility slice."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/tests/test_d1_client.py",
+      "target_path": "dags/common/serving/tests/test_d1_client.py",
+      "scope": "airflow_weather_serving_test",
+      "reason": "Secretless test or fixture for the complete Weather serving publication compatibility slice."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/tests/test_dag_factory.py",
+      "target_path": "dags/common/serving/tests/test_dag_factory.py",
+      "scope": "airflow_weather_serving_test",
+      "reason": "Secretless test or fixture for the complete Weather serving publication compatibility slice.",
+      "record_type": "derived",
+      "derivation": "Keep the upstream regression suite but skip the non-target Citydata, Culture, and Transit wrapper assertion when those wrappers are intentionally absent.",
+      "validator": "python -m pytest dags/common/serving/tests -q"
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/tests/test_pattern_audit.py",
+      "target_path": "dags/common/serving/tests/test_pattern_audit.py",
+      "scope": "airflow_weather_serving_test",
+      "reason": "Secretless test or fixture for the complete Weather serving publication compatibility slice."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/tests/test_pattern_verify.py",
+      "target_path": "dags/common/serving/tests/test_pattern_verify.py",
+      "scope": "airflow_weather_serving_test",
+      "reason": "Secretless test or fixture for the complete Weather serving publication compatibility slice."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/tests/test_publisher.py",
+      "target_path": "dags/common/serving/tests/test_publisher.py",
+      "scope": "airflow_weather_serving_test",
+      "reason": "Secretless test or fixture for the complete Weather serving publication compatibility slice."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/tests/test_runtime.py",
+      "target_path": "dags/common/serving/tests/test_runtime.py",
+      "scope": "airflow_weather_serving_test",
+      "reason": "Secretless test or fixture for the complete Weather serving publication compatibility slice."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/tests/test_watchdog.py",
+      "target_path": "dags/common/serving/tests/test_watchdog.py",
+      "scope": "airflow_weather_serving_test",
+      "reason": "Secretless test or fixture for the complete Weather serving publication compatibility slice."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/serving/watchdog.py",
+      "target_path": "dags/common/serving/watchdog.py",
+      "scope": "airflow_weather_serving_dependency",
+      "reason": "Part of the complete fixed-SHA common/serving publication compatibility slice imported by Weather serving DAGs."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/storage.py",
+      "target_path": "dags/common/storage.py",
+      "scope": "airflow_weather_common_dependency",
+      "reason": "Transitive local common import or required package initializer for the selected Weather lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/tests/test_admin_dong.py",
+      "target_path": "dags/common/tests/test_admin_dong.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/tests/test_collection_slot_due_reconciler.py",
+      "target_path": "dags/common/tests/test_collection_slot_due_reconciler.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/tests/test_pools.py",
+      "target_path": "dags/common/tests/test_pools.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "common/tests/test_product_observability.py",
+      "target_path": "dags/common/tests/test_product_observability.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/config/seoul_kma_grids.csv",
+      "target_path": "dags/domains/weather/config/seoul_kma_grids.csv",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/weather_bronze_test_support.py",
+      "target_path": "dags/domains/weather/tests/weather_bronze_test_support.py",
+      "scope": "airflow_weather_test",
+      "reason": "Shared recording fakes required by the selected KMA Bronze tests."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_bronze_idempotency.py",
+      "target_path": "dags/domains/weather/tests/test_weather_bronze_idempotency.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_bronze_module_wiring.py",
+      "target_path": "dags/domains/weather/tests/test_weather_bronze_module_wiring.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_bronze_pyiceberg.py",
+      "target_path": "dags/domains/weather/tests/test_weather_bronze_pyiceberg.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_bronze_retry_policy.py",
+      "target_path": "dags/domains/weather/tests/test_weather_bronze_retry_policy.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_bronze_verification.py",
+      "target_path": "dags/domains/weather/tests/test_weather_bronze_verification.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_collection_slot_reconciliation_dag.py",
+      "target_path": "dags/domains/weather/tests/test_weather_collection_slot_reconciliation_dag.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_collection_slots.py",
+      "target_path": "dags/domains/weather/tests/test_weather_collection_slots.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_dbt_execution_artifacts.py",
+      "target_path": "dags/domains/weather/tests/test_weather_dbt_execution_artifacts.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_dbt_execution_paths.py",
+      "target_path": "dags/domains/weather/tests/test_weather_dbt_execution_paths.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_dbt_execution.py",
+      "target_path": "dags/domains/weather/tests/test_weather_dbt_execution.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_failure_alert_contract.py",
+      "target_path": "dags/domains/weather/tests/test_weather_failure_alert_contract.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_kma_grids.py",
+      "target_path": "dags/domains/weather/tests/test_weather_kma_grids.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_kma_landing_checkpoint.py",
+      "target_path": "dags/domains/weather/tests/test_weather_kma_landing_checkpoint.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_landing_checkpoint_errors.py",
+      "target_path": "dags/domains/weather/tests/test_weather_landing_checkpoint_errors.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_landing_module.py",
+      "target_path": "dags/domains/weather/tests/test_weather_landing_module.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_landing_runtime.py",
+      "target_path": "dags/domains/weather/tests/test_weather_landing_runtime.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_lineage.py",
+      "target_path": "dags/domains/weather/tests/test_weather_lineage.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_run_manifest_compat.py",
+      "target_path": "dags/domains/weather/tests/test_weather_run_manifest_compat.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_run_manifest_module.py",
+      "target_path": "dags/domains/weather/tests/test_weather_run_manifest_module.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_run_manifest.py",
+      "target_path": "dags/domains/weather/tests/test_weather_run_manifest.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_runtime_http.py",
+      "target_path": "dags/domains/weather/tests/test_weather_runtime_http.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_schedule_defaults.py",
+      "target_path": "dags/domains/weather/tests/test_weather_schedule_defaults.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_serving_export.py",
+      "target_path": "dags/domains/weather/tests/test_weather_serving_export.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_serving_freshness_watchdog.py",
+      "target_path": "dags/domains/weather/tests/test_weather_serving_freshness_watchdog.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_serving_snapshot_refresh.py",
+      "target_path": "dags/domains/weather/tests/test_weather_serving_snapshot_refresh.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_source_contract.py",
+      "target_path": "dags/domains/weather/tests/test_weather_source_contract.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_transform_dag.py",
+      "target_path": "dags/domains/weather/tests/test_weather_transform_dag.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_transform_execution.py",
+      "target_path": "dags/domains/weather/tests/test_weather_transform_execution.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_w2_canonical_transform_dag.py",
+      "target_path": "dags/domains/weather/tests/test_weather_w2_canonical_transform_dag.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/test_weather_w2_canonical_transform_execution.py",
+      "target_path": "dags/domains/weather/tests/test_weather_w2_canonical_transform_execution.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/weather_dbt_execution_test_support.py",
+      "target_path": "dags/domains/weather/tests/weather_dbt_execution_test_support.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/tests/weather_transform_test_support.py",
+      "target_path": "dags/domains/weather/tests/weather_transform_test_support.py",
+      "scope": "airflow_weather_test",
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_dbt_execution.py",
+      "target_path": "dags/domains/weather/weather_dbt_execution.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_dbt_failure.py",
+      "target_path": "dags/domains/weather/weather_dbt_failure.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_dbt_runtime.py",
+      "target_path": "dags/domains/weather/weather_dbt_runtime.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/__init__.py",
+      "target_path": "dags/domains/weather/weather_ingest/__init__.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/_dbt_execution/__init__.py",
+      "target_path": "dags/domains/weather/weather_ingest/_dbt_execution/__init__.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/_dbt_execution/commands.py",
+      "target_path": "dags/domains/weather/weather_ingest/_dbt_execution/commands.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/_dbt_execution/contracts.py",
+      "target_path": "dags/domains/weather/weather_ingest/_dbt_execution/contracts.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/_dbt_execution/environment.py",
+      "target_path": "dags/domains/weather/weather_ingest/_dbt_execution/environment.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/_dbt_execution/executor.py",
+      "target_path": "dags/domains/weather/weather_ingest/_dbt_execution/executor.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/_dbt_execution/paths.py",
+      "target_path": "dags/domains/weather/weather_ingest/_dbt_execution/paths.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/bronze_batch.py",
+      "target_path": "dags/domains/weather/weather_ingest/bronze_batch.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/bronze_contract.py",
+      "target_path": "dags/domains/weather/weather_ingest/bronze_contract.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/bronze_dag_support.py",
+      "target_path": "dags/domains/weather/weather_ingest/bronze_dag_support.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/bronze_pyiceberg.py",
+      "target_path": "dags/domains/weather/weather_ingest/bronze_pyiceberg.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/bronze_trino.py",
+      "target_path": "dags/domains/weather/weather_ingest/bronze_trino.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/bronze_verification.py",
+      "target_path": "dags/domains/weather/weather_ingest/bronze_verification.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/bronze.py",
+      "target_path": "dags/domains/weather/weather_ingest/bronze.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/collection_slots.py",
+      "target_path": "dags/domains/weather/weather_ingest/collection_slots.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/common/__init__.py",
+      "target_path": "dags/domains/weather/weather_ingest/common/__init__.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/common/resources.py",
+      "target_path": "dags/domains/weather/weather_ingest/common/resources.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/common/runtime.py",
+      "target_path": "dags/domains/weather/weather_ingest/common/runtime.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/errors.py",
+      "target_path": "dags/domains/weather/weather_ingest/errors.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/kma.py",
+      "target_path": "dags/domains/weather/weather_ingest/kma.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/landing.py",
+      "target_path": "dags/domains/weather/weather_ingest/landing.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/raw_contract.py",
+      "target_path": "dags/domains/weather/weather_ingest/raw_contract.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/run_manifest.py",
+      "target_path": "dags/domains/weather/weather_ingest/run_manifest.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/runtime.py",
+      "target_path": "dags/domains/weather/weather_ingest/runtime.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_ingest/w2_canonical_runtime.py",
+      "target_path": "dags/domains/weather/weather_ingest/w2_canonical_runtime.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_lineage.py",
+      "target_path": "dags/domains/weather/weather_lineage.py",
+      "scope": "airflow_weather_dependency",
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_serving_export.py",
+      "target_path": "dags/domains/weather/weather_serving_export.py",
+      "scope": "airflow_weather_entrypoint",
+      "reason": "Weather vertical-slice DAG entrypoint at the fixed source commit."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_serving_freshness_watchdog.py",
+      "target_path": "dags/domains/weather/weather_serving_freshness_watchdog.py",
+      "scope": "airflow_weather_entrypoint",
+      "reason": "Weather vertical-slice DAG entrypoint at the fixed source commit."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_serving_snapshot_refresh.py",
+      "target_path": "dags/domains/weather/weather_serving_snapshot_refresh.py",
+      "scope": "airflow_weather_entrypoint",
+      "reason": "Weather vertical-slice DAG entrypoint at the fixed source commit."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_vilage_fcst_bronze.py",
+      "target_path": "dags/domains/weather/weather_vilage_fcst_bronze.py",
+      "scope": "airflow_weather_entrypoint",
+      "reason": "Weather vertical-slice DAG entrypoint at the fixed source commit."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_vilage_fcst_collection_slot_reconciliation.py",
+      "target_path": "dags/domains/weather/weather_vilage_fcst_collection_slot_reconciliation.py",
+      "scope": "airflow_weather_entrypoint",
+      "reason": "Weather vertical-slice DAG entrypoint at the fixed source commit."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_vilage_fcst_transform.py",
+      "target_path": "dags/domains/weather/weather_vilage_fcst_transform.py",
+      "scope": "airflow_weather_entrypoint",
+      "reason": "Weather vertical-slice DAG entrypoint at the fixed source commit."
+    },
+    {
+      "source_id": "airflow_weather",
+      "source_path": "domains/weather/weather_w2_canonical_transform.py",
+      "target_path": "dags/domains/weather/weather_w2_canonical_transform.py",
+      "scope": "airflow_weather_entrypoint",
+      "reason": "Weather vertical-slice DAG entrypoint at the fixed source commit."
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/macros/manifest_state.sql",
+      "target_path": "dbt/domains/traffic_weather/macros/manifest_state.sql",
+      "scope": "weather_macro",
+      "reason": "publishable collection-manifest state"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/macros/weather/kma_value_semantics.sql",
+      "target_path": "dbt/domains/traffic_weather/macros/weather/kma_value_semantics.sql",
+      "scope": "weather_macro",
+      "reason": "KMA category value semantics"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/macros/weather/weather_serving_as_of_hour.sql",
+      "target_path": "dbt/domains/traffic_weather/macros/weather/weather_serving_as_of_hour.sql",
+      "scope": "weather_macro",
+      "reason": "fixed KST serving-hour boundary"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/macros/weather/weather_silver_publishability.sql",
+      "target_path": "dbt/domains/traffic_weather/macros/weather/weather_silver_publishability.sql",
+      "scope": "weather_macro",
+      "reason": "non-publishable Silver cleanup"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/macros/weather/weather_v2_contract.sql",
+      "target_path": "dbt/domains/traffic_weather/macros/weather/weather_v2_contract.sql",
+      "scope": "weather_macro",
+      "reason": "bounded incremental lookback macro"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/macros/weather/weather_wide_pivot.sql",
+      "target_path": "dbt/domains/traffic_weather/macros/weather/weather_wide_pivot.sql",
+      "scope": "weather_macro",
+      "reason": "hourly labels and pivot helpers"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/gold/gold_weather_place_current_outlook.sql",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_current_outlook.sql",
+      "scope": "weather_public_product",
+      "reason": "public current outlook producer"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/gold/gold_weather_place_current_outlook.yml",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_current_outlook.yml",
+      "scope": "weather_product_contract",
+      "reason": "public current-outlook contract"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/gold/gold_weather_place_forecast_change_daily.sql",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_forecast_change_daily.sql",
+      "scope": "weather_public_product",
+      "reason": "public forecast-change producer"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/gold/gold_weather_place_forecast_change_daily.yml",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_forecast_change_daily.yml",
+      "scope": "weather_product_contract",
+      "reason": "public forecast-change contract"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/gold/gold_weather_place_hourly_outlook_unit.yml",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_hourly_outlook_unit.yml",
+      "scope": "weather_unit_test",
+      "reason": "latest-issued-at no-backfill fixture"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/gold/gold_weather_place_hourly_outlook.sql",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_hourly_outlook.sql",
+      "scope": "weather_model",
+      "reason": "shared latest-issued hourly Weather evidence"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/gold/gold_weather_place_precipitation_window.sql",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_precipitation_window.sql",
+      "scope": "weather_public_product",
+      "reason": "public precipitation-window producer"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/gold/gold_weather_place_precipitation_window.yml",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_precipitation_window.yml",
+      "scope": "weather_product_contract",
+      "reason": "public precipitation-window contract"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/gold/gold_weather_place_risk_query_availability.sql",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_risk_query_availability.sql",
+      "scope": "weather_private_companion",
+      "reason": "private query-availability evidence"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/gold/gold_weather_place_risk_query_availability.yml",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_risk_query_availability.yml",
+      "scope": "weather_private_contract",
+      "reason": "private availability contract and unit cases"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/gold/gold_weather_place_risk_window.sql",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_risk_window.sql",
+      "scope": "weather_public_product",
+      "reason": "public risk-window producer"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/gold/gold_weather_place_risk_window.yml",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_risk_window.yml",
+      "scope": "weather_product_contract",
+      "reason": "public risk-window contract"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/place_mart/dim_weather_place.sql",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/place_mart/dim_weather_place.sql",
+      "scope": "weather_model",
+      "reason": "mapped-place dimension"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/place_mart/gold_weather_forecast_by_place_serving.sql",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/place_mart/gold_weather_forecast_by_place_serving.sql",
+      "scope": "weather_model",
+      "reason": "bounded place serving projection"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/place_mart/silver_weather_forecast_by_admin_dong_serving.sql",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/place_mart/silver_weather_forecast_by_admin_dong_serving.sql",
+      "scope": "weather_model",
+      "reason": "bounded serving working set"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/silver/_silver.yml",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/silver/_silver.yml",
+      "scope": "weather_model_contract",
+      "reason": "Silver KMA model contract"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/models/weather/transform/silver/silver_kma_vilage_fcst.sql",
+      "target_path": "dbt/domains/traffic_weather/models/weather/transform/silver/silver_kma_vilage_fcst.sql",
+      "scope": "weather_model",
+      "reason": "Weather Bronze-to-Silver producer"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/package-lock.yml",
+      "target_path": "dbt/domains/traffic_weather/package-lock.yml",
+      "scope": "dbt_dependency_lock",
+      "reason": "pinned local asac_axes package lock"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/packages.yml",
+      "target_path": "dbt/domains/traffic_weather/packages.yml",
+      "scope": "dbt_dependency_config",
+      "reason": "local asac_axes package declaration"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/seeds/weather/weather_place_grid_mapping.csv",
+      "target_path": "dbt/domains/traffic_weather/seeds/weather/weather_place_grid_mapping.csv",
+      "scope": "weather_seed",
+      "reason": "427-place compatibility mapping"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/special/assert_silver_kma_category_domain.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/special/assert_silver_kma_category_domain.sql",
+      "scope": "weather_singular_test",
+      "reason": "KMA category domain"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/special/assert_silver_kma_numeric_categories_parsed.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/special/assert_silver_kma_numeric_categories_parsed.sql",
+      "scope": "weather_singular_test",
+      "reason": "numeric KMA categories parse"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/special/assert_silver_kma_pcp_sno_parser_consistency.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/special/assert_silver_kma_pcp_sno_parser_consistency.sql",
+      "scope": "weather_singular_test",
+      "reason": "PCP/SNO parser consistency"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/special/assert_silver_kma_pty_pcp_consistency.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/special/assert_silver_kma_pty_pcp_consistency.sql",
+      "scope": "weather_singular_test",
+      "reason": "PTY/PCP consistency"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/special/assert_silver_kma_pty_sky_accepted_values.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/special/assert_silver_kma_pty_sky_accepted_values.sql",
+      "scope": "weather_singular_test",
+      "reason": "PTY/SKY accepted values"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/special/assert_silver_kma_value_representation_classified.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/special/assert_silver_kma_value_representation_classified.sql",
+      "scope": "weather_singular_test",
+      "reason": "value-representation classification"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/test_incremental_materialization_contract.py",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/test_incremental_materialization_contract.py",
+      "scope": "weather_python_test",
+      "reason": "incremental Silver and serving workset contract",
+      "record_type": "derived",
+      "derivation": "Keep the KMA Silver regression and skip two assertions for the intentionally excluded legacy unbounded admin-dong Silver model.",
+      "validator": "python -m pytest dbt/domains/traffic_weather/tests/weather -q"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/test_source_freshness_slo.py",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/test_source_freshness_slo.py",
+      "scope": "weather_python_test",
+      "reason": "Weather source freshness manifest contract"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/test_weather_serving_working_set_contract.py",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/test_weather_serving_working_set_contract.py",
+      "scope": "weather_python_test",
+      "reason": "bounded serving dependency contract"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_current_outlook_readiness.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_current_outlook_readiness.sql",
+      "scope": "weather_singular_test",
+      "reason": "current outlook readiness"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_forecast_change_daily_consistent.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_forecast_change_daily_consistent.sql",
+      "scope": "weather_singular_test",
+      "reason": "forecast-change consistency"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_hourly_outlook_single_issue.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_hourly_outlook_single_issue.sql",
+      "scope": "weather_singular_test",
+      "reason": "latest issue is singular per place/hour"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_precipitation_window_non_overlapping.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_precipitation_window_non_overlapping.sql",
+      "scope": "weather_singular_test",
+      "reason": "precipitation windows do not overlap"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_precipitation_window_valid_empty.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_precipitation_window_valid_empty.sql",
+      "scope": "weather_singular_test",
+      "reason": "valid empty precipitation semantics"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_risk_query_availability_grain_unique.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_risk_query_availability_grain_unique.sql",
+      "scope": "weather_singular_test",
+      "reason": "availability companion grain"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_risk_query_availability_population_reconciles.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_risk_query_availability_population_reconciles.sql",
+      "scope": "weather_singular_test",
+      "reason": "availability covers mapped population"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_risk_query_availability_reconciles.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_risk_query_availability_reconciles.sql",
+      "scope": "weather_singular_test",
+      "reason": "availability content reconciliation"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_risk_window_future_only.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/transform/gold/assert_gold_weather_place_risk_window_future_only.sql",
+      "scope": "weather_singular_test",
+      "reason": "risk evidence is future-only"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/transform/place_mart/assert_dim_weather_place_admin_axis_consistent.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/transform/place_mart/assert_dim_weather_place_admin_axis_consistent.sql",
+      "scope": "weather_singular_test",
+      "reason": "mapped-place admin code consistency"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/transform/place_mart/assert_silver_weather_admin_dong_serving_grain_unique.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/transform/place_mart/assert_silver_weather_admin_dong_serving_grain_unique.sql",
+      "scope": "weather_singular_test",
+      "reason": "working-set grain"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/transform/place_mart/assert_silver_weather_admin_dong_serving_retention_window.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/transform/place_mart/assert_silver_weather_admin_dong_serving_retention_window.sql",
+      "scope": "weather_singular_test",
+      "reason": "working-set retention window"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/transform/silver/assert_silver_kma_event_at_matches_forecast_at.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/transform/silver/assert_silver_kma_event_at_matches_forecast_at.sql",
+      "scope": "weather_singular_test",
+      "reason": "KMA event-time contract"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/transform/silver/assert_silver_kma_uses_publishable_runs.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/transform/silver/assert_silver_kma_uses_publishable_runs.sql",
+      "scope": "weather_singular_test",
+      "reason": "Silver reads publishable runs only"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/tests/weather/transform/silver/assert_silver_kma_vilage_fcst_grain_unique.sql",
+      "target_path": "dbt/domains/traffic_weather/tests/weather/transform/silver/assert_silver_kma_vilage_fcst_grain_unique.sql",
+      "scope": "weather_singular_test",
+      "reason": "Silver KMA grain"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "domains/traffic_weather/workflows/requirements-ci.txt",
+      "target_path": "dbt/domains/traffic_weather/workflows/requirements-ci.txt",
+      "scope": "dbt_test_toolchain",
+      "reason": "dbt and pytest CI version pins"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/dbt_project.yml",
+      "target_path": "dbt/packages/asac_axes/dbt_project.yml",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/macros/axis_tests.sql",
+      "target_path": "dbt/packages/asac_axes/macros/axis_tests.sql",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/macros/dim_admin_dong_pin.sql",
+      "target_path": "dbt/packages/asac_axes/macros/dim_admin_dong_pin.sql",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/macros/space_axes.sql",
+      "target_path": "dbt/packages/asac_axes/macros/space_axes.sql",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/macros/time_axes.sql",
+      "target_path": "dbt/packages/asac_axes/macros/time_axes.sql",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/models/dim_admin_dong.sql",
+      "target_path": "dbt/packages/asac_axes/models/dim_admin_dong.sql",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/models/dim_beop_admin_link.sql",
+      "target_path": "dbt/packages/asac_axes/models/dim_beop_admin_link.sql",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/models/schema.yml",
+      "target_path": "dbt/packages/asac_axes/models/schema.yml",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/models/sources.yml",
+      "target_path": "dbt/packages/asac_axes/models/sources.yml",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/README.md",
+      "target_path": "dbt/packages/asac_axes/README.md",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/scripts/build_crosswalk.py",
+      "target_path": "dbt/packages/asac_axes/scripts/build_crosswalk.py",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/seeds/_asac_axes__seeds.yml",
+      "target_path": "dbt/packages/asac_axes/seeds/_asac_axes__seeds.yml",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/seeds/seoul_admin_dong_boundary.csv",
+      "target_path": "dbt/packages/asac_axes/seeds/seoul_admin_dong_boundary.csv",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/seeds/seoul_admin_dong_crosswalk.csv",
+      "target_path": "dbt/packages/asac_axes/seeds/seoul_admin_dong_crosswalk.csv",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/seeds/seoul_gu_boundary.csv",
+      "target_path": "dbt/packages/asac_axes/seeds/seoul_gu_boundary.csv",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "packages/asac_axes/tests/assert_dim_beop_admin_link_pair_unique.sql",
+      "target_path": "dbt/packages/asac_axes/tests/assert_dim_beop_admin_link_pair_unique.sql",
+      "scope": "asac_axes_package",
+      "reason": "complete pinned package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/__init__.py",
+      "target_path": "dbt/serving_contract/__init__.py",
+      "scope": "serving_contract",
+      "reason": "complete static validator package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/cli.py",
+      "target_path": "dbt/serving_contract/cli.py",
+      "scope": "serving_contract",
+      "reason": "complete static validator package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/io_utf8.py",
+      "target_path": "dbt/serving_contract/io_utf8.py",
+      "scope": "serving_contract",
+      "reason": "complete static validator package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/model.py",
+      "target_path": "dbt/serving_contract/model.py",
+      "scope": "serving_contract",
+      "reason": "complete static validator package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/pattern_hygiene.py",
+      "target_path": "dbt/serving_contract/pattern_hygiene.py",
+      "scope": "serving_contract",
+      "reason": "complete static validator package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/projection_identity.py",
+      "target_path": "dbt/serving_contract/projection_identity.py",
+      "scope": "serving_contract",
+      "reason": "complete static validator package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/README.md",
+      "target_path": "dbt/serving_contract/README.md",
+      "scope": "serving_contract",
+      "reason": "complete static validator package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/schema.yml",
+      "target_path": "dbt/serving_contract/schema.yml",
+      "scope": "serving_contract",
+      "reason": "complete static validator package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/tests/__init__.py",
+      "target_path": "dbt/serving_contract/tests/__init__.py",
+      "scope": "serving_contract_test",
+      "reason": "validator regression suite"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/tests/conftest.py",
+      "target_path": "dbt/serving_contract/tests/conftest.py",
+      "scope": "serving_contract_test",
+      "reason": "validator regression suite"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/tests/fixtures/invalid_contracts.yml",
+      "target_path": "dbt/serving_contract/tests/fixtures/invalid_contracts.yml",
+      "scope": "serving_contract_test",
+      "reason": "validator regression fixture"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/tests/fixtures/manifest.json",
+      "target_path": "dbt/serving_contract/tests/fixtures/manifest.json",
+      "scope": "serving_contract_test",
+      "reason": "validator regression fixture"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/tests/fixtures/not_in_manifest.yml",
+      "target_path": "dbt/serving_contract/tests/fixtures/not_in_manifest.yml",
+      "scope": "serving_contract_test",
+      "reason": "validator regression fixture"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/tests/fixtures/valid_contracts.yml",
+      "target_path": "dbt/serving_contract/tests/fixtures/valid_contracts.yml",
+      "scope": "serving_contract_test",
+      "reason": "validator regression fixture"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/tests/test_pattern_hygiene.py",
+      "target_path": "dbt/serving_contract/tests/test_pattern_hygiene.py",
+      "scope": "serving_contract_test",
+      "reason": "validator regression suite"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/tests/test_validator.py",
+      "target_path": "dbt/serving_contract/tests/test_validator.py",
+      "scope": "serving_contract_test",
+      "reason": "validator regression suite",
+      "record_type": "derived",
+      "derivation": "Keep the upstream validator suite but skip cross-domain source-evidence assertions whose source domain contracts are intentionally absent.",
+      "validator": "python -m pytest dbt/serving_contract/tests -q"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/tests/test_verify_stamp_resolve.py",
+      "target_path": "dbt/serving_contract/tests/test_verify_stamp_resolve.py",
+      "scope": "serving_contract_test",
+      "reason": "validator regression suite"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/tests/test_verify_stamp.py",
+      "target_path": "dbt/serving_contract/tests/test_verify_stamp.py",
+      "scope": "serving_contract_test",
+      "reason": "validator regression suite"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/validate_serving_contract.py",
+      "target_path": "dbt/serving_contract/validate_serving_contract.py",
+      "scope": "serving_contract",
+      "reason": "complete static validator package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/validator.py",
+      "target_path": "dbt/serving_contract/validator.py",
+      "scope": "serving_contract",
+      "reason": "complete static validator package"
+    },
+    {
+      "source_id": "weather_dbt",
+      "source_path": "serving_contract/verify_stamp.py",
+      "target_path": "dbt/serving_contract/verify_stamp.py",
+      "scope": "serving_contract",
+      "reason": "complete static validator package"
+    },
+    {
+      "source_id": "weather_origin_contract",
+      "source_path": "skills/seoul-weather-risk/NOTICE",
+      "target_path": "release/weather/NOTICE",
+      "scope": "kskill_release_notice",
+      "reason": "Preserve the exported Weather Risk artifact notice."
+    },
+    {
+      "source_id": "weather_origin_contract",
+      "source_path": "skills/seoul-weather-risk/references/admin-dong-place-map.json",
+      "target_path": "release/weather/snapshots/admin-dong-place-map.json",
+      "scope": "kskill_place_reference",
+      "reason": "Pin the reviewed 427-place runtime artifact."
+    },
+    {
+      "source_id": "weather_origin_contract",
+      "source_path": "skills/seoul-weather-risk/provenance.json",
+      "target_path": "release/weather/upstream-provenance.json",
+      "scope": "kskill_release_provenance",
+      "reason": "Preserve the exported Weather Risk artifact provenance."
+    }
+  ],
+  "explicit_exclusions": [
+    "traffic domain",
+    "cross-domain weather products",
+    "mixed weather/traffic maintenance",
+    "weather traffic cost and reliability experiments",
+    "marketplace runtime",
+    "credentials and local harness state"
+  ]
+}
