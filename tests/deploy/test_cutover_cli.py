@@ -14,7 +14,7 @@ from deployment.command import CompletedCommand
 from deployment.models import WriterRunCounts
 from deployment.overlay import render_baseline_overlay
 from deployment.target import target_fingerprint
-from tests.deploy.test_release_inventory import _target
+from tests.deploy.test_release_inventory import _native_target, _target
 
 
 @pytest.fixture(autouse=True)
@@ -30,6 +30,13 @@ def block_process_and_network(monkeypatch: pytest.MonkeyPatch) -> None:
 def _target_file(tmp_path: Path) -> tuple[object, Path]:
     target = _target(tmp_path)
     path = tmp_path / "reviewed-target.json"
+    path.write_bytes(target.canonical_target_bytes)
+    return target, path
+
+
+def _native_target_file(tmp_path: Path) -> tuple[object, Path]:
+    target = _native_target(tmp_path)
+    path = tmp_path / "repo" / "reviewed-target.json"
     path.write_bytes(target.canonical_target_bytes)
     return target, path
 
@@ -99,7 +106,7 @@ def test_inspect_is_read_only_and_prints_only_sanitized_digests(
 ) -> None:
     import deployment.cutover_cli as cli
 
-    target, path = _target_file(tmp_path)
+    target, path = _native_target_file(tmp_path)
     calls = _Calls([])
     _install_read_fakes(monkeypatch, calls)
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
@@ -149,7 +156,7 @@ def test_inspect_rejects_missing_existing_local_env_before_compose_or_airflow(
 ) -> None:
     import deployment.cutover_cli as cli
 
-    target, path = _target_file(tmp_path)
+    target, path = _native_target_file(tmp_path)
     target = replace(target, credential_source_kind="existing_local_env")
     calls = _Calls([])
     monkeypatch.setattr(cli, "_load_target", lambda command, target_path: target)
@@ -278,7 +285,7 @@ def test_activate_rehearses_baseline_records_ledger_and_installs_target_last(
 ) -> None:
     import deployment.cutover_cli as cli
 
-    target, path = _target_file(tmp_path)
+    target, path = _native_target_file(tmp_path)
     baseline = render_baseline_overlay(target)
     install_path = tmp_path / "installed-target.json"
     calls = _Calls([])
@@ -545,7 +552,7 @@ def test_activate_rejects_hostile_install_destination_before_lock_or_writes(
 ) -> None:
     import deployment.cutover_cli as cli
 
-    target, path = _target_file(tmp_path)
+    target, path = _native_target_file(tmp_path)
     baseline = render_baseline_overlay(target)
     calls = _Calls([])
     _install_read_fakes(monkeypatch, calls)

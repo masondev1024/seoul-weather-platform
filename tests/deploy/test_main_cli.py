@@ -34,6 +34,10 @@ RUNTIME_IMPORTS = {
 }
 
 
+def _native_target_path(tmp_path: Path) -> str:
+    return str(tmp_path / "deploy-target.json")
+
+
 @pytest.fixture(autouse=True)
 def block_process_and_network(monkeypatch: pytest.MonkeyPatch) -> None:
     def blocked(*args: object, **kwargs: object) -> None:
@@ -151,7 +155,7 @@ def test_deploy_imports_runtime_only_after_identity(
 
     event = _event_path(tmp_path)
     _set_base_env(monkeypatch, event)
-    monkeypatch.setenv("WEATHER_DEPLOY_TARGET_PATH", TARGET_PATH)
+    monkeypatch.setenv("WEATHER_DEPLOY_TARGET_PATH", _native_target_path(tmp_path))
     calls = _Calls()
     _install_verify_fakes(monkeypatch, calls)
 
@@ -200,7 +204,7 @@ def test_deploy_runtime_import_failure_is_fixed_and_redacted(
 
     event = _event_path(tmp_path)
     _set_base_env(monkeypatch, event)
-    monkeypatch.setenv("WEATHER_DEPLOY_TARGET_PATH", TARGET_PATH)
+    monkeypatch.setenv("WEATHER_DEPLOY_TARGET_PATH", _native_target_path(tmp_path))
     calls = _Calls()
     _install_verify_fakes(monkeypatch, calls)
 
@@ -408,7 +412,7 @@ def test_deploy_main_success_wires_stable_probe_adapters_and_orchestrator_in_ord
 
     event = _event_path(tmp_path)
     _set_base_env(monkeypatch, event)
-    monkeypatch.setenv("WEATHER_DEPLOY_TARGET_PATH", TARGET_PATH)
+    monkeypatch.setenv("WEATHER_DEPLOY_TARGET_PATH", _native_target_path(tmp_path))
     calls = _Calls()
     _install_verify_fakes(monkeypatch, calls)
     target = _target(tmp_path)
@@ -525,7 +529,7 @@ def test_deploy_main_rejects_invalid_existing_local_env_before_runtime_adapters(
 
     event = _event_path(tmp_path)
     _set_base_env(monkeypatch, event)
-    monkeypatch.setenv("WEATHER_DEPLOY_TARGET_PATH", TARGET_PATH)
+    monkeypatch.setenv("WEATHER_DEPLOY_TARGET_PATH", _native_target_path(tmp_path))
     _install_verify_fakes(monkeypatch, _Calls())
     target = _target(tmp_path)
     monkeypatch.setattr(cli, "_load_runtime_symbols", lambda: None)

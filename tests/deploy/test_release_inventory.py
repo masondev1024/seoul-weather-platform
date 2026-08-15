@@ -21,6 +21,40 @@ from tools.dagbag_runtime_check import EXPECTED_DAG_IDS
 
 def _target(tmp_path: Path):
     runtime = "C:/ProgramData/example-weather/runtime"
+    return _target_with_paths(
+        tmp_path,
+        repo_root=tmp_path,
+        runtime=runtime,
+        ledger_directory="C:/ProgramData/example-weather/ledger",
+        lock_file="C:/ProgramData/example-weather/deploy.lock",
+        generated_overlay_file="C:/ProgramData/example-weather/generated/main-deploy.override.yml",
+    )
+
+
+def _native_target(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    runtime = tmp_path / "runtime"
+    local_state = tmp_path / "local-state"
+    return _target_with_paths(
+        repo_root,
+        repo_root=repo_root,
+        runtime=str(runtime),
+        ledger_directory=str(local_state / "ledger"),
+        lock_file=str(local_state / "deploy.lock"),
+        generated_overlay_file=str(local_state / "generated" / "main-deploy.override.yml"),
+    )
+
+
+def _target_with_paths(
+    target_directory: Path,
+    *,
+    repo_root: Path,
+    runtime: str,
+    ledger_directory: str,
+    lock_file: str,
+    generated_overlay_file: str,
+):
     payload = {
         "schema_version": "weather-local-deploy-target/v1",
         "target_id": "example-local-weather",
@@ -53,14 +87,14 @@ def _target(tmp_path: Path):
         },
         "timeouts": {"drain_timeout_seconds": 1800, "poll_interval_seconds": 15},
         "local_state": {
-            "ledger_directory": "C:/ProgramData/example-weather/ledger",
-            "lock_file": "C:/ProgramData/example-weather/deploy.lock",
-            "generated_overlay_file": "C:/ProgramData/example-weather/generated/main-deploy.override.yml",
+            "ledger_directory": ledger_directory,
+            "lock_file": lock_file,
+            "generated_overlay_file": generated_overlay_file,
         },
     }
-    path = tmp_path / "deploy-target.json"
+    path = target_directory / "deploy-target.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
-    return load_deploy_target(path, repo_root=tmp_path)
+    return load_deploy_target(path, repo_root=repo_root)
 
 
 class _FakeRunner:

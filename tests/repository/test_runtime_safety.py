@@ -71,8 +71,10 @@ def test_dagbag_harness_imports_without_windows_environment() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def _write_command_stub(directory: Path, command: str) -> Path:
-    if os.name == "nt":
+def _write_command_stub(
+    directory: Path, command: str, *, platform_name: str | None = None
+) -> Path:
+    if (platform_name or os.name) == "nt":
         path = directory / f"{command}.cmd"
         path.write_text(
             "@echo off\n"
@@ -88,7 +90,7 @@ def _write_command_stub(directory: Path, command: str) -> Path:
         "#!/bin/sh\n"
         "command_name=${0##*/}\n"
         "printf '%s %s\\n' \"$command_name\" \"$*\" "
-        '">>\"$REPOSITORY_SAFETY_COMMAND_LOG\"\n'
+        '>>"$REPOSITORY_SAFETY_COMMAND_LOG"\n'
         "if [ \"$command_name\" = python ] && [ \"$1\" = -c ]; then\n"
         "  printf '3.11\\n'\n"
         "fi\n"
@@ -97,6 +99,15 @@ def _write_command_stub(directory: Path, command: str) -> Path:
     )
     path.chmod(0o755)
     return path
+
+
+def test_posix_command_stub_uses_shell_redirection(tmp_path: Path) -> None:
+    script = _write_command_stub(
+        tmp_path, "python", platform_name="posix"
+    ).read_text(encoding="utf-8")
+
+    assert '"$*" >>"$REPOSITORY_SAFETY_COMMAND_LOG"' in script
+    assert '"$*" ">>"$REPOSITORY_SAFETY_COMMAND_LOG"' not in script
 
 
 def test_repository_verifier_runs_only_secretless_python_checks(tmp_path: Path) -> None:
