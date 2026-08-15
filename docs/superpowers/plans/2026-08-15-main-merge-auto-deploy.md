@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 보호된 `main`의 CI 성공 SHA를 기존 로컬 Airflow에 자동 배포하고 실패 시 직전 성공 SHA 또는 승인된 baseline으로 rollback한다.
+**Goal:** private 단일 소유자 `guarded_private` 또는 더 강한 `protected` 경계에서 exact `main` merge의 CI 성공 SHA를 기존 로컬 Airflow에 자동 배포하고 실패 시 직전 성공 SHA 또는 승인된 baseline으로 rollback한다.
 
 **Architecture:** GitHub `workflow_run`은 thin dispatcher다. GitHub-hosted `verify-main`이 원격 identity를 read-only 검증하고, 성공한 경우에만 self-hosted `deploy-main`이 동일 검증을 반복한 뒤 상태를 변경한다. 두 경로는 `deployment.main_cli` 하나로 진입한다. identity, ledger, overlay, orchestration, concrete argv adapter를 분리하고 L0에서는 injected fake만 사용한다. 최초 cutover 전에는 runner와 workflow를 비활성 상태로 유지한다.
 
@@ -12,9 +12,10 @@
 
 - 운영 승격은 same-repository `dev → main` PR merge만 허용한다.
 - 배포 trigger는 `CI`의 `workflow_run.completed`이고 source event/branch/conclusion은 `push`/`main`/`success`다.
-- `WEATHER_GOVERNANCE_MODE=protected`, current remote `main`, exact branch-bound required checks가 mutation 전 모두 일치해야 한다.
+- `guarded_private`에서는 private 단일 소유자 경계, current remote `main`, same-repository exact `dev → main` merged PR, exact branch-bound required checks를 mutation 전에 모두 재검증한다. public/internal 전환 또는 추가 writer면 guarded 배포를 중단한다.
+- `protected`에서는 위 exact merge 증거에 더해 `dev`·`main` native protection과 branch-bound required check readback이 mutation 전에 모두 일치해야 한다.
 - `WEATHER_DEPLOYMENT_ENABLED=enabled`만 자동배포를 예약한다. 최초 승인 전에는 이 값을 설정하지 않으며 runner도 offline 상태로 둔다.
-- PR, `workflow_dispatch`, `repository_dispatch`, Release event와 `guarded_private`는 self-hosted deploy에 도달하지 않는다.
+- PR, `workflow_dispatch`, `repository_dispatch`, Release event는 self-hosted deploy에 도달하지 않는다. guarded_private도 별도 최초 cutover 승인과 deployment flag 전에는 self-hosted deploy에 도달하지 않는다.
 - 실제 Airflow pause/deploy와 runner 활성화는 최초 cutover 보고·승인 전까지 금지한다.
 - L0 test는 fake/injected runner만 사용하고 Docker·Airflow·GitHub subprocess를 실행하지 않는다.
 - DAG trigger/backfill/clear/retry/mark-success, dbt run/build, Trino·D1·R2 write는 금지한다.
@@ -44,7 +45,7 @@ def test_exact_successful_main_ci_is_accepted():
     assert identity.candidate_sha == SHA
 
 @pytest.mark.parametrize("mutation", [
-    "pull_request_source", "guarded_private", "stale_main", "wrong_workflow",
+    "pull_request_source", "public_guarded", "stale_main", "wrong_workflow",
     "wrong_repo", "failed_ci", "missing_required_check", "duplicate_check",
 ])
 def test_identity_fails_closed_before_mutation(mutation):
@@ -60,7 +61,7 @@ Expected: `ModuleNotFoundError: deployment.main_identity`.
 
 - [ ] **Step 3: immutable identity 최소 구현**
 
-Require exact lowercase 40-hex equality across `workflow_run.head_sha`, trusted deploy workflow SHA, remote `main`, source job and linked check SHA. Require source workflow `CI`, suffix 없는 path `.github/workflows/ci.yml`, 별도 `head_branch=main`, event `push`, status/conclusion `completed/success`, `classify(...) == "protected"`, and unique `CI / required` plus `Promotion Source / required` jobs from that exact source run. Each linked check must be `completed/success`, `app.slug == "github-actions"`, and have the same positive app id required by main protection. Snapshot JSON-native input once; expose only frozen scalar/tuple fields. Errors contain a fixed category only.
+Require exact lowercase 40-hex equality across `workflow_run.head_sha`, trusted deploy workflow SHA, remote `main`, source job and linked check SHA. Require source workflow `CI`, suffix 없는 path `.github/workflows/ci.yml`, 별도 `head_branch=main`, event `push`, status/conclusion `completed/success`, same-repository `dev → main` merged PR evidence, and unique `CI / required` plus `Promotion Source / required` jobs from that exact source run. `guarded_private` accepts only `private=true`; public/internal or additional-writer operational evidence stops deployment. `protected` additionally requires `classify(...) == "protected"` and exact protection app bindings. Each linked check must be `completed/success`, `app.slug == "github-actions"`, and have the same positive app id. Snapshot JSON-native input once; expose only frozen scalar/tuple fields. Errors contain a fixed category only.
 
 - [ ] **Step 4: GREEN**
 
@@ -214,7 +215,7 @@ Run the three test files plus `python -m compileall -q deployment`.
 
 - [ ] **Step 1: workflow/policy RED tests**
 
-Require only `workflow_run` for `CI`/`completed`/`main`, read-only workflow permissions, `concurrency.group: weather-main-deploy`, `cancel-in-progress: false`, and a job-level event guard that checks `WEATHER_GOVERNANCE_MODE == protected`, `WEATHER_DEPLOYMENT_ENABLED == enabled`, and source name/path/event/branch/status/conclusion before either job runs. The `ubuntu-latest` preflight uses only pinned checkout/setup-python plus stdlib-only exact `verify-main`; the `[self-hosted, windows, weather-prod]` deploy job has `needs: verify-main`, timeout 60, pinned checkout와 exact `deploy-main` 두 step만 사용한다. self-hosted Python `3.11`·PyYAML은 최초 승인된 cutover에서 workflow 밖에 사전 준비하며 어떤 deploy workflow도 package install이나 `setup-python`으로 환경을 바꾸지 않는다. Both CLI steps use exact `GH_TOKEN: ${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}`. This repository-scoped fine-grained token has only `Administration: read`, `Actions: read`, `Checks: read`, and `Contents: read`; omission or insufficient permission fails before mutation, and the default `github.token` is not accepted as branch-protection evidence. Checkout ref is `${{ github.workflow_sha }}`, never event text. Ban all other events, local/unpinned actions, direct Docker/Airflow commands and extra self-hosted steps.
+Require only `workflow_run` for `CI`/`completed`/`main`, read-only workflow permissions including `pull-requests: read`, `concurrency.group: weather-main-deploy`, `cancel-in-progress: false`, and a job-level event guard that checks allowed governance mode, `WEATHER_DEPLOYMENT_ENABLED == enabled`, and source name/path/event/branch/status/conclusion before either job runs. The `ubuntu-latest` preflight uses only pinned checkout/setup-python plus stdlib-only exact `verify-main`; the `[self-hosted, windows, weather-prod]` deploy job has `needs: verify-main`, timeout 60, pinned checkout와 exact `deploy-main` 두 step만 사용한다. self-hosted Python `3.11`·PyYAML은 최초 승인된 cutover에서 workflow 밖에 사전 준비하며 어떤 deploy workflow도 package install이나 `setup-python`으로 환경을 바꾸지 않는다. guarded_private uses the workflow read token and private exact merged-PR revalidation; protected uses exact `GH_TOKEN: ${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}` with only `Administration: read`, `Actions: read`, `Checks: read`, `Contents: read`, and `Pull requests: read`. Checkout ref is `${{ github.workflow_sha }}`, never event text. Ban all other events, local/unpinned actions, direct Docker/Airflow commands and extra self-hosted steps.
 
 - [ ] **Step 2: thin workflow GREEN**
 
@@ -222,7 +223,7 @@ Run: `python -m pytest tests/deploy/test_deploy_main_workflow.py tests/repositor
 
 - [ ] **Step 3: first-cutover document/test**
 
-Document exact STOP report fields: target main SHA, code services, 10 DAG pause states, writer running/queued counts, target/CLI fingerprints, sanitized candidate baseline-overlay fingerprint, stable overlay path presence only as a boolean, `WEATHER_GOVERNANCE_READ_TOKEN` existence/permission result without its value, zero dbt/Trino/D1/R2 writes, rollback and rollback-failure pause behavior. The approved cutover procedure is `read-only inspect → report/STOP → user approval → install target and baseline overlay → config/dry-run plus baseline restore rehearsal → configure/read back the least-privilege governance secret → start runner → set and read back WEATHER_DEPLOYMENT_ENABLED=enabled`. State deploy jobs remain skipped before that exact enable flag; later protected main merges require no additional approval.
+Document exact STOP report fields: target main SHA, code services, 10 DAG pause states, writer running/queued counts, target/CLI fingerprints, sanitized candidate baseline-overlay fingerprint, stable overlay path presence only as a boolean, protected mode의 `WEATHER_GOVERNANCE_READ_TOKEN` existence/permission result without its value, zero dbt/Trino/D1/R2 writes, rollback and rollback-failure pause behavior. The approved cutover procedure is `read-only inspect → report/STOP → user approval → install target and baseline overlay → config/dry-run plus baseline restore rehearsal → protected인 경우 least-privilege governance secret configure/readback → start runner → set and read back WEATHER_DEPLOYMENT_ENABLED=enabled`. guarded_private에는 secret을 설치하지 않으며 public/internal 또는 extra writer가 있으면 배포를 중단한다. State deploy jobs remain skipped before that exact enable flag; later eligible guarded_private or protected main merges require no additional approval.
 
 - [ ] **Step 4: remove superseded Release artifacts**
 

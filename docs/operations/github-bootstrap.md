@@ -2,7 +2,7 @@
 
 ## 목적과 중단 원칙
 
-이 절차는 `dev`의 검증된 한 commit을 최초 `main`으로 만들고, 저장소 기본 브랜치와 `dev`·`main` native branch protection을 API readback으로 확인하는 1회성 bootstrap이다. 최초 CI PR을 열거나 재실행하기 전에 `WEATHER_GOVERNANCE_MODE=guarded_private`를 설정하고 exact readback해야 하며, 완료 전까지 그 값을 유지한다. `guarded_private`는 GitHub-hosted secretless CI 진단만 허용하는 mode일 뿐 `main` 자동 배포를 허용하는 대체 보호가 아니다.
+이 절차는 `dev`의 검증된 한 commit을 최초 `main`으로 만들고, 저장소 기본 브랜치와 `dev`·`main` native branch protection을 API readback으로 확인하는 1회성 bootstrap이다. 최초 CI PR을 열거나 재실행하기 전에 `WEATHER_GOVERNANCE_MODE=guarded_private`를 설정하고 exact readback해야 하며, 완료 전까지 그 값을 유지한다. `guarded_private`는 단일 소유자 private 저장소의 사고 방지용 제한 mode다. 별도 최초 전환 승인으로 deployment flag와 runner가 준비된 경우에만, 같은 저장소의 exact `dev → main` merged PR과 그 merge SHA의 CI 증거를 매번 다시 검증해 배포를 허용한다. public/internal 전환 또는 추가 writer가 생기면 guarded 배포를 중단하고 더 강한 `protected` mode를 사용한다.
 
 각 state mutation은 직전에 현재 대상 저장소, `bootstrap_sha`, 바뀌는 설정과 rollback/중단 지점을 다시 보고하고 새 사용자 승인을 받아야 한다. 한 번 받은 승인을 뒤의 mutation에 재사용하지 않는다. 이 문서 자체와 `plan`·`verify` 성공은 push, repository 설정 변경, runner 설치 또는 Airflow 배포 승인이 아니다.
 
@@ -30,7 +30,7 @@ gh variable set WEATHER_GOVERNANCE_MODE --repo masondev1024/seoul-weather-platfo
 gh variable get WEATHER_GOVERNANCE_MODE --repo masondev1024/seoul-weather-platform
 ```
 
-readback이 정확히 `guarded_private`가 아니면 최초 CI를 시작하지 않는다. 이 precondition은 self-hosted runner, `WEATHER_DEPLOYMENT_ENABLED=enabled`, `Deploy Main`, public-readiness 또는 Airflow 상태 변경을 허용하지 않는다. 최초 `feat/* → dev` PR과 merge 뒤 `dev` push CI는 이 진단 mode에서 GitHub-hosted secretless jobs만 실행하고 runtime은 `skipped`인 degraded 결과를 남긴다.
+readback이 정확히 `guarded_private`가 아니면 최초 CI를 시작하지 않는다. 이 precondition 자체는 self-hosted runner, `WEATHER_DEPLOYMENT_ENABLED=enabled`, `Deploy Main`, public-readiness 또는 Airflow 상태 변경을 허용하지 않는다. 최초 `feat/* → dev` PR과 merge 뒤 `dev` push CI는 GitHub-hosted secretless 검증만 수행한다. 첫 배포는 여전히 target·baseline·capability read-only 보고와 명시 사용자 승인을 거친 별도 cutover에서만 가능하다.
 
 ## 변경 순서 정본
 
@@ -111,7 +111,7 @@ native protection이 아직 검증되지 않았으므로 precondition의 reposit
 gh variable get WEATHER_GOVERNANCE_MODE --repo masondev1024/seoul-weather-platform
 ```
 
-값이 정확히 `guarded_private`가 아니면 protection plan을 만들지 않고 중단한다. 이 값에서는 GitHub-hosted secretless CI 진단만 허용한다. self-hosted runner 등록·설치·시작, governance read secret 설치, `WEATHER_DEPLOYMENT_ENABLED=enabled`, `Deploy Main`과 public-readiness 활성화는 금지한다.
+값이 정확히 `guarded_private`가 아니면 protection plan을 만들지 않고 중단한다. 이 bootstrap 단계에서는 self-hosted runner 등록·설치·시작, `WEATHER_DEPLOYMENT_ENABLED=enabled`, `Deploy Main`과 Airflow 상태 변경을 허용하지 않는다. guarded mode에는 governance read secret을 설치하지 않는다. 첫 배포는 별도 cutover의 read-only target·baseline·capability 보고와 사용자 명시 승인 뒤에만 진행하며, public/internal visibility 또는 추가 writer가 확인되면 guarded mode로 진행하지 않는다.
 
 ### 5. check-run 출현과 plan 생성 — read-only
 
@@ -176,7 +176,7 @@ python -m tools.github_protection verify --repo masondev1024/seoul-weather-platf
 gh variable set WEATHER_GOVERNANCE_MODE --repo masondev1024/seoul-weather-platform --body protected
 ```
 
-이 write는 native protection readback 완료만 기록한다. runner 설치·활성화, governance read secret, `WEATHER_DEPLOYMENT_ENABLED=enabled` 또는 Airflow 상태 변경 승인은 포함하지 않는다. runner 등록과 자동 배포 활성화는 [main 자동 배포 최초 전환 절차](./main-auto-deploy-first-cutover.md)의 read-only inventory와 STOP 보고를 마친 뒤 별도 승인으로 수행한다.
+이 write는 native protection readback 완료만 기록한다. runner 설치·활성화, protected mode용 governance read secret, `WEATHER_DEPLOYMENT_ENABLED=enabled` 또는 Airflow 상태 변경 승인은 포함하지 않는다. runner 등록과 자동 배포 활성화는 [main 자동 배포 최초 전환 절차](./main-auto-deploy-first-cutover.md)의 read-only inventory와 STOP 보고를 마친 뒤 별도 승인으로 수행한다.
 
 ## 실패 처리와 guarded fallback
 
@@ -188,7 +188,7 @@ gh variable set WEATHER_GOVERNANCE_MODE --repo masondev1024/seoul-weather-platfo
 - private 저장소 protection에서 HTTP 403 또는 404
 - normalized readback 불일치
 
-private protection의 403/404는 `guarded_private` 진단이다. deployment-enabled 결과가 아니며, plan이나 CI 결과로 `protected`를 추론하지 않는다. `dev` PUT 뒤 `main`에서 실패한 부분 적용 상태도 전체 실패다. 이미 생긴 보호를 삭제하거나 약화해 되돌리지 말고, `guarded_private`를 유지하거나 별도 승인으로 다시 설정한 뒤 중단한다.
+private protection의 403/404는 `guarded_private`로 남아야 한다는 진단이다. plan이나 CI 결과로 `protected`를 추론하지 않는다. `dev` PUT 뒤 `main`에서 실패한 부분 적용 상태도 전체 실패다. 이미 생긴 보호를 삭제하거나 약화해 되돌리지 말고, `guarded_private`를 유지하거나 별도 승인으로 다시 설정한 뒤 중단한다. guarded 배포는 private 단일 소유자 경계가 유지되고 별도 최초 cutover가 명시 승인된 경우에만 고려한다.
 
 실패 시 임시 plan은 내용을 출력하지 않고 삭제한다.
 
@@ -196,4 +196,4 @@ private protection의 403/404는 `guarded_private` 진단이다. deployment-enab
 Remove-Item -LiteralPath "$env:TEMP\weather-protection-plan.json"
 ```
 
-문제를 해결한 뒤에는 새 `bootstrap_sha`·check-run·plan checksum을 다시 확인하고 mutation마다 새 승인을 받아 처음부터 재평가한다. 어떤 실패 경로에서도 self-hosted runner, governance read secret, deployment enable flag 또는 Airflow pipeline을 활성화하지 않는다.
+문제를 해결한 뒤에는 새 `bootstrap_sha`·check-run·plan checksum을 다시 확인하고 mutation마다 새 승인을 받아 처음부터 재평가한다. 어떤 실패 경로에서도 self-hosted runner, protected mode용 governance read secret, deployment enable flag 또는 Airflow pipeline을 활성화하지 않는다.

@@ -2,7 +2,7 @@
 
 ## 1. 결정과 적용 범위
 
-Weather Platform의 운영 배포 승인은 보호된 `dev → main` PR merge로 단일화한다. `main` merge 자체로 배포하지 않고, 그 merge commit의 `CI` workflow가 성공한 직후 별도 `Deploy Main` workflow가 같은 SHA를 자동 배포한다.
+Weather Platform의 운영 배포 증거는 같은 저장소의 exact `dev → main` PR merge로 단일화한다. `main` merge 자체로 배포하지 않고, 그 merge commit의 `CI` workflow가 성공한 직후 별도 `Deploy Main` workflow가 같은 SHA와 PR 증거를 다시 검증해 자동 배포한다. `guarded_private`는 단일 소유자 private 저장소의 사고 방지용 제한 경계이고, public/internal 전환 또는 추가 writer가 생기면 guarded 배포를 중단한다. `protected`는 native protection readback을 더한 강한 경계다.
 
 이 설계는 다음 기존 안을 폐기한다.
 
@@ -51,7 +51,9 @@ on:
 
 GitHub-hosted `preflight` job은 event와 원격 readback을 검증하고, self-hosted `deploy` job은 그 성공 뒤 동일 검증을 다시 수행한다. 다음 조건을 모두 만족할 때만 self-hosted runner에 도달한다.
 
-- `WEATHER_GOVERNANCE_MODE == protected`
+- `WEATHER_GOVERNANCE_MODE == guarded_private` 또는 `protected`
+- guarded인 경우 repository visibility가 private이고 단일 소유자 경계가 계속 확인되며, public/internal 전환 또는 추가 writer가 있으면 배포를 중단
+- protected인 경우 `dev`·`main` native protection과 branch-bound required check readback까지 정확히 일치
 - `WEATHER_DEPLOYMENT_ENABLED == enabled`
 - source workflow 이름은 `CI`, path는 suffix 없는 정본 `.github/workflows/ci.yml`, branch는 별도 `head_branch=main`
 - source event가 `push`
@@ -61,9 +63,9 @@ GitHub-hosted `preflight` job은 event와 원격 readback을 검증하고, self-
 - 실행 중인 deploy workflow가 기본 브랜치 `main`의 정본 workflow임
 - exact source SHA의 `CI / required`와 `Promotion Source / required`가 branch-bound GitHub Actions check로 성공
 
-branch protection readback은 기본 `GITHUB_TOKEN`으로 대체하지 않는다. GitHub REST의 해당 endpoint에 필요한 repository `Administration: read`를 포함하고 `Actions: read`, `Checks: read`, `Contents: read`만 추가한 repository-scoped fine-grained token을 `WEATHER_GOVERNANCE_READ_TOKEN` secret으로 보관한다. 두 CLI step은 이 값을 `GH_TOKEN` 환경 변수로만 전달하며 argv·로그·artifact에는 포함하지 않는다. secret 누락, 권한 부족, 403/404는 모두 mutation 전 identity 실패다.
+protected mode의 branch protection readback은 기본 `GITHUB_TOKEN`으로 대체하지 않는다. GitHub REST identity GET에 필요한 repository `Administration: read`, `Actions: read`, `Checks: read`, `Contents: read`, `Pull requests: read`만 가진 repository-scoped fine-grained token을 `WEATHER_GOVERNANCE_READ_TOKEN` secret으로 보관한다. protected CLI step은 이 값을 `GH_TOKEN` 환경 변수로만 전달하며 argv·로그·artifact에는 포함하지 않는다. protected mode의 secret 누락, 권한 부족, 403/404는 모두 mutation 전 identity 실패다. guarded_private는 private repository 및 exact merged-PR evidence를 workflow read permission으로 재검증하며 이 secret을 설치하지 않는다.
 
-PR, `workflow_dispatch`, `repository_dispatch`, `pull_request_target`, Release event는 배포 trigger가 아니다. `guarded_private`이거나 `WEATHER_DEPLOYMENT_ENABLED != enabled`이면 preflight와 runner job 모두 실행하지 않는다.
+PR, `workflow_dispatch`, `repository_dispatch`, `pull_request_target`, Release event는 배포 trigger가 아니다. `WEATHER_DEPLOYMENT_ENABLED != enabled`이면 preflight와 runner job 모두 실행하지 않는다. guarded_private도 private 단일 소유자 경계, exact merge 증거, 별도 최초 cutover 승인을 모두 만족할 때만 배포 경로가 열리며, public/internal 또는 추가 writer에서는 fail-closed한다.
 
 ## 4. 구성 요소
 
@@ -156,9 +158,9 @@ runner-local repository 밖 경로에 checksum이 포함된 atomic JSON record�
 6. dbt·Trino·D1·R2 write가 0임
 7. pause → drain → dry-run → deploy → health → restore 순서
 
-승인 뒤에만 local target/baseline을 설치하고 self-hosted runner를 시작한 뒤 `WEATHER_DEPLOYMENT_ENABLED=enabled`를 exact readback으로 활성화한다. 그 이후에는 보호된 `main` merge마다 같은 절차가 자동 실행된다.
+승인 뒤에만 local target/baseline을 설치하고 self-hosted runner를 시작한 뒤 `WEATHER_DEPLOYMENT_ENABLED=enabled`를 exact readback으로 활성화한다. 그 이후에는 eligible guarded_private 또는 protected `main` merge마다 같은 절차가 자동 실행된다.
 
-최초 실제 전환에서 말하는 “main release”는 GitHub Release 발행이 아니라 개인 저장소의 보호된 `dev → main` PR merge다. 전환 직전 read-only STOP 보고 후 사용자가 승인하면 baseline·runner·gate를 준비하고 첫 main CI 성공 SHA의 orchestrator가 기존 pause 상태를 먼저 capture한 뒤 Weather DAG 10개만 pause·drain한다(data/container service 전체 중지는 금지). 성공 시 새 Weather-only 코드로 capture한 pause snapshot을 복원하고, 실패 시 기존 조직 mount를 가리키는 baseline으로 rollback한다. 전환 전에 운영자가 10개를 수동 all-pause하면 원 snapshot을 잃으므로 금지한다.
+최초 실제 전환에서 말하는 “main release”는 GitHub Release 발행이 아니라 개인 저장소의 eligible guarded_private 또는 protected `dev → main` PR merge다. 전환 직전 target·baseline·capability read-only STOP 보고 후 사용자가 명시 승인하면 baseline·runner·gate를 준비하고 첫 main CI 성공 SHA의 orchestrator가 기존 pause 상태를 먼저 capture한 뒤 Weather DAG 10개만 pause·drain한다(data/container service 전체 중지는 금지). 성공 시 새 Weather-only 코드로 capture한 pause snapshot을 복원하고, 실패 시 기존 조직 mount를 가리키는 baseline으로 rollback한다. 전환 전에 운영자가 10개를 수동 all-pause하면 원 snapshot을 잃으므로 금지한다.
 
 최초 1회 준비는 workflow에서 호출할 수 없는 별도 `deployment.cutover_cli`로 수행한다. `inspect`는 target·Compose·Airflow inventory와 in-memory baseline fingerprint만 읽고 sanitized 결과만 출력한다. 승인 후 `activate`는 `GITHUB_ACTIONS=true`를 거부하고, 사용자가 확인한 target/baseline fingerprint를 다시 대조한 뒤 baseline overlay config/dry-run, stable overlay atomic install·동일 bytes restore rehearsal, baseline ledger record, 최종 target file atomic install 순서까지만 수행한다. runner 시작, repository secret/variable 변경, DAG pause/unpause, code-service deploy는 이 CLI가 수행하지 않는다.
 
@@ -202,9 +204,9 @@ dbt parse·serving contract는 exact source SHA의 `dbt-weather`를 포함한 `C
 
 - `dev → main` 이외의 main 승격은 계속 거부된다.
 - 성공한 exact main CI SHA만 deploy workflow를 시작한다.
-- PR 코드·guarded mode·stale main SHA는 self-hosted runner에 도달하지 않는다.
+- PR 코드·public/internal 또는 extra-writer guarded mode·stale main SHA는 self-hosted runner에 도달하지 않는다.
 - 코드 서비스 외 Compose 대상은 mutation 전에 차단된다.
 - 성공 시 원래 pause 상태가 복원된다.
 - 실패 시 rollback 또는 paused fail-closed 상태가 증명된다.
 - 최초 cutover 전에는 실제 Airflow/Docker state change가 없다.
-- 최초 승인 뒤에는 `main` merge 외 추가 수동 승인 없이 배포가 완료된다.
+- 최초 승인 뒤에는 eligible guarded_private 또는 protected `main` merge 외 추가 수동 승인 없이 배포가 완료된다. guarded의 private 단일 소유자 경계가 사라지면 배포를 중단하고 protected 전환을 별도로 승인한다.
