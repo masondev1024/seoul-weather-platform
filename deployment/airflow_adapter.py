@@ -6,7 +6,11 @@ from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
 from deployment.command import CommandRunner, CompletedCommand
 from deployment.models import WriterRunCounts
-from deployment.output_contracts import parse_airflow_bool, parse_airflow_json_rows
+from deployment.output_contracts import (
+    is_airflow_322_noop,
+    parse_airflow_bool,
+    parse_airflow_json_rows,
+)
 from deployment.target import DeployTarget
 
 
@@ -15,6 +19,10 @@ class AirflowAdapterError(RuntimeError):
 
 
 _UNSAFE = re.compile(r"[|;&`$<>\x00-\x1f\x7f]")
+_IDEMPOTENT_NOOP_MESSAGES = {
+    ("pause", True): "No unpaused DAGs were found",
+    ("unpause", False): "No paused DAGs were found",
+}
 
 
 def _safe_atom(value: object) -> str:
@@ -142,19 +150,23 @@ class AirflowCommandAdapter:
     ) -> None:
         if target != self._target or dag_id not in self._target.dag_allowlist:
             raise AirflowAdapterError("airflow_adapter_input_rejected")
-        rows = _json_rows(
-            self._checked(
-                (
-                    *self._prefix,
-                    "dags",
-                    operation,
-                    "-o",
-                    "json",
-                    "-y",
-                    dag_id,
-                )
+        expected_noop = _IDEMPOTENT_NOOP_MESSAGES.get((operation, expected))
+        if expected_noop is None:
+            raise AirflowAdapterError("airflow_adapter_input_rejected")
+        stdout = self._checked(
+            (
+                *self._prefix,
+                "dags",
+                operation,
+                "-o",
+                "json",
+                "-y",
+                dag_id,
             )
         )
+        if is_airflow_322_noop(stdout, expected_noop):
+            return
+        rows = _json_rows(stdout)
         if (
             len(rows) != 1
             or rows[0].get("dag_id") != dag_id

@@ -203,6 +203,11 @@ def _airflow_322_output(payload: object) -> str:
     return "\n".join([*lines, json.dumps(payload, separators=(",", ":"))]) + "\n"
 
 
+def _airflow_322_noop(message: str) -> str:
+    lines = _airflow_322_output([]).splitlines()
+    return "\n".join([*lines[:-1], message]) + "\n"
+
+
 def test_airflow_uses_stable_overlay_and_exact_sorted_inventory_argv(tmp_path: Path):
     target, artifact, _ = _candidate(tmp_path)
     Path(str(target.generated_overlay_file)).write_bytes(artifact.content)
@@ -322,6 +327,50 @@ def test_airflow_mutation_is_exact_and_checks_response(tmp_path: Path, operation
     assert runner.calls[0][0] == (
         *_airflow_prefix(target), "dags", operation, "-o", "json", "-y", dag_id
     )
+
+
+@pytest.mark.parametrize(
+    ("operation", "paused", "message"),
+    [
+        ("pause", True, "No unpaused DAGs were found"),
+        ("unpause", False, "No paused DAGs were found"),
+    ],
+)
+def test_airflow_mutation_accepts_exact_322_idempotent_noop(
+    tmp_path: Path, operation: str, paused: bool, message: str
+):
+    target, artifact, _ = _candidate(tmp_path)
+    Path(str(target.generated_overlay_file)).write_bytes(artifact.content)
+    dag_id = sorted(target.dag_allowlist)[0]
+    runner = _QueueRunner([_ok(_airflow_322_noop(message))])
+
+    getattr(AirflowCommandAdapter(target, runner), f"{operation}_dag")(target, dag_id)
+
+    assert runner.calls[0][0] == (
+        *_airflow_prefix(target), "dags", operation, "-o", "json", "-y", dag_id
+    )
+
+
+@pytest.mark.parametrize(
+    ("operation", "paused", "stdout"),
+    [
+        ("pause", True, _airflow_322_noop("No paused DAGs were found")),
+        ("unpause", False, _airflow_322_noop("No unpaused DAGs were found")),
+        ("pause", True, "No unpaused DAGs were found\n"),
+        ("unpause", False, _airflow_322_noop("No paused DAGs were found private")),
+    ],
+)
+def test_airflow_mutation_rejects_nonexact_idempotent_noop(
+    tmp_path: Path, operation: str, paused: bool, stdout: str
+):
+    target = _native_target(tmp_path)
+    dag_id = sorted(target.dag_allowlist)[0]
+    runner = _QueueRunner([_ok(stdout)])
+
+    with pytest.raises(AirflowAdapterError, match="^airflow_adapter_invalid_output$") as error:
+        getattr(AirflowCommandAdapter(target, runner), f"{operation}_dag")(target, dag_id)
+
+    assert "private" not in str(error.value)
 
 
 def test_airflow_rejects_mutation_response_for_another_dag(tmp_path: Path):
