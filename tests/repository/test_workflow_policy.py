@@ -604,6 +604,7 @@ def test_repository_ci_promotion_uses_sanitized_read_only_evidence() -> None:
     ) in commands
     assert (
         "python -m tools.promotion_source main-push "
+        '--event-path "$GITHUB_EVENT_PATH" '
         '--associated-prs-path "$associated_prs_path" '
         '--repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"'
     ) in commands
@@ -611,10 +612,36 @@ def test_repository_ci_promotion_uses_sanitized_read_only_evidence() -> None:
     assert "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" in commands
     assert 'associated_prs_path="${RUNNER_TEMP}/associated-prs.json"' in commands
     assert (
-        "--jq '[.[] | {base: {ref: .base.ref, repo: {full_name: .base.repo.full_name}}, head: {ref: .head.ref, repo: {full_name: .head.repo.full_name}}, merged_at, merge_commit_sha}]'"
+        "--jq '[.[] | {base: {ref: .base.ref, sha: .base.sha, repo: {full_name: .base.repo.full_name}}, head: {ref: .head.ref, repo: {full_name: .head.repo.full_name}}, merged_at, merge_commit_sha}]'"
         in commands
     )
     assert '> "$associated_prs_path"' in commands
+
+
+def test_repository_ci_promotion_policy_binds_main_push_event_and_pr_base_sha(
+    tmp_path: Path,
+) -> None:
+    missing_event_path = CI_WORKFLOW.read_text(encoding="utf-8").replace(
+        '--event-path "$GITHUB_EVENT_PATH" ',
+        "",
+    )
+    repo_root = _write_repo(tmp_path, missing_event_path)
+    assert "promotion_source_contract" in _rules(repo_root)
+
+    missing_base_sha = CI_WORKFLOW.read_text(encoding="utf-8").replace(
+        "sha: .base.sha, ",
+        "",
+    )
+    repo_root = _write_repo(tmp_path / "base_sha", missing_base_sha)
+    assert "promotion_source_contract" in _rules(repo_root)
+
+    workflow = _repository_ci()
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    promotion = jobs["promotion-source"]
+    assert isinstance(promotion, dict)
+    steps = promotion["steps"]
+    assert isinstance(steps, list)
 
     main_push = next(
         step

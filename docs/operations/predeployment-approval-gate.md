@@ -59,4 +59,4 @@ Airflow 코드 서비스 배포, DAG pause/unpause, pipeline start/stop에는 �
 
 ## 전환 후 승인 모델
 
-최초 cutover 이후 추가 수동 Release 승인은 없다. eligible guarded_private 또는 protected same-repository `dev → main` merge와 exact main CI 성공을 매번 다시 검증한 결과가 배포 증거이며, `Deploy Main`은 GitHub-hosted identity preflight 뒤에만 self-hosted 배포를 실행한다. stale SHA, 다른 workflow/event/branch, public/internal guarded repository, extra writer, disabled flag, protected mode의 missing read secret, invalid target/ledger/baseline은 모두 mutation 전에 fail-closed한다.
+최초 cutover 이후 추가 수동 Release 승인은 없다. eligible guarded_private 또는 protected same-repository `dev → main` merge와 exact main CI 성공을 매번 다시 검증한 결과가 배포 증거이며, `Deploy Main`은 GitHub-hosted identity preflight 뒤에만 self-hosted 배포를 실행한다. guarded의 sole owner/no extra writer 전제는 workflow 밖 운영 확인 사항이고, extra writer가 생기면 다음 배포 전에 `WEATHER_DEPLOYMENT_ENABLED`를 비활성화한 뒤 protected mode 또는 저장소 밖 trusted controller로 전환한다. stale SHA, 다른 workflow/event/branch, public/internal guarded repository, disabled flag, protected mode의 missing read secret, invalid target/ledger/baseline은 모두 mutation 전에 fail-closed한다.

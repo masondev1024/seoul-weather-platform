@@ -1,0 +1,10 @@
+{
+  "after": "0123456789abcdef0123456789abcdef01234567",
+  "before": "fedcba9876543210fedcba9876543210fedcba98",
+  "created": false,
+  "deleted": false,
+  "ref": "refs/heads/main",
+  "repository": {
+    "full_name": "masondev1024/seoul-weather-platform"
+  }
+}

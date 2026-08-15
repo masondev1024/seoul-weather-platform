@@ -1045,6 +1045,28 @@ def test_subprocess_runner_reads_exact_json_object_list() -> None:
 
 
 @pytest.mark.parametrize(
+    ("method_name", "stdout"),
+    [
+        ("api", '{"number":7,"number":8}'),
+        ("api_list", '[{"number":7,"number":8}]'),
+    ],
+)
+def test_subprocess_runner_rejects_duplicate_json_keys_without_raw_body(
+    method_name: str, stdout: str
+) -> None:
+    runner = SubprocessGhRunner(run=lambda *args, **kwargs: _completed(stdout))
+    call = getattr(runner, method_name)
+
+    with pytest.raises(GhApiError) as caught:
+        call(
+            "GET",
+            f"/repos/{REPOSITORY}/commits/{BOOTSTRAP_SHA}/pulls?per_page=2&page=1",
+        )
+
+    assert "number" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
     "stdout", ['7', '{"number":7}', '[7]', '[[]]', '[{"number":7},null]']
 )
 def test_subprocess_runner_rejects_non_object_json_list_items(stdout: str) -> None:

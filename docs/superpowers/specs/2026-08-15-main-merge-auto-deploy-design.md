@@ -52,7 +52,7 @@ on:
 GitHub-hosted `preflight` job은 event와 원격 readback을 검증하고, self-hosted `deploy` job은 그 성공 뒤 동일 검증을 다시 수행한다. 다음 조건을 모두 만족할 때만 self-hosted runner에 도달한다.
 
 - `WEATHER_GOVERNANCE_MODE == guarded_private` 또는 `protected`
-- guarded인 경우 repository visibility가 private이고 단일 소유자 경계가 계속 확인되며, public/internal 전환 또는 추가 writer가 있으면 배포를 중단
+- guarded인 경우 repository visibility가 private이다. 단일 소유자/no extra writer는 최초 전환과 권한 변경 때 workflow 밖에서 확인하는 운영 전제이며, public/internal 전환 또는 추가 writer가 있으면 다음 배포 전에 `WEATHER_DEPLOYMENT_ENABLED`를 비활성화하고 protected mode 또는 저장소 밖 trusted controller로 전환한다.
 - protected인 경우 `dev`·`main` native protection과 branch-bound required check readback까지 정확히 일치
 - `WEATHER_DEPLOYMENT_ENABLED == enabled`
 - source workflow 이름은 `CI`, path는 suffix 없는 정본 `.github/workflows/ci.yml`, branch는 별도 `head_branch=main`
@@ -61,7 +61,7 @@ GitHub-hosted `preflight` job은 event와 원격 readback을 검증하고, self-
 - source status/conclusion이 `completed/success`
 - source head SHA가 현재 원격 `refs/heads/main`과 같음
 - 실행 중인 deploy workflow가 기본 브랜치 `main`의 정본 workflow임
-- exact source SHA의 `CI / required`와 `Promotion Source / required`가 branch-bound GitHub Actions check로 성공
+- exact source SHA의 `CI / required`와 push-bound `Promotion Source / required`가 branch-bound GitHub Actions check로 성공. `Promotion Source / required`는 raw main push event의 `before`/`after`와 associated PR `base.sha`/`merge_commit_sha`를 결합해 과거 merge SHA replay를 차단한다.
 
 protected mode의 branch protection readback은 기본 `GITHUB_TOKEN`으로 대체하지 않는다. GitHub REST identity GET에 필요한 repository `Administration: read`, `Actions: read`, `Checks: read`, `Contents: read`, `Pull requests: read`만 가진 repository-scoped fine-grained token을 `WEATHER_GOVERNANCE_READ_TOKEN` secret으로 보관한다. protected CLI step은 이 값을 `GH_TOKEN` 환경 변수로만 전달하며 argv·로그·artifact에는 포함하지 않는다. protected mode의 secret 누락, 권한 부족, 403/404는 모두 mutation 전 identity 실패다. guarded_private는 private repository 및 exact merged-PR evidence를 workflow read permission으로 재검증하며 이 secret을 설치하지 않는다.
 
@@ -78,14 +78,14 @@ python -m deployment.main_cli verify-main
 python -m deployment.main_cli deploy-main
 ```
 
-Docker·Airflow 명령을 workflow YAML에 직접 쓰지 않는다. 두 job의 checkout은 기본 브랜치의 trusted workflow SHA를 사용한다. `preflight`는 source CI SHA·원격 main·same-repository merged PR·branch-bound checks를 검증해야 `deploy`를 예약한다. guarded_private에서는 private·단일 소유자 경계와 workflow `github.token`을, protected에서는 추가로 governance secret과 native protection readback을 검증한다. self-hosted CLI는 같은 mode별 검증을 반복한 뒤 별도 runtime directory에 exact source SHA를 detached checkout한다.
+Docker·Airflow 명령을 workflow YAML에 직접 쓰지 않는다. 두 job의 checkout은 기본 브랜치의 trusted workflow SHA를 사용한다. `preflight`는 source CI SHA·원격 main·same-repository merged PR·branch-bound checks를 검증해야 `deploy`를 예약한다. guarded_private에서는 private visibility와 workflow `github.token` read capability를 확인하며, sole owner/no extra writer는 runtime 자동 열거가 아니라 운영 cutover 전제다. protected에서는 추가로 governance secret과 native protection readback을 검증한다. self-hosted CLI는 같은 mode별 검증을 반복한 뒤 별도 runtime directory에 exact source SHA를 detached checkout한다.
 
 ### 4.2 main identity gate
 
 `deployment.main_cli`는 mutation adapter를 만들기 전에 다음을 검증한다.
 
 - repository/default branch, same-repository `dev → main` merged PR, source CI와 branch-bound required check readback
-- guarded_private에서는 private·단일 소유자 상태와 workflow `github.token` read capability
+- guarded_private에서는 private visibility와 workflow `github.token` read capability. 단일 소유자/no extra writer는 workflow 밖에서 확인한다.
 - protected에서는 governance secret과 native protection readback
 - workflow event와 source CI identity
 - source SHA가 현재 remote `main` HEAD와 동일
@@ -125,7 +125,7 @@ runner-local repository 밖 경로에 checksum이 포함된 atomic JSON record�
 
 배포 순서는 고정한다.
 
-1. identity·target·CLI 호환성 검증: 두 mode 모두 exact same-repository merged PR/CI 증거를 확인하고, guarded_private는 private·단일 소유자 상태와 workflow `github.token`을, protected는 governance secret과 native protection을 추가 검증
+1. identity·target·CLI 호환성 검증: 두 mode 모두 exact same-repository merged PR/CI 증거와 raw push event에 결합된 promotion attestation을 확인하고, guarded_private는 private visibility와 workflow `github.token` read capability를, protected는 governance secret과 native protection을 추가 검증
 2. exclusive lock 획득과 현재 DAG pause 상태 snapshot
 3. 정확한 10개 Weather DAG만 pause
 4. writer allowlist의 `running`·`queued` run이 0이 될 때까지 bounded drain

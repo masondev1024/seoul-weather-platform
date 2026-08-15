@@ -2,6 +2,7 @@
   {
     "base": {
       "ref": "main",
+      "sha": "fedcba9876543210fedcba9876543210fedcba98",
       "repo": {
         "full_name": "masondev1024/seoul-weather-platform"
       }

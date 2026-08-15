@@ -146,9 +146,27 @@ class SubprocessGhRunner:
             status = int(match.group(1)) if match else None
             raise GhApiError(method, endpoint, status)
         try:
-            return json.loads(stdout)
+            return json.loads(
+                stdout,
+                object_pairs_hook=_unique_json_object,
+                parse_constant=_reject_json_constant,
+            )
         except (TypeError, json.JSONDecodeError) as exc:
             raise GhApiError(method, endpoint, None) from exc
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise GhApiError("GET", "<json>", None)
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value: str) -> NoReturn:
+    del value
+    raise GhApiError("GET", "<json>", None)
 
 
 class _SanitizedArgumentParser(argparse.ArgumentParser):

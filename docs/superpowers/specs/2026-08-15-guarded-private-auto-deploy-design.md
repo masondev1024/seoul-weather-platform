@@ -69,7 +69,7 @@ branch protection 없이도 더 강한 경계를 만들려면 self-hosted runner
 
 ## 5. 병합 PR 증거
 
-현재 `Promotion Source / required` check만 신뢰하면 최초 `main` 생성용 `initial-main-bootstrap` 성공 run을 일반 승격과 구분할 수 없다. 따라서 배포 identity는 commit-associated PR을 독립적으로 다시 검증한다.
+현재 `Promotion Source / required` check만 신뢰하면 최초 `main` 생성용 `initial-main-bootstrap` 성공 run을 일반 승격과 구분할 수 없다. 따라서 일반 main push의 `Promotion Source / required`는 raw push event를 필수 입력으로 받아 `ref=refs/heads/main`, `created=false`, `deleted=false`, `after=<candidate sha>`, nonzero lowercase 40-hex `before`, repository identity를 검증하고, commit-associated PR의 `base.sha`가 event `before`와 같고 `merge_commit_sha`가 event `after`와 같은 정확히 하나의 same-repository `dev → main` PR일 때만 성공한다. 이 성공 check가 현재 push에 결합된 promotion attestation이다.
 
 GitHub REST `GET /repos/{owner}/{repo}/commits/{sha}/pulls` 응답에서 다음 조건을 모두 만족하는 PR이 정확히 하나여야 한다.
 
@@ -80,7 +80,7 @@ GitHub REST `GET /repos/{owner}/{repo}/commits/{sha}/pulls` 응답에서 다음 
 - `head.repo.full_name == repository`
 - `merge_commit_sha == candidate_sha`
 
-0개, 2개 이상, fork, feature branch, open/closed-but-unmerged PR, 다른 merge SHA는 모두 차단한다. 이 조회에는 `pull-requests: read` permission을 명시한다. GitHub 문서상 commit-associated PR endpoint는 Pull requests read 권한을 요구한다.
+0개, 2개 이상, fork, feature branch, open/closed-but-unmerged PR, 다른 merge SHA, stale `base.sha`, bootstrap zero SHA는 모두 차단한다. 이 조회에는 `pull-requests: read` permission을 명시한다. GitHub 문서상 commit-associated PR endpoint는 Pull requests read 권한을 요구한다.
 
 이 검증으로 최초 bootstrap SHA, 로컬 merge push, commit message만 위조한 push는 배포 후보가 되지 않는다.
 
@@ -112,7 +112,7 @@ checkout은 계속 `persist-credentials: false`이며 `ref: ${{ github.workflow_
 ### `deployment.github_evidence`
 
 - `governance_mode`를 명시적으로 입력받고 canonical evidence에 보존한다.
-- 양 mode에서 repository, source run, jobs, linked checks, associated merged PR, remote main HEAD를 동일하게 검증한다.
+- 양 mode에서 repository, source run, jobs, linked checks, associated merged PR, remote main HEAD를 동일하게 검증한다. source run의 `dagbag-runtime` job은 governance mode에 결합해 `protected`에서는 `completed/success`, `guarded_private`에서는 protected-only condition의 GitHub 결과인 `completed/skipped`를 요구한다.
 - `protected`에서만 dev/main protection을 조회하고 exact payload를 정규화한다.
 - `guarded_private`에서는 private repository를 강제하고 `protections=null`을 반환한다.
 - API list 응답은 별도 bounded parser로 처리하고 pagination/extra page 또는 malformed payload를 fail-closed한다.

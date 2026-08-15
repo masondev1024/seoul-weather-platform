@@ -17,6 +17,7 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _BOOTSTRAP_SHA = "0" * 40
 _REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _REQUIRED_CHECKS = ("CI / required", "Promotion Source / required")
+_DAGBAG_RUNTIME_JOB = "dagbag-runtime"
 _DEFAULT_MAX_EVENT_BYTES = 65_536
 
 
@@ -396,7 +397,11 @@ def _check_run_url(repository: str, value: object) -> tuple[str, str]:
 
 
 def _normalize_jobs(
-    response: dict[str, Any], repository: str, run_id: int, sha: str
+    response: dict[str, Any],
+    repository: str,
+    run_id: int,
+    sha: str,
+    governance_mode: str,
 ) -> tuple[list[dict[str, Any]], dict[str, str]]:
     jobs = _sequence(response.get("jobs"))
     total_count = response.get("total_count")
@@ -409,12 +414,16 @@ def _normalize_jobs(
     required: dict[str, dict[str, Any]] = {}
     endpoints: dict[str, str] = {}
     urls: set[str] = set()
+    dagbag_runtime: dict[str, Any] | None = None
+    expected_runtime_conclusion = (
+        "success" if governance_mode == "protected" else "skipped"
+    )
     for value in jobs:
         job = _mapping(value)
         name = job.get("name")
-        if name not in _REQUIRED_CHECKS:
+        if name not in (*_REQUIRED_CHECKS, _DAGBAG_RUNTIME_JOB):
             continue
-        if name in required:
+        if name in required or (name == _DAGBAG_RUNTIME_JOB and dagbag_runtime is not None):
             _reject()
         url, endpoint = _check_run_url(repository, job.get("check_run_url"))
         if url in urls:
@@ -425,8 +434,23 @@ def _normalize_jobs(
             or job.get("head_branch") != "main"
             or _sha(job.get("head_sha")) != sha
             or job.get("status") != "completed"
-            or job.get("conclusion") != "success"
         ):
+            _reject()
+        conclusion = job.get("conclusion")
+        if name == _DAGBAG_RUNTIME_JOB:
+            if conclusion != expected_runtime_conclusion:
+                _reject()
+            dagbag_runtime = {
+                "run_id": run_id,
+                "name": _DAGBAG_RUNTIME_JOB,
+                "head_branch": "main",
+                "head_sha": sha,
+                "status": "completed",
+                "conclusion": expected_runtime_conclusion,
+                "check_run_url": url,
+            }
+            continue
+        if conclusion != "success":
             _reject()
         required[name] = {
             "run_id": run_id,
@@ -440,7 +464,9 @@ def _normalize_jobs(
         endpoints[name] = endpoint
     if set(required) != set(_REQUIRED_CHECKS):
         _reject()
-    return [required[name] for name in _REQUIRED_CHECKS], endpoints
+    if dagbag_runtime is None:
+        _reject()
+    return [required[name] for name in _REQUIRED_CHECKS] + [dagbag_runtime], endpoints
 
 
 def _normalize_check(
@@ -552,6 +578,7 @@ def read_main_identity_inputs(
             repository_text,
             run_id,
             sha,
+            mode,
         )
 
         linked_checks: list[dict[str, Any]] = []

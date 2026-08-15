@@ -20,6 +20,7 @@ APP_ID = 424242
 OTHER_APP_ID = 434343
 CI_NAME = "CI / required"
 PROMOTION_NAME = "Promotion Source / required"
+DAGBAG_RUNTIME_NAME = "dagbag-runtime"
 WORKFLOW_REF = f"{REPOSITORY}/.github/workflows/deploy-main.yml@refs/heads/main"
 CI_URL = f"https://api.github.com/repos/{REPOSITORY}/check-runs/101"
 PROMOTION_URL = f"https://api.github.com/repos/{REPOSITORY}/check-runs/102"
@@ -128,11 +129,26 @@ def _job(name: str, check_url: str) -> dict[str, Any]:
     }
 
 
+def _dagbag_runtime_job(conclusion: str = "success") -> dict[str, Any]:
+    return {
+        "id": 701,
+        "run_id": RUN_ID,
+        "name": DAGBAG_RUNTIME_NAME,
+        "head_branch": "main",
+        "head_sha": SHA,
+        "status": "completed",
+        "conclusion": conclusion,
+        "check_run_url": f"https://api.github.com/repos/{REPOSITORY}/check-runs/103",
+        "steps": [],
+    }
+
+
 def _jobs_response() -> dict[str, Any]:
     return {
-        "total_count": 3,
+        "total_count": 4,
         "jobs": [
             _job(PROMOTION_NAME, PROMOTION_URL),
+            _dagbag_runtime_job(),
             _job("lint-extra", f"https://api.github.com/repos/{REPOSITORY}/check-runs/999"),
             _job(CI_NAME, CI_URL),
         ],
@@ -317,7 +333,11 @@ def test_valid_evidence_uses_exact_get_order_and_canonical_identity_payload(
         "status": "completed",
         "conclusion": "success",
     }
-    assert [job["name"] for job in inputs.source_jobs] == [CI_NAME, PROMOTION_NAME]
+    assert [job["name"] for job in inputs.source_jobs] == [
+        CI_NAME,
+        PROMOTION_NAME,
+        DAGBAG_RUNTIME_NAME,
+    ]
     assert [check["name"] for check in inputs.linked_checks] == [
         CI_NAME,
         PROMOTION_NAME,
@@ -340,13 +360,66 @@ def test_guarded_private_evidence_skips_protection_reads_and_returns_none(
 ) -> None:
     from deployment.main_identity import validate_main_deploy_identity
 
-    inputs, runner = _collect(tmp_path, governance_mode="guarded_private")
+    responses = _responses()
+    jobs = responses[JOBS_ENDPOINT]["jobs"]  # type: ignore[index]
+    for job in jobs:
+        if job["name"] == DAGBAG_RUNTIME_NAME:
+            job["conclusion"] = "skipped"
+    inputs, runner = _collect(
+        tmp_path,
+        runner=FakeGhRunner(responses),
+        governance_mode="guarded_private",
+    )
 
     assert runner.calls == GUARDED_EXPECTED_CALLS
     assert inputs.governance_mode == "guarded_private"
     assert inputs.protections is None
     assert inputs.promotion_pr == PROMOTION_PR
     assert validate_main_deploy_identity(**inputs.as_kwargs()).workflow_sha == SHA
+
+
+@pytest.mark.parametrize(
+    ("governance_mode", "runtime_conclusion"),
+    [("protected", "skipped"), ("guarded_private", "success")],
+)
+def test_evidence_rejects_dagbag_runtime_result_from_other_governance_mode(
+    tmp_path: Path, governance_mode: str, runtime_conclusion: str
+) -> None:
+    responses = _responses()
+    jobs = responses[JOBS_ENDPOINT]["jobs"]  # type: ignore[index]
+    for job in jobs:
+        if job["name"] == DAGBAG_RUNTIME_NAME:
+            job["conclusion"] = runtime_conclusion
+
+    runner = _assert_rejected(
+        tmp_path,
+        runner=FakeGhRunner(responses),
+        governance_mode=governance_mode,
+    )
+
+    assert runner.calls == EXPECTED_CALLS[:3]
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "wrong-run", "wrong-sha"])
+def test_evidence_rejects_missing_duplicate_or_stale_dagbag_runtime_job(
+    tmp_path: Path, mutation: str
+) -> None:
+    responses = _responses()
+    jobs = responses[JOBS_ENDPOINT]["jobs"]  # type: ignore[index]
+    runtime = next(job for job in jobs if job["name"] == DAGBAG_RUNTIME_NAME)
+    if mutation == "missing":
+        jobs.remove(runtime)
+    elif mutation == "duplicate":
+        jobs.append(copy.deepcopy(runtime))
+    elif mutation == "wrong-run":
+        runtime["run_id"] = RUN_ID + 1
+    else:
+        runtime["head_sha"] = OTHER_SHA
+    responses[JOBS_ENDPOINT]["total_count"] = len(jobs)  # type: ignore[index]
+
+    runner = _assert_rejected(tmp_path, runner=FakeGhRunner(responses))
+
+    assert runner.calls == EXPECTED_CALLS[:3]
 
 
 @pytest.mark.parametrize("count", [0, 2])
@@ -592,7 +665,7 @@ def test_jobs_page_must_be_complete_and_required_jobs_unique(
     responses = _responses()
     jobs_response = responses[JOBS_ENDPOINT]
     if mutation == "truncated":
-        jobs_response["total_count"] = 4  # type: ignore[index]
+        jobs_response["total_count"] = 5  # type: ignore[index]
     elif mutation == "over-100":
         job = _job("extra", f"https://api.github.com/repos/{REPOSITORY}/check-runs/999")
         jobs_response["jobs"] = [copy.deepcopy(job) for _ in range(101)]  # type: ignore[index]
@@ -634,7 +707,7 @@ def test_foreign_or_malformed_check_run_url_is_never_called(
     tmp_path: Path, url: str
 ) -> None:
     responses = _responses()
-    responses[JOBS_ENDPOINT]["jobs"][2]["check_run_url"] = url  # type: ignore[index]
+    responses[JOBS_ENDPOINT]["jobs"][3]["check_run_url"] = url  # type: ignore[index]
 
     runner = _assert_rejected(tmp_path, runner=FakeGhRunner(responses))
 

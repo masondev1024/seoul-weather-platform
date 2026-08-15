@@ -1423,6 +1423,46 @@ def _deploy_main_contract_matches(
     )
 
 
+def _ci_promotion_source_contract_matches(
+    relative_path: str, workflow: Mapping[str, object]
+) -> bool:
+    if relative_path != _CI_WORKFLOW_PATH or workflow.get("name") != "CI":
+        return True
+    jobs = workflow.get("jobs")
+    if not isinstance(jobs, Mapping):
+        return False
+    promotion = jobs.get("promotion-source")
+    if not isinstance(promotion, Mapping):
+        return False
+    steps = promotion.get("steps")
+    if not isinstance(steps, Sequence) or isinstance(steps, (str, bytes, bytearray)):
+        return False
+    main_push_steps = [
+        step
+        for step in steps
+        if isinstance(step, Mapping)
+        and step.get("name") == "Validate main push promotion source"
+    ]
+    if not main_push_steps:
+        return True
+    if len(main_push_steps) != 1:
+        return False
+    command = main_push_steps[0].get("run")
+    if not isinstance(command, str):
+        return False
+    required = (
+        "python -m tools.promotion_source main-push "
+        '--event-path "$GITHUB_EVENT_PATH" '
+        '--associated-prs-path "$associated_prs_path" '
+        '--repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"'
+    )
+    return (
+        required in command
+        and "sha: .base.sha" in command
+        and "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" in command
+    )
+
+
 def _workflow_findings(repo_root: Path, path: Path) -> list[WorkflowFinding]:
     relative_path = _relative_path(repo_root, path)
     try:
@@ -1492,6 +1532,14 @@ def _workflow_findings(repo_root: Path, path: Path) -> list[WorkflowFinding]:
                 relative_path,
                 "required_ci_always",
                 "CI workflow must define CI / required with if: always()",
+            )
+        )
+    if not _ci_promotion_source_contract_matches(relative_path, workflow):
+        findings.append(
+            _finding(
+                relative_path,
+                "promotion_source_contract",
+                "CI promotion source evidence must bind the raw main push event and PR base sha",
             )
         )
     return findings
