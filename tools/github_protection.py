@@ -20,7 +20,7 @@ from tools.github_governance import (
 
 
 PLAN_SCHEMA_VERSION = "weather-github-protection-plan/v1"
-GH_API_VERSION = "2026-03-10"
+GH_API_VERSION = "2022-11-28"
 
 _BRANCHES = ("dev", "main")
 _REQUIRED_CHECKS: dict[str, tuple[str, ...]] = {
