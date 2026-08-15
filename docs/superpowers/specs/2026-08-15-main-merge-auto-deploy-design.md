@@ -78,13 +78,15 @@ python -m deployment.main_cli verify-main
 python -m deployment.main_cli deploy-main
 ```
 
-Docker·Airflow 명령을 workflow YAML에 직접 쓰지 않는다. 두 job의 checkout은 기본 브랜치의 trusted workflow SHA를 사용한다. `preflight`가 source CI SHA·원격 main·protection·branch-bound checks를 검증해야 `deploy`가 예약되며, self-hosted CLI가 같은 검증을 반복한 뒤 별도 runtime directory에 exact source SHA를 detached checkout한다.
+Docker·Airflow 명령을 workflow YAML에 직접 쓰지 않는다. 두 job의 checkout은 기본 브랜치의 trusted workflow SHA를 사용한다. `preflight`는 source CI SHA·원격 main·same-repository merged PR·branch-bound checks를 검증해야 `deploy`를 예약한다. guarded_private에서는 private·단일 소유자 경계와 workflow `github.token`을, protected에서는 추가로 governance secret과 native protection readback을 검증한다. self-hosted CLI는 같은 mode별 검증을 반복한 뒤 별도 runtime directory에 exact source SHA를 detached checkout한다.
 
 ### 4.2 main identity gate
 
 `deployment.main_cli`는 mutation adapter를 만들기 전에 다음을 검증한다.
 
-- repository/default branch/protection readback
+- repository/default branch, same-repository `dev → main` merged PR, source CI와 branch-bound required check readback
+- guarded_private에서는 private·단일 소유자 상태와 workflow `github.token` read capability
+- protected에서는 governance secret과 native protection readback
 - workflow event와 source CI identity
 - source SHA가 현재 remote `main` HEAD와 동일
 - source SHA가 `dev → main` merge 증거를 가짐
@@ -123,7 +125,7 @@ runner-local repository 밖 경로에 checksum이 포함된 atomic JSON record�
 
 배포 순서는 고정한다.
 
-1. identity·protection·target·CLI 호환성 검증
+1. identity·target·CLI 호환성 검증: 두 mode 모두 exact same-repository merged PR/CI 증거를 확인하고, guarded_private는 private·단일 소유자 상태와 workflow `github.token`을, protected는 governance secret과 native protection을 추가 검증
 2. exclusive lock 획득과 현재 DAG pause 상태 snapshot
 3. 정확한 10개 Weather DAG만 pause
 4. writer allowlist의 `running`·`queued` run이 0이 될 때까지 bounded drain

@@ -44,7 +44,7 @@
 
 다음 항목을 읽어 사용자에게 먼저 보고하고 STOP한다. 절대경로, credential reference, token 값, raw Compose/Airflow payload는 보고하지 않는다.
 
-1. 배포 후보인 개인 저장소 `main` SHA와 source `CI` identity
+1. 배포 후보인 개인 저장소 `main` SHA, same-repository `dev → main` merged PR와 source `CI` identity. guarded_private이면 private·단일 소유자 경계도 함께 확인
 2. 위 네 코드 서비스의 논리 이름과 현재 health/state
 3. 위 열 개 DAG 각각의 pause 상태
 4. writer allowlist 전체의 `running`·`queued` run 수와 drain timeout/poll 계약
@@ -54,7 +54,7 @@
 8. release 후보 overlay가 `/opt/airflow/dags`·`/opt/airflow/dbt`를 read-only로 바꾸고, 기존 writable `/opt/airflow/logs` mount와 exact SHA별 dbt artifact 환경 변수를 보존한다는 검증 결과. baseline 후보는 기존 조직 executor를 위해 dbt read-write·artifact 환경 변수 없음으로 구분함
 9. rollback 시 복원할 baseline과 rollback health 실패 시 열 개 DAG를 모두 paused로 유지한다는 동작
 10. dbt `run/build`, Trino·Iceberg·D1·R2 write가 모두 0이며 전체 stack/data services를 중지하지 않는다는 확인
-11. `WEATHER_GOVERNANCE_READ_TOKEN` secret 이름의 존재 여부, 만료일/rotation 담당과 최소권한 확인. 값은 조회하거나 출력하지 않음
+11. protected mode인 경우에만 `WEATHER_GOVERNANCE_READ_TOKEN` secret 이름의 존재 여부, 만료일/rotation 담당과 최소권한을 확인. guarded_private에는 이 항목을 요구하지 않으며 값은 어느 mode에서도 조회하거나 출력하지 않음
 12. `credential_source_kind=existing_local_env` target이면 runner 프로세스의 `COMPOSE_ENV_FILES`와 `ASK_SEOUL_PROD_ENV_FILE`이 동일한 기존 Compose credential 단일 파일을 가리키는지 확인. 값·절대경로·파일 내용은 출력하지 않음
 
 보고 시점에는 `compose config`, `compose ps`, Airflow list/help/version, ledger read처럼 검증된 read-only adapter만 사용한다. `compose up --dry-run`도 실제 전환 승인 뒤에 실행한다.
@@ -77,7 +77,7 @@ protected mode의 GitHub Actions repository secret에는 위 token을 `WEATHER_G
 6. self-hosted runner를 시작한다. runner 서비스는 승인된 `WEATHER_DEPLOY_TARGET_PATH`, `COMPOSE_ENV_FILES`, `ASK_SEOUL_PROD_ENV_FILE`을 상속해야 하며 workflow YAML이 이 값을 덮어쓰지 않는다.
 7. `WEATHER_DEPLOYMENT_ENABLED=enabled`를 설정하고 exact readback한다. 이 전까지 deploy job은 계속 비활성이다.
 8. 개인 private 단일 소유자 guarded 경계 또는 protected 경계에서 같은 저장소의 `dev → main` PR을 merge한다. GitHub Release나 tag를 만들지 않는다.
-9. exact merge SHA의 `CI`가 성공하면 `workflow_run`의 GitHub-hosted `verify-main`이 source workflow name `CI`, suffix 없는 path `.github/workflows/ci.yml`, 별도 `head_branch=main`, event/status/conclusion, remote `main`, protection과 branch-bound required checks를 검증한다.
+9. exact merge SHA의 `CI`가 성공하면 `workflow_run`의 GitHub-hosted `verify-main`이 source workflow name `CI`, suffix 없는 path `.github/workflows/ci.yml`, 별도 `head_branch=main`, event/status/conclusion, remote `main`, same-repository merged PR와 branch-bound required checks를 검증한다. guarded_private에서는 private·단일 소유자 경계와 workflow `github.token`을 확인하고, protected에서는 추가로 governance secret과 native protection readback을 확인한다.
 10. preflight 성공 뒤에만 self-hosted `deploy-main`이 같은 identity를 다시 검증하고 기존 조직 Weather DAG 열 개의 현재 pause snapshot을 캡처한다. 이어 정확한 열 개만 pause하고 writer allowlist의 `running`·`queued`가 모두 0이 될 때까지 bounded drain한다. timeout이면 snapshot을 복원하고 배포를 중단한다.
 11. drain 성공 뒤 exact SHA checkout·candidate overlay config/dry-run·네 코드 서비스 배포·health를 수행한다. Compose config는 release source가 read-only이고, 기존 logs volume이 writable이며, artifact root가 exact SHA에 결속됐는지 확인한다.
 12. 성공하면 deploy 시작 시 캡처한 snapshot에서 원래 unpaused였던 DAG만 복원해 개인 저장소 코드 기반 새 Weather pipeline을 시작한다. 원래 paused였던 DAG는 paused로 유지한다.
