@@ -158,8 +158,8 @@ def _validate_repo(repo: object, repository: str, sha: str) -> dict[str, Any]:
         _reject()
     visibility = _string(repo_map["visibility"])
     if (
-        visibility.casefold() not in {"private", "public", "internal"}
-        or repo_map["private"] is not (visibility.casefold() == "private")
+        visibility not in {"private", "public", "internal"}
+        or repo_map["private"] is not (visibility == "private")
     ):
         _reject()
     return repo_map
@@ -280,7 +280,11 @@ def _validate_governance(
     expected_app_ids: dict[str, int],
 ) -> None:
     if governance_mode == "guarded_private":
-        if repo["private"] is not True or protections is not None:
+        if (
+            repo["visibility"] != "private"
+            or repo["private"] is not True
+            or protections is not None
+        ):
             _reject()
         return
     if governance_mode != "protected":

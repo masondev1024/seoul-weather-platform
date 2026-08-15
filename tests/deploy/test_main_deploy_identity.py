@@ -184,6 +184,13 @@ def test_guarded_private_identity_rejects_non_private_repository(visibility: str
     _assert_rejected(governance_mode="guarded_private", protections=None, repo=repo)
 
 
+def test_guarded_private_identity_rejects_noncanonical_private_visibility() -> None:
+    repo = _repo()
+    repo["visibility"] = "PRIVATE"
+
+    _assert_rejected(governance_mode="guarded_private", protections=None, repo=repo)
+
+
 @pytest.mark.parametrize("mode", ["", "open", True, None])
 def test_identity_rejects_invalid_governance_mode(mode: object) -> None:
     _assert_rejected(governance_mode=mode)
