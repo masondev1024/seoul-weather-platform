@@ -314,12 +314,25 @@ def test_airflow_counts_only_exact_writer_allowlist_and_validates_rows(tmp_path:
     assert [argv for argv, _ in runner.calls] == expected
 
 
-@pytest.mark.parametrize("operation, paused", [("pause", True), ("unpause", False)])
-def test_airflow_mutation_is_exact_and_checks_response(tmp_path: Path, operation: str, paused: bool):
+@pytest.mark.parametrize(
+    ("operation", "previously_paused"),
+    [("pause", False), ("unpause", True)],
+)
+def test_airflow_mutation_accepts_airflow_322_previous_state_transition_output(
+    tmp_path: Path, operation: str, previously_paused: bool
+):
     target, artifact, _ = _candidate(tmp_path)
     Path(str(target.generated_overlay_file)).write_bytes(artifact.content)
     dag_id = sorted(target.dag_allowlist)[0]
-    runner = _QueueRunner([_ok(json.dumps([{"dag_id": dag_id, "is_paused": paused}]))])
+    runner = _QueueRunner(
+        [
+            _ok(
+                _airflow_322_output(
+                    [{"dag_id": dag_id, "is_paused": str(previously_paused)}]
+                )
+            )
+        ]
+    )
     adapter = AirflowCommandAdapter(target, runner)
 
     getattr(adapter, f"{operation}_dag")(target, dag_id)
@@ -327,6 +340,27 @@ def test_airflow_mutation_is_exact_and_checks_response(tmp_path: Path, operation
     assert runner.calls[0][0] == (
         *_airflow_prefix(target), "dags", operation, "-o", "json", "-y", dag_id
     )
+
+
+@pytest.mark.parametrize("operation, expected_paused", [("pause", True), ("unpause", False)])
+def test_airflow_mutation_rejects_post_state_json_for_a_transition(
+    tmp_path: Path, operation: str, expected_paused: bool
+):
+    target, artifact, _ = _candidate(tmp_path)
+    Path(str(target.generated_overlay_file)).write_bytes(artifact.content)
+    dag_id = sorted(target.dag_allowlist)[0]
+    runner = _QueueRunner(
+        [
+            _ok(
+                _airflow_322_output(
+                    [{"dag_id": dag_id, "is_paused": str(expected_paused)}]
+                )
+            )
+        ]
+    )
+
+    with pytest.raises(AirflowAdapterError, match="^airflow_adapter_invalid_output$"):
+        getattr(AirflowCommandAdapter(target, runner), f"{operation}_dag")(target, dag_id)
 
 
 @pytest.mark.parametrize(
