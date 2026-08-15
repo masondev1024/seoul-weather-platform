@@ -49,6 +49,28 @@ def test_runtime_safety_harness_imports_without_windows_environment() -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_dagbag_harness_imports_without_windows_environment() -> None:
+    """A hosted Ubuntu repository run must be able to collect DagBag policy tests."""
+    environment = os.environ.copy()
+    environment.pop("WINDIR", None)
+    dagbag_harness = REPO_ROOT / "tests" / "repository" / "test_dagbag_harness.py"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            f"import runpy; runpy.run_path({str(dagbag_harness)!r})",
+        ],
+        cwd=REPO_ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def _write_command_stub(directory: Path, command: str) -> Path:
     if os.name == "nt":
         path = directory / f"{command}.cmd"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -18,7 +19,26 @@ from tools.dagbag_runtime_check import (
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 VERIFY_SCRIPT = REPOSITORY_ROOT / "tools" / "verify_dagbag.ps1"
-POWERSHELL = Path(os.environ["WINDIR"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+
+
+def _powershell_executable() -> str:
+    windir = os.environ.get("WINDIR")
+    if windir:
+        windows_powershell = (
+            Path(windir)
+            / "System32"
+            / "WindowsPowerShell"
+            / "v1.0"
+            / "powershell.exe"
+        )
+        if windows_powershell.is_file():
+            return str(windows_powershell)
+
+    executable = shutil.which("pwsh") or shutil.which("powershell")
+    if executable:
+        return executable
+
+    pytest.skip("PowerShell is required to verify the wrapper")
 
 
 def _write_toolchain(
@@ -143,7 +163,7 @@ def test_powershell_wrapper_has_no_pipeline_control_words() -> None:
 def test_powershell_wrapper_resolves_repo_root_when_omitted(tmp_path: Path) -> None:
     result = subprocess.run(
         [
-            str(POWERSHELL),
+            _powershell_executable(),
             "-NoProfile",
             "-ExecutionPolicy",
             "Bypass",
