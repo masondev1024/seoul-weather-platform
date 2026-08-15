@@ -20,9 +20,17 @@ APP_ID = 424242
 OTHER_APP_ID = 434343
 CI_NAME = "CI / required"
 PROMOTION_NAME = "Promotion Source / required"
+DAGBAG_RUNTIME_NAME = "dagbag-runtime"
 WORKFLOW_REF = f"{REPOSITORY}/.github/workflows/deploy-main.yml@refs/heads/main"
 CI_URL = f"https://api.github.com/repos/{REPOSITORY}/check-runs/101"
 PROMOTION_URL = f"https://api.github.com/repos/{REPOSITORY}/check-runs/102"
+PROMOTION_PR = {
+    "number": 7,
+    "merged_at": "2026-08-15T00:00:00Z",
+    "merge_commit_sha": SHA,
+    "base": {"ref": "main", "repo": {"full_name": REPOSITORY}},
+    "head": {"ref": "dev", "repo": {"full_name": REPOSITORY}},
+}
 
 
 def _repo() -> dict[str, Any]:
@@ -70,7 +78,11 @@ def _job(name: str, url: str) -> dict[str, Any]:
 
 
 def _source_jobs() -> list[dict[str, Any]]:
-    return [_job(CI_NAME, CI_URL), _job(PROMOTION_NAME, PROMOTION_URL)]
+    return [
+        _job(CI_NAME, CI_URL),
+        _job(PROMOTION_NAME, PROMOTION_URL),
+        _job(DAGBAG_RUNTIME_NAME, f"https://api.github.com/repos/{REPOSITORY}/check-runs/103"),
+    ]
 
 
 def _check(name: str, url: str, app_id: object = APP_ID) -> dict[str, Any]:
@@ -103,6 +115,8 @@ def _valid_inputs() -> dict[str, Any]:
         "workflow_sha": SHA,
         "repository": REPOSITORY,
         "repo": _repo(),
+        "governance_mode": "protected",
+        "promotion_pr": copy.deepcopy(PROMOTION_PR),
         "protections": _protections(),
         "source_run": _source_run(),
         "source_jobs": _source_jobs(),
@@ -158,6 +172,103 @@ def test_accepts_exact_main_deploy_identity_and_returns_immutable_scalars() -> N
     )
     with pytest.raises(AttributeError):
         identity.repository = "other/repo"  # type: ignore[misc]
+
+
+def test_accepts_guarded_private_identity_only_with_no_protections() -> None:
+    jobs = _source_jobs()
+    for job in jobs:
+        if job["name"] == DAGBAG_RUNTIME_NAME:
+            job["conclusion"] = "skipped"
+    identity = _validate(
+        governance_mode="guarded_private", protections=None, source_jobs=jobs
+    )
+
+    assert identity.workflow_sha == SHA
+
+
+@pytest.mark.parametrize(
+    ("governance_mode", "runtime_conclusion", "protections"),
+    [
+        ("protected", "skipped", _protections()),
+        ("guarded_private", "success", None),
+    ],
+)
+def test_identity_rejects_dagbag_runtime_result_from_other_governance_mode(
+    governance_mode: str, runtime_conclusion: str, protections: object
+) -> None:
+    jobs = _source_jobs()
+    for job in jobs:
+        if job["name"] == DAGBAG_RUNTIME_NAME:
+            job["conclusion"] = runtime_conclusion
+
+    _assert_rejected(
+        governance_mode=governance_mode,
+        protections=protections,
+        source_jobs=jobs,
+    )
+
+
+@pytest.mark.parametrize("visibility", ["public", "internal"])
+def test_guarded_private_identity_rejects_non_private_repository(visibility: str) -> None:
+    repo = _repo()
+    repo["visibility"] = visibility
+    repo["private"] = False
+
+    _assert_rejected(governance_mode="guarded_private", protections=None, repo=repo)
+
+
+def test_guarded_private_identity_rejects_noncanonical_private_visibility() -> None:
+    repo = _repo()
+    repo["visibility"] = "PRIVATE"
+
+    _assert_rejected(governance_mode="guarded_private", protections=None, repo=repo)
+
+
+@pytest.mark.parametrize("mode", ["", "open", True, None])
+def test_identity_rejects_invalid_governance_mode(mode: object) -> None:
+    _assert_rejected(governance_mode=mode)
+
+
+def test_guarded_private_identity_rejects_present_protections() -> None:
+    _assert_rejected(governance_mode="guarded_private", protections=_protections())
+
+
+def test_protected_identity_rejects_absent_protections() -> None:
+    _assert_rejected(protections=None)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["zero", "feature", "fork", "unmerged", "wrong-sha", "extra"],
+)
+def test_identity_rejects_invalid_promotion_pr(mutation: str) -> None:
+    promotion_pr = copy.deepcopy(PROMOTION_PR)
+    if mutation == "zero":
+        promotion_pr["merge_commit_sha"] = "0" * 40
+    elif mutation == "feature":
+        promotion_pr["head"]["ref"] = "feature/deploy"
+    elif mutation == "fork":
+        promotion_pr["head"]["repo"]["full_name"] = "fork/repo"
+    elif mutation == "unmerged":
+        promotion_pr["merged_at"] = None
+    elif mutation == "wrong-sha":
+        promotion_pr["merge_commit_sha"] = OTHER_SHA
+    else:
+        promotion_pr["title"] = "RAW_PR_MARKER"
+
+    _assert_rejected(promotion_pr=promotion_pr)
+
+
+def test_identity_rejects_bootstrap_sha_even_when_all_evidence_matches() -> None:
+    def replace_sha(value: object) -> object:
+        if type(value) is dict:
+            return {key: replace_sha(child) for key, child in value.items()}
+        if type(value) is list:
+            return [replace_sha(child) for child in value]
+        return "0" * 40 if value == SHA else value
+
+    inputs = replace_sha(_valid_inputs())
+    _assert_rejected(**inputs)  # type: ignore[arg-type]
 
 
 def test_accepts_required_jobs_in_any_input_order_with_deterministic_output() -> None:
@@ -231,7 +342,7 @@ def test_rejects_stale_or_non_exact_workflow_sha(sha: object) -> None:
         {"dev": _protections()["dev"], "main": {"bad": True}},
     ],
 )
-def test_rejects_guarded_private_or_invalid_governance(
+def test_protected_identity_rejects_invalid_protection_shape(
     protections: dict[str, Any]
 ) -> None:
     _assert_rejected(protections=protections)
@@ -341,6 +452,7 @@ def test_rejects_source_run_missing_extra_or_duplicate_contract_keys(
         "extra-required",
         "bool-run",
         "not-list",
+        "missing-dagbag",
     ],
 )
 def test_rejects_missing_duplicate_wrong_run_or_foreign_required_job(
@@ -369,6 +481,8 @@ def test_rejects_missing_duplicate_wrong_run_or_foreign_required_job(
         jobs.append(_job("Other / required", f"https://api.github.com/repos/{REPOSITORY}/check-runs/103"))  # type: ignore[union-attr]
     elif mutation == "bool-run":
         jobs[0]["run_id"] = True  # type: ignore[index]
+    elif mutation == "missing-dagbag":
+        jobs = [job for job in jobs if job["name"] != DAGBAG_RUNTIME_NAME]  # type: ignore[union-attr]
     else:
         jobs = {"total_count": 2, "jobs": jobs}
     _assert_rejected(source_jobs=jobs)
@@ -443,6 +557,7 @@ def test_snapshots_inputs_before_validation_and_ignores_caller_mutation() -> Non
     identity = _validate(**inputs)
     inputs["event"]["workflow_run"]["head_sha"] = OTHER_SHA
     inputs["source_jobs"][0]["name"] = "mutated"
+    inputs["promotion_pr"]["number"] = 99
 
     assert identity.workflow_sha == SHA
     assert identity.checks[0][0] == CI_NAME

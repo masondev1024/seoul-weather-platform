@@ -63,11 +63,22 @@ SETUP_PYTHON_STEP = (
 LEGACY_GITHUB_TOKEN_ENV = (
     "        env:\n          GITHUB_TOKEN: ${{ github.token }}\n"
 )
-MAIN_CLI_ENV = (
+GUARDED_MAIN_CLI_ENV = (
+    "        env:\n"
+    "          GH_TOKEN: ${{ github.token }}\n"
+    "          GOVERNANCE_MODE: ${{ vars.WEATHER_GOVERNANCE_MODE }}\n"
+    "          DEPLOYMENT_ENABLED: ${{ vars.WEATHER_DEPLOYMENT_ENABLED }}\n"
+)
+PROTECTED_MAIN_CLI_ENV = (
     "        env:\n"
     "          GH_TOKEN: ${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}\n"
     "          GOVERNANCE_MODE: ${{ vars.WEATHER_GOVERNANCE_MODE }}\n"
     "          DEPLOYMENT_ENABLED: ${{ vars.WEATHER_DEPLOYMENT_ENABLED }}\n"
+)
+MAIN_CLI_ENV = PROTECTED_MAIN_CLI_ENV
+TWO_MODE_GUARD = (
+    "(vars.WEATHER_GOVERNANCE_MODE == 'protected' ||\n"
+    "      vars.WEATHER_GOVERNANCE_MODE == 'guarded_private')"
 )
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 CODEOWNERS = REPO_ROOT / ".github" / "CODEOWNERS"
@@ -109,7 +120,11 @@ jobs:
     name: Promotion Source / required
     runs-on: ubuntu-latest
     steps:
-      - run: echo safe
+      - name: Validate main push promotion source
+        run: |
+          gh api "repos/${{GITHUB_REPOSITORY}}/commits/${{GITHUB_SHA}}/pulls" \
+            --jq '[.[] | {{base: {{sha: .base.sha}}}}]' > "$associated_prs_path"
+          python -m tools.promotion_source main-push --event-path "$GITHUB_EVENT_PATH" --associated-prs-path "$associated_prs_path" --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
   required:
     name: CI / required
     if: always()
@@ -212,6 +227,7 @@ permissions:
   actions: read
   checks: read
   contents: read
+  pull-requests: read
 concurrency:
   group: weather-main-deploy
   cancel-in-progress: false
@@ -219,7 +235,8 @@ jobs:
   verify-main:
     name: verify-main
     if: >-
-      vars.WEATHER_GOVERNANCE_MODE == 'protected' &&
+      (vars.WEATHER_GOVERNANCE_MODE == 'protected' ||
+      vars.WEATHER_GOVERNANCE_MODE == 'guarded_private') &&
       vars.WEATHER_DEPLOYMENT_ENABLED == 'enabled' &&
       github.event_name == 'workflow_run' &&
       github.event.action == 'completed' &&
@@ -239,13 +256,18 @@ jobs:
       - uses: {SETUP_PYTHON_USE}
         with:
           python-version: '3.11.15'
-      - run: {VERIFY_MAIN_COMMAND}
+      - if: vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'
+        run: {VERIFY_MAIN_COMMAND}
+        shell: pwsh
+{GUARDED_MAIN_CLI_ENV}      - if: vars.WEATHER_GOVERNANCE_MODE == 'protected'
+        run: {VERIFY_MAIN_COMMAND}
         shell: pwsh
 {MAIN_CLI_ENV}  deploy-main:
     name: deploy-main
     needs: verify-main
     if: >-
-      vars.WEATHER_GOVERNANCE_MODE == 'protected' &&
+      (vars.WEATHER_GOVERNANCE_MODE == 'protected' ||
+      vars.WEATHER_GOVERNANCE_MODE == 'guarded_private') &&
       vars.WEATHER_DEPLOYMENT_ENABLED == 'enabled' &&
       github.event_name == 'workflow_run' &&
       github.event.action == 'completed' &&
@@ -263,7 +285,11 @@ jobs:
         with:
           ref: ${{{{ github.workflow_sha }}}}
           persist-credentials: false
-      - run: {DEPLOY_MAIN_COMMAND}
+      - if: vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'
+        run: {DEPLOY_MAIN_COMMAND}
+        shell: pwsh
+{GUARDED_MAIN_CLI_ENV}      - if: vars.WEATHER_GOVERNANCE_MODE == 'protected'
+        run: {DEPLOY_MAIN_COMMAND}
         shell: pwsh
 {MAIN_CLI_ENV}"""
 
@@ -582,6 +608,7 @@ def test_repository_ci_promotion_uses_sanitized_read_only_evidence() -> None:
     ) in commands
     assert (
         "python -m tools.promotion_source main-push "
+        '--event-path "$GITHUB_EVENT_PATH" '
         '--associated-prs-path "$associated_prs_path" '
         '--repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"'
     ) in commands
@@ -589,10 +616,68 @@ def test_repository_ci_promotion_uses_sanitized_read_only_evidence() -> None:
     assert "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" in commands
     assert 'associated_prs_path="${RUNNER_TEMP}/associated-prs.json"' in commands
     assert (
-        "--jq '[.[] | {base: {ref: .base.ref, repo: {full_name: .base.repo.full_name}}, head: {ref: .head.ref, repo: {full_name: .head.repo.full_name}}, merged_at, merge_commit_sha}]'"
+        "--jq '[.[] | {base: {ref: .base.ref, sha: .base.sha, repo: {full_name: .base.repo.full_name}}, head: {ref: .head.ref, repo: {full_name: .head.repo.full_name}}, merged_at, merge_commit_sha}]'"
         in commands
     )
     assert '> "$associated_prs_path"' in commands
+
+
+def test_ci_promotion_contract_fails_closed_without_main_push_validation_step(
+    tmp_path: Path,
+) -> None:
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    step_start = workflow.index(
+        "      - name: Validate main push promotion source\n"
+    )
+    next_step = workflow.index(
+        "      - name: Validate initial main bootstrap source\n",
+        step_start,
+    )
+    repo_root = _write_repo(
+        tmp_path,
+        workflow[:step_start] + workflow[next_step:],
+    )
+
+    assert "promotion_source_contract" in _rules(repo_root)
+
+
+def test_ci_promotion_contract_fails_closed_when_validation_step_is_renamed(
+    tmp_path: Path,
+) -> None:
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8").replace(
+        "      - name: Validate main push promotion source\n",
+        "      - name: Validate main promotion evidence\n",
+        1,
+    )
+    repo_root = _write_repo(tmp_path, workflow)
+
+    assert "promotion_source_contract" in _rules(repo_root)
+
+
+def test_repository_ci_promotion_policy_binds_main_push_event_and_pr_base_sha(
+    tmp_path: Path,
+) -> None:
+    missing_event_path = CI_WORKFLOW.read_text(encoding="utf-8").replace(
+        '--event-path "$GITHUB_EVENT_PATH" ',
+        "",
+    )
+    repo_root = _write_repo(tmp_path, missing_event_path)
+    assert "promotion_source_contract" in _rules(repo_root)
+
+    missing_base_sha = CI_WORKFLOW.read_text(encoding="utf-8").replace(
+        "sha: .base.sha, ",
+        "",
+    )
+    repo_root = _write_repo(tmp_path / "base_sha", missing_base_sha)
+    assert "promotion_source_contract" in _rules(repo_root)
+
+    workflow = _repository_ci()
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    promotion = jobs["promotion-source"]
+    assert isinstance(promotion, dict)
+    steps = promotion["steps"]
+    assert isinstance(steps, list)
 
     main_push = next(
         step
@@ -820,7 +905,7 @@ def test_exact_deploy_main_workflow_is_the_only_approved_auto_deploy_route(
     [
         ("branches: [main]", "branches: [dev]"),
         ("types: [completed]", "types: [requested]"),
-        ("vars.WEATHER_GOVERNANCE_MODE == 'protected' &&", ""),
+        (TWO_MODE_GUARD, "vars.WEATHER_GOVERNANCE_MODE == 'protected'"),
         ("vars.WEATHER_DEPLOYMENT_ENABLED == 'enabled' &&", ""),
         ("github.event.action == 'completed'", "github.event.action == 'requested'"),
         ("workflow_run.name == 'CI'", "workflow_run.name == 'Other'"),
@@ -866,10 +951,10 @@ def test_deploy_main_rejects_every_weakened_source_boundary(
         ),
         ("        shell: pwsh", "        shell: powershell"),
         (
-            f"      - run: {VERIFY_MAIN_COMMAND}\n",
+            "      - if: vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'\n",
             f"      - run: {FORBIDDEN_MAIN_INSTALL_COMMAND}\n"
             "        shell: pwsh\n"
-            f"      - run: {VERIFY_MAIN_COMMAND}\n",
+            "      - if: vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'\n",
         ),
         (DEPLOY_MAIN_COMMAND, "python -m deployment.main_cli deploy-main"),
         (
@@ -887,6 +972,131 @@ def test_deploy_main_rejects_execution_surface_drift(
         VALID_DEPLOY_MAIN.replace(old, new, 1),
         filename="deploy-main.yml",
     )
+
+    assert "deploy_main_contract" in _rules(repo_root)
+
+
+@pytest.mark.parametrize("occurrence", ["first", "last"])
+def test_deploy_main_requires_both_exact_mode_clauses(
+    tmp_path: Path, occurrence: str
+) -> None:
+    """Removing either job's guarded clause must not preserve deploy authority."""
+    workflow = (
+        VALID_DEPLOY_MAIN.replace(
+            TWO_MODE_GUARD,
+            "vars.WEATHER_GOVERNANCE_MODE == 'protected'",
+            1,
+        )
+        if occurrence == "first"
+        else _replace_last(
+            VALID_DEPLOY_MAIN,
+            TWO_MODE_GUARD,
+            "vars.WEATHER_GOVERNANCE_MODE == 'protected'",
+        )
+    )
+    repo_root = _write_repo(tmp_path, workflow, filename="deploy-main.yml")
+
+    assert "deploy_main_contract" in _rules(repo_root)
+
+
+@pytest.mark.parametrize("occurrence", ["first", "last"])
+def test_deploy_main_rejects_duplicate_guard_clause_before_set_normalization(
+    tmp_path: Path, occurrence: str
+) -> None:
+    duplicate_clause = (
+        "(vars.WEATHER_GOVERNANCE_MODE == 'protected' ||\n"
+        "      vars.WEATHER_GOVERNANCE_MODE == 'guarded_private' ||\n"
+        "      vars.WEATHER_GOVERNANCE_MODE == 'guarded_private')"
+    )
+    workflow = (
+        VALID_DEPLOY_MAIN.replace(TWO_MODE_GUARD, duplicate_clause, 1)
+        if occurrence == "first"
+        else _replace_last(VALID_DEPLOY_MAIN, TWO_MODE_GUARD, duplicate_clause)
+    )
+    repo_root = _write_repo(tmp_path, workflow, filename="deploy-main.yml")
+
+    assert "deploy_main_contract" in _rules(repo_root)
+
+
+@pytest.mark.parametrize("occurrence", ["first", "last"])
+def test_deploy_main_rejects_duplicate_guard_atom_before_frozenset_normalization(
+    tmp_path: Path, occurrence: str
+) -> None:
+    atom = "vars.WEATHER_DEPLOYMENT_ENABLED == 'enabled' &&"
+    duplicate_atom = f"{atom}\n      {atom}"
+    workflow = (
+        VALID_DEPLOY_MAIN.replace(atom, duplicate_atom, 1)
+        if occurrence == "first"
+        else _replace_last(VALID_DEPLOY_MAIN, atom, duplicate_atom)
+    )
+    repo_root = _write_repo(tmp_path, workflow, filename="deploy-main.yml")
+
+    assert "deploy_main_contract" in _rules(repo_root)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (
+            "GH_TOKEN: ${{ github.token }}",
+            "GH_TOKEN: ${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}",
+        ),
+        (
+            "GH_TOKEN: ${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}",
+            "GH_TOKEN: ${{ github.token }}",
+        ),
+        (
+            "GH_TOKEN: ${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}",
+            "GH_TOKEN: ${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN || github.token }}",
+        ),
+        (
+            "GH_TOKEN: ${{ github.token }}",
+            "GH_TOKEN: ${{ github.token || secrets.WEATHER_GOVERNANCE_READ_TOKEN }}",
+        ),
+        (
+            "if: vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'",
+            "if: vars.WEATHER_GOVERNANCE_MODE == 'protected'",
+        ),
+        (
+            "if: vars.WEATHER_GOVERNANCE_MODE == 'protected'",
+            "if: vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'",
+        ),
+    ],
+)
+@pytest.mark.parametrize("occurrence", ["first", "last"])
+def test_deploy_main_rejects_swapped_or_fallback_mode_authority(
+    tmp_path: Path, old: str, new: str, occurrence: str
+) -> None:
+    """Each hosted and self-hosted mode step owns one non-fallback token source."""
+    workflow = (
+        VALID_DEPLOY_MAIN.replace(old, new, 1)
+        if occurrence == "first"
+        else _replace_last(VALID_DEPLOY_MAIN, old, new)
+    )
+    repo_root = _write_repo(tmp_path, workflow, filename="deploy-main.yml")
+
+    assert "deploy_main_contract" in _rules(repo_root)
+
+
+@pytest.mark.parametrize("event", ["pull_request", "workflow_dispatch", "release"])
+def test_deploy_main_rejects_any_additional_trigger(
+    tmp_path: Path, event: str
+) -> None:
+    workflow = VALID_DEPLOY_MAIN.replace(
+        "on:\n  workflow_run:\n",
+        f"on:\n  {event}:\n  workflow_run:\n",
+        1,
+    )
+    repo_root = _write_repo(tmp_path, workflow, filename="deploy-main.yml")
+
+    assert "deploy_main_contract" in _rules(repo_root)
+
+
+def test_deploy_main_requires_pull_request_read_for_guarded_identity(
+    tmp_path: Path,
+) -> None:
+    workflow = VALID_DEPLOY_MAIN.replace("  pull-requests: read\n", "", 1)
+    repo_root = _write_repo(tmp_path, workflow, filename="deploy-main.yml")
 
     assert "deploy_main_contract" in _rules(repo_root)
 
@@ -1312,10 +1522,10 @@ def test_self_hosted_action_input_order_is_deterministic(tmp_path: Path) -> None
         ),
         _replace_last(
             VALID_DEPLOY_MAIN,
-            f"      - run: {DEPLOY_MAIN_COMMAND}\n",
+            "      - if: vars.WEATHER_GOVERNANCE_MODE == 'protected'\n",
             f"      - run: {FORBIDDEN_MAIN_INSTALL_COMMAND}\n"
             "        shell: pwsh\n"
-            f"      - run: {DEPLOY_MAIN_COMMAND}\n",
+            "      - if: vars.WEATHER_GOVERNANCE_MODE == 'protected'\n",
         ),
         _replace_last(
             VALID_DEPLOY_MAIN,
@@ -1326,6 +1536,11 @@ def test_self_hosted_action_input_order_is_deterministic(tmp_path: Path) -> None
             VALID_DEPLOY_MAIN,
             DEPLOY_MAIN_COMMAND,
             "docker compose run deploy main",
+        ),
+        _replace_last(
+            VALID_DEPLOY_MAIN,
+            DEPLOY_MAIN_COMMAND,
+            "airflow dags trigger weather_collection",
         ),
     ],
 )
@@ -1572,6 +1787,28 @@ def test_ci_self_hosted_guard_accepts_an_exact_single_branch_subset(
     repo_root = _write_repo(tmp_path, workflow)
 
     assert audit_workflows(repo_root) == []
+
+
+def test_ci_self_hosted_route_remains_protected_only(tmp_path: Path) -> None:
+    workflow = VALID_CI.replace(
+        "vars.WEATHER_GOVERNANCE_MODE == 'protected'",
+        "vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'",
+    )
+    repo_root = _write_repo(tmp_path, workflow)
+
+    assert "self_hosted_event_boundary" in _rules(repo_root)
+
+
+def test_ci_self_hosted_dagbag_step_contract_is_not_widened(tmp_path: Path) -> None:
+    workflow = VALID_CI.replace(
+        f"      - run: {DAGBAG_COMMAND}\n",
+        "      - if: always()\n"
+        f"        run: {DAGBAG_COMMAND}\n",
+        1,
+    )
+    repo_root = _write_repo(tmp_path, workflow)
+
+    assert "self_hosted_execution_context" in _rules(repo_root)
 
 
 @pytest.mark.parametrize(

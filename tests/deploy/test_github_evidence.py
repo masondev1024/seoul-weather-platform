@@ -20,6 +20,7 @@ APP_ID = 424242
 OTHER_APP_ID = 434343
 CI_NAME = "CI / required"
 PROMOTION_NAME = "Promotion Source / required"
+DAGBAG_RUNTIME_NAME = "dagbag-runtime"
 WORKFLOW_REF = f"{REPOSITORY}/.github/workflows/deploy-main.yml@refs/heads/main"
 CI_URL = f"https://api.github.com/repos/{REPOSITORY}/check-runs/101"
 PROMOTION_URL = f"https://api.github.com/repos/{REPOSITORY}/check-runs/102"
@@ -32,6 +33,16 @@ PROMOTION_CHECK_ENDPOINT = f"/repos/{REPOSITORY}/check-runs/102"
 DEV_PROTECTION_ENDPOINT = f"/repos/{REPOSITORY}/branches/dev/protection"
 MAIN_PROTECTION_ENDPOINT = f"/repos/{REPOSITORY}/branches/main/protection"
 MAIN_BRANCH_ENDPOINT = f"/repos/{REPOSITORY}/branches/main"
+PROMOTION_PR_ENDPOINT = (
+    f"/repos/{REPOSITORY}/commits/{SHA}/pulls?per_page=2&page=1"
+)
+PROMOTION_PR = {
+    "number": 7,
+    "merged_at": "2026-08-15T00:00:00Z",
+    "merge_commit_sha": SHA,
+    "base": {"ref": "main", "repo": {"full_name": REPOSITORY}},
+    "head": {"ref": "dev", "repo": {"full_name": REPOSITORY}},
+}
 
 EXPECTED_CALLS = [
     ("GET", REPO_ENDPOINT),
@@ -39,8 +50,13 @@ EXPECTED_CALLS = [
     ("GET", JOBS_ENDPOINT),
     ("GET", CI_CHECK_ENDPOINT),
     ("GET", PROMOTION_CHECK_ENDPOINT),
+    ("GET", PROMOTION_PR_ENDPOINT),
     ("GET", DEV_PROTECTION_ENDPOINT),
     ("GET", MAIN_PROTECTION_ENDPOINT),
+    ("GET", MAIN_BRANCH_ENDPOINT),
+]
+GUARDED_EXPECTED_CALLS = [
+    *EXPECTED_CALLS[:6],
     ("GET", MAIN_BRANCH_ENDPOINT),
 ]
 
@@ -113,11 +129,26 @@ def _job(name: str, check_url: str) -> dict[str, Any]:
     }
 
 
+def _dagbag_runtime_job(conclusion: str = "success") -> dict[str, Any]:
+    return {
+        "id": 701,
+        "run_id": RUN_ID,
+        "name": DAGBAG_RUNTIME_NAME,
+        "head_branch": "main",
+        "head_sha": SHA,
+        "status": "completed",
+        "conclusion": conclusion,
+        "check_run_url": f"https://api.github.com/repos/{REPOSITORY}/check-runs/103",
+        "steps": [],
+    }
+
+
 def _jobs_response() -> dict[str, Any]:
     return {
-        "total_count": 3,
+        "total_count": 4,
         "jobs": [
             _job(PROMOTION_NAME, PROMOTION_URL),
+            _dagbag_runtime_job(),
             _job("lint-extra", f"https://api.github.com/repos/{REPOSITORY}/check-runs/999"),
             _job(CI_NAME, CI_URL),
         ],
@@ -171,6 +202,7 @@ def _responses() -> dict[str, object]:
         JOBS_ENDPOINT: _jobs_response(),
         CI_CHECK_ENDPOINT: _check_response(CI_NAME, CI_URL),
         PROMOTION_CHECK_ENDPOINT: _check_response(PROMOTION_NAME, PROMOTION_URL),
+        PROMOTION_PR_ENDPOINT: [copy.deepcopy(PROMOTION_PR)],
         DEV_PROTECTION_ENDPOINT: _raw_protection("dev"),
         MAIN_PROTECTION_ENDPOINT: _raw_protection("main"),
         MAIN_BRANCH_ENDPOINT: {
@@ -201,6 +233,15 @@ class FakeGhRunner:
             raise RuntimeError("RAW_MISSING_ENDPOINT_MARKER")
         return value  # type: ignore[return-value]
 
+    def api_list(self, method: str, endpoint: str) -> list[dict[str, Any]]:
+        if method != "GET" or endpoint != PROMOTION_PR_ENDPOINT:
+            raise AssertionError("unbounded API list call")
+        self.calls.append((method, endpoint))
+        value = self.responses.get(endpoint)
+        if type(value) is not list or not all(type(item) is dict for item in value):
+            raise AssertionError("invalid test list response")
+        return value
+
 
 def _write_event(path: Path, event: object | None = None) -> Path:
     path.write_text(
@@ -220,6 +261,7 @@ def _collect(
     workflow_ref: object = WORKFLOW_REF,
     workflow_sha: object = SHA,
     repository: object = REPOSITORY,
+    governance_mode: object = "protected",
     gh_token: object = "TOKEN_MARKER",
 ) -> tuple[Any, FakeGhRunner]:
     from deployment.github_evidence import read_main_identity_inputs
@@ -231,6 +273,7 @@ def _collect(
         workflow_ref=workflow_ref,
         workflow_sha=workflow_sha,
         repository=repository,
+        governance_mode=governance_mode,
         gh_token=gh_token,
         runner=active_runner,
     )
@@ -266,6 +309,7 @@ def test_valid_evidence_uses_exact_get_order_and_canonical_identity_payload(
     assert inputs.workflow_ref == WORKFLOW_REF
     assert inputs.workflow_sha == SHA
     assert inputs.repository == REPOSITORY
+    assert inputs.governance_mode == "protected"
     assert inputs.event == {
         "action": "completed",
         "repository": {"full_name": REPOSITORY},
@@ -289,7 +333,11 @@ def test_valid_evidence_uses_exact_get_order_and_canonical_identity_payload(
         "status": "completed",
         "conclusion": "success",
     }
-    assert [job["name"] for job in inputs.source_jobs] == [CI_NAME, PROMOTION_NAME]
+    assert [job["name"] for job in inputs.source_jobs] == [
+        CI_NAME,
+        PROMOTION_NAME,
+        DAGBAG_RUNTIME_NAME,
+    ]
     assert [check["name"] for check in inputs.linked_checks] == [
         CI_NAME,
         PROMOTION_NAME,
@@ -300,10 +348,136 @@ def test_valid_evidence_uses_exact_get_order_and_canonical_identity_payload(
             "main", {CI_NAME: APP_ID, PROMOTION_NAME: APP_ID}
         ),
     }
+    assert inputs.promotion_pr == PROMOTION_PR
     identity = validate_main_deploy_identity(**inputs.as_kwargs())
     assert identity.workflow_sha == SHA
     assert repr(inputs) == "MainIdentityInputs()"
     assert "TOKEN_MARKER" not in repr(inputs)
+
+
+def test_guarded_private_evidence_skips_protection_reads_and_returns_none(
+    tmp_path: Path,
+) -> None:
+    from deployment.main_identity import validate_main_deploy_identity
+
+    responses = _responses()
+    jobs = responses[JOBS_ENDPOINT]["jobs"]  # type: ignore[index]
+    for job in jobs:
+        if job["name"] == DAGBAG_RUNTIME_NAME:
+            job["conclusion"] = "skipped"
+    inputs, runner = _collect(
+        tmp_path,
+        runner=FakeGhRunner(responses),
+        governance_mode="guarded_private",
+    )
+
+    assert runner.calls == GUARDED_EXPECTED_CALLS
+    assert inputs.governance_mode == "guarded_private"
+    assert inputs.protections is None
+    assert inputs.promotion_pr == PROMOTION_PR
+    assert validate_main_deploy_identity(**inputs.as_kwargs()).workflow_sha == SHA
+
+
+@pytest.mark.parametrize(
+    ("governance_mode", "runtime_conclusion"),
+    [("protected", "skipped"), ("guarded_private", "success")],
+)
+def test_evidence_rejects_dagbag_runtime_result_from_other_governance_mode(
+    tmp_path: Path, governance_mode: str, runtime_conclusion: str
+) -> None:
+    responses = _responses()
+    jobs = responses[JOBS_ENDPOINT]["jobs"]  # type: ignore[index]
+    for job in jobs:
+        if job["name"] == DAGBAG_RUNTIME_NAME:
+            job["conclusion"] = runtime_conclusion
+
+    runner = _assert_rejected(
+        tmp_path,
+        runner=FakeGhRunner(responses),
+        governance_mode=governance_mode,
+    )
+
+    assert runner.calls == EXPECTED_CALLS[:3]
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "wrong-run", "wrong-sha"])
+def test_evidence_rejects_missing_duplicate_or_stale_dagbag_runtime_job(
+    tmp_path: Path, mutation: str
+) -> None:
+    responses = _responses()
+    jobs = responses[JOBS_ENDPOINT]["jobs"]  # type: ignore[index]
+    runtime = next(job for job in jobs if job["name"] == DAGBAG_RUNTIME_NAME)
+    if mutation == "missing":
+        jobs.remove(runtime)
+    elif mutation == "duplicate":
+        jobs.append(copy.deepcopy(runtime))
+    elif mutation == "wrong-run":
+        runtime["run_id"] = RUN_ID + 1
+    else:
+        runtime["head_sha"] = OTHER_SHA
+    responses[JOBS_ENDPOINT]["total_count"] = len(jobs)  # type: ignore[index]
+
+    runner = _assert_rejected(tmp_path, runner=FakeGhRunner(responses))
+
+    assert runner.calls == EXPECTED_CALLS[:3]
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_evidence_rejects_zero_or_multiple_associated_promotion_prs(
+    tmp_path: Path, count: int
+) -> None:
+    responses = _responses()
+    responses[PROMOTION_PR_ENDPOINT] = [copy.deepcopy(PROMOTION_PR) for _ in range(count)]
+
+    runner = _assert_rejected(tmp_path, runner=FakeGhRunner(responses))
+
+    assert runner.calls == EXPECTED_CALLS[:6]
+
+
+@pytest.mark.parametrize(
+    "mutation", ["bootstrap", "feature", "fork", "unmerged", "wrong-sha"]
+)
+def test_evidence_rejects_noncanonical_associated_promotion_pr(
+    tmp_path: Path, mutation: str
+) -> None:
+    responses = _responses()
+    promotion_pr = responses[PROMOTION_PR_ENDPOINT][0]  # type: ignore[index]
+    if mutation == "bootstrap":
+        promotion_pr["merge_commit_sha"] = "0" * 40
+    elif mutation == "feature":
+        promotion_pr["head"]["ref"] = "feature/deploy"
+    elif mutation == "fork":
+        promotion_pr["head"]["repo"]["full_name"] = "fork/repository"
+    elif mutation == "unmerged":
+        promotion_pr["merged_at"] = None
+    else:
+        promotion_pr["merge_commit_sha"] = OTHER_SHA
+
+    runner = _assert_rejected(tmp_path, runner=FakeGhRunner(responses))
+
+    assert runner.calls == EXPECTED_CALLS[:6]
+
+
+@pytest.mark.parametrize("visibility", ["public", "internal"])
+def test_guarded_private_evidence_rejects_non_private_repository(
+    tmp_path: Path, visibility: str
+) -> None:
+    responses = _responses()
+    responses[REPO_ENDPOINT]["visibility"] = visibility  # type: ignore[index]
+    responses[REPO_ENDPOINT]["private"] = False  # type: ignore[index]
+
+    runner = _assert_rejected(
+        tmp_path, runner=FakeGhRunner(responses), governance_mode="guarded_private"
+    )
+
+    assert runner.calls == EXPECTED_CALLS[:1]
+
+
+@pytest.mark.parametrize("mode", ["", "open", True, None])
+def test_evidence_rejects_invalid_governance_mode(tmp_path: Path, mode: object) -> None:
+    runner = _assert_rejected(tmp_path, governance_mode=mode)
+
+    assert runner.calls == []
 
 
 @pytest.mark.parametrize(
@@ -331,13 +505,17 @@ def test_result_is_frozen_and_defensive_against_response_and_caller_mutation(
 
     responses[REPO_ENDPOINT]["full_name"] = "other/repo"  # type: ignore[index]
     responses[JOBS_ENDPOINT]["jobs"][0]["name"] = "mutated"  # type: ignore[index]
+    responses[PROMOTION_PR_ENDPOINT][0]["number"] = 99  # type: ignore[index]
     returned_repo = inputs.repo
     returned_repo["full_name"] = "mutated/repo"
     returned_jobs = inputs.source_jobs
     returned_jobs[0]["name"] = "mutated"
+    returned_pr = inputs.promotion_pr
+    returned_pr["number"] = 99
 
     assert inputs.repo["full_name"] == REPOSITORY
     assert inputs.source_jobs[0]["name"] == CI_NAME
+    assert inputs.promotion_pr["number"] == 7
     with pytest.raises(AttributeError):
         inputs.repository = "other/repo"
 
@@ -487,7 +665,7 @@ def test_jobs_page_must_be_complete_and_required_jobs_unique(
     responses = _responses()
     jobs_response = responses[JOBS_ENDPOINT]
     if mutation == "truncated":
-        jobs_response["total_count"] = 4  # type: ignore[index]
+        jobs_response["total_count"] = 5  # type: ignore[index]
     elif mutation == "over-100":
         job = _job("extra", f"https://api.github.com/repos/{REPOSITORY}/check-runs/999")
         jobs_response["jobs"] = [copy.deepcopy(job) for _ in range(101)]  # type: ignore[index]
@@ -529,7 +707,7 @@ def test_foreign_or_malformed_check_run_url_is_never_called(
     tmp_path: Path, url: str
 ) -> None:
     responses = _responses()
-    responses[JOBS_ENDPOINT]["jobs"][2]["check_run_url"] = url  # type: ignore[index]
+    responses[JOBS_ENDPOINT]["jobs"][3]["check_run_url"] = url  # type: ignore[index]
 
     runner = _assert_rejected(tmp_path, runner=FakeGhRunner(responses))
 
@@ -580,8 +758,8 @@ def test_linked_check_fields_and_shared_app_binding_are_exact(
 @pytest.mark.parametrize(
     ("endpoint", "branch", "call_count"),
     [
-        (DEV_PROTECTION_ENDPOINT, "dev", 6),
-        (MAIN_PROTECTION_ENDPOINT, "main", 7),
+        (DEV_PROTECTION_ENDPOINT, "dev", 7),
+        (MAIN_PROTECTION_ENDPOINT, "main", 8),
     ],
 )
 def test_weakened_protection_is_rejected_before_canonicalization(
@@ -603,7 +781,7 @@ def test_main_protection_must_bind_exact_linked_check_app(tmp_path: Path) -> Non
 
     runner = _assert_rejected(tmp_path, runner=FakeGhRunner(responses))
 
-    assert runner.calls == EXPECTED_CALLS[:7]
+    assert runner.calls == EXPECTED_CALLS[:8]
 
 
 def test_stale_final_main_head_is_rejected(tmp_path: Path) -> None:

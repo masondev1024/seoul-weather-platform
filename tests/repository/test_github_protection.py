@@ -1032,6 +1032,109 @@ def test_subprocess_runner_sanitizes_process_start_failure() -> None:
     assert "TOKEN_MARKER" not in str(caught.value)
 
 
+def _completed(stdout: object) -> SimpleNamespace:
+    return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+
+def test_subprocess_runner_reads_exact_json_object_list() -> None:
+    runner = SubprocessGhRunner(run=lambda *args, **kwargs: _completed('[{"number":7}]'))
+
+    assert runner.api_list(
+        "GET", f"/repos/{REPOSITORY}/commits/{BOOTSTRAP_SHA}/pulls?per_page=2&page=1"
+    ) == [{"number": 7}]
+
+
+@pytest.mark.parametrize(
+    ("method_name", "stdout"),
+    [
+        ("api", '{"number":7,"number":8}'),
+        ("api_list", '[{"number":7,"number":8}]'),
+    ],
+)
+def test_subprocess_runner_rejects_duplicate_json_keys_without_raw_body(
+    method_name: str, stdout: str
+) -> None:
+    runner = SubprocessGhRunner(run=lambda *args, **kwargs: _completed(stdout))
+    call = getattr(runner, method_name)
+
+    with pytest.raises(GhApiError) as caught:
+        call(
+            "GET",
+            f"/repos/{REPOSITORY}/commits/{BOOTSTRAP_SHA}/pulls?per_page=2&page=1",
+        )
+
+    assert "number" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "stdout", ['7', '{"number":7}', '[7]', '[[]]', '[{"number":7},null]']
+)
+def test_subprocess_runner_rejects_non_object_json_list_items(stdout: str) -> None:
+    runner = SubprocessGhRunner(run=lambda *args, **kwargs: _completed(stdout))
+
+    with pytest.raises(GhApiError) as caught:
+        runner.api_list("GET", f"/repos/{REPOSITORY}/commits/{BOOTSTRAP_SHA}/pulls?per_page=2&page=1")
+
+    assert "number" not in str(caught.value)
+
+
+def test_subprocess_runner_api_list_rejects_non_get_or_payload_without_response() -> None:
+    called = False
+
+    def run(*args: object, **kwargs: object) -> SimpleNamespace:
+        nonlocal called
+        del args, kwargs
+        called = True
+        return _completed('[{"number":7}]')
+
+    runner = SubprocessGhRunner(run=run)
+    with pytest.raises(GhApiError):
+        runner.api_list("PUT", f"/repos/{REPOSITORY}/commits/{BOOTSTRAP_SHA}/pulls?per_page=2&page=1")
+    assert not called
+    with pytest.raises(TypeError):
+        runner.api_list(  # type: ignore[call-arg]
+            "GET",
+            f"/repos/{REPOSITORY}/commits/{BOOTSTRAP_SHA}/pulls?per_page=2&page=1",
+            {"unexpected": True},
+        )
+    assert not called
+
+
+@pytest.mark.parametrize("outcome", ["{malformed", OSError("TOKEN_MARKER RAW_RESPONSE")])
+def test_subprocess_runner_api_list_sanitizes_malformed_or_failed_subprocess(
+    outcome: object,
+) -> None:
+    def run(*args: object, **kwargs: object) -> SimpleNamespace:
+        del args, kwargs
+        if isinstance(outcome, Exception):
+            raise outcome
+        return _completed(outcome)
+
+    runner = SubprocessGhRunner(run=run)
+    with pytest.raises(GhApiError) as caught:
+        runner.api_list("GET", f"/repos/{REPOSITORY}/commits/{BOOTSTRAP_SHA}/pulls?per_page=2&page=1")
+
+    assert "TOKEN_MARKER" not in str(caught.value)
+
+
+def test_subprocess_runner_api_list_redacts_failed_command_response() -> None:
+    def run(*args: object, **kwargs: object) -> SimpleNamespace:
+        del args, kwargs
+        return SimpleNamespace(
+            returncode=1,
+            stdout="RAW_RESPONSE_MARKER",
+            stderr="TOKEN_MARKER private API response (HTTP 403)",
+        )
+
+    runner = SubprocessGhRunner(run=run)
+    with pytest.raises(GhApiError) as caught:
+        runner.api_list("GET", f"/repos/{REPOSITORY}/commits/{BOOTSTRAP_SHA}/pulls?per_page=2&page=1")
+
+    assert caught.value.status == 403
+    assert "TOKEN_MARKER" not in str(caught.value)
+    assert "RAW_RESPONSE_MARKER" not in str(caught.value)
+
+
 def test_cli_plan_apply_verify_use_injected_runner_and_sanitized_status(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

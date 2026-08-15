@@ -20,6 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "github"
 REPOSITORY = "masondev1024/seoul-weather-platform"
 PUSHED_SHA = "0123456789abcdef0123456789abcdef01234567"
+BASE_SHA = "fedcba9876543210fedcba9876543210fedcba98"
 ZERO_SHA = "0" * 40
 
 
@@ -43,6 +44,17 @@ def _bootstrap_event() -> dict[str, object]:
         "before": ZERO_SHA,
         "after": PUSHED_SHA,
         "created": True,
+        "deleted": False,
+        "repository": {"full_name": REPOSITORY},
+    }
+
+
+def _main_push_event() -> dict[str, object]:
+    return {
+        "ref": "refs/heads/main",
+        "before": BASE_SHA,
+        "after": PUSHED_SHA,
+        "created": False,
         "deleted": False,
         "repository": {"full_name": REPOSITORY},
     }
@@ -102,7 +114,9 @@ def test_pull_request_to_main_rejects_non_dev_or_cross_repository_source(
 def test_main_push_fixture_accepts_exact_merged_dev_to_main_pr() -> None:
     prs = _fixture("push-main-associated-prs.json")
 
-    decision = validate_main_push_associated_prs(prs, REPOSITORY, PUSHED_SHA)
+    decision = validate_main_push_associated_prs(
+        prs, _main_push_event(), REPOSITORY, PUSHED_SHA
+    )
 
     assert decision.allowed
     assert decision.reason == "allowed"
@@ -127,9 +141,51 @@ def test_main_push_rejects_non_exact_promotion_evidence(
         target = target[field]
     target[field_path[-1]] = value
 
-    decision = validate_main_push_associated_prs(prs, REPOSITORY, PUSHED_SHA)
+    decision = validate_main_push_associated_prs(
+        prs, _main_push_event(), REPOSITORY, PUSHED_SHA
+    )
 
     assert not decision.allowed
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("ref", "refs/heads/dev"),
+        ("before", ZERO_SHA),
+        ("before", BASE_SHA.upper()),
+        ("after", BASE_SHA),
+        ("created", True),
+        ("deleted", True),
+        ("repository", {"full_name": "other/repo"}),
+    ],
+)
+def test_main_push_rejects_non_current_or_bootstrap_push_event(
+    field: str, value: object
+) -> None:
+    prs = _fixture("push-main-associated-prs.json")
+    event = _main_push_event()
+    event[field] = value
+
+    decision = validate_main_push_associated_prs(
+        prs, event, REPOSITORY, PUSHED_SHA
+    )
+
+    assert not decision.allowed
+    assert decision.reason == "invalid-push-event"
+
+
+def test_main_push_rejects_historical_merge_sha_replay() -> None:
+    prs = _fixture("push-main-associated-prs.json")
+    event = _main_push_event()
+    event["before"] = "1111111111111111111111111111111111111111"
+
+    decision = validate_main_push_associated_prs(
+        prs, event, REPOSITORY, PUSHED_SHA
+    )
+
+    assert not decision.allowed
+    assert decision.reason == "missing-promotion-evidence"
 
 
 def test_main_push_requires_at_least_one_exact_associated_pr() -> None:
@@ -138,18 +194,21 @@ def test_main_push_requires_at_least_one_exact_associated_pr() -> None:
     unrelated["head"]["ref"] = "feature/weather-copy"
 
     assert (
-        validate_main_push_associated_prs([], REPOSITORY, PUSHED_SHA).allowed is False
+        validate_main_push_associated_prs(
+            [], _main_push_event(), REPOSITORY, PUSHED_SHA
+        ).allowed
+        is False
     )
     assert validate_main_push_associated_prs(
-        [unrelated, *prs], REPOSITORY, PUSHED_SHA
-    ).allowed
+        [unrelated, *prs], _main_push_event(), REPOSITORY, PUSHED_SHA
+    ).allowed is False
 
 
 def test_main_push_rejects_malformed_entry_even_when_valid_evidence_follows() -> None:
     prs = _fixture("push-main-associated-prs.json")
 
     decision = validate_main_push_associated_prs(
-        [{"base": "main"}, *prs], REPOSITORY, PUSHED_SHA
+        [{"base": "main"}, *prs], _main_push_event(), REPOSITORY, PUSHED_SHA
     )
 
     assert not decision.allowed
@@ -160,7 +219,7 @@ def test_main_push_rejects_malformed_entry_after_valid_evidence() -> None:
     prs = _fixture("push-main-associated-prs.json")
 
     decision = validate_main_push_associated_prs(
-        [*prs, {"base": "main"}], REPOSITORY, PUSHED_SHA
+        [*prs, {"base": "main"}], _main_push_event(), REPOSITORY, PUSHED_SHA
     )
 
     assert not decision.allowed
@@ -355,6 +414,8 @@ def test_cli_accepts_fixture_files_without_network_access() -> None:
     )
     main_push = _run_cli(
         "main-push",
+        "--event-path",
+        str(FIXTURES / "push-main-event.json"),
         "--associated-prs-path",
         str(FIXTURES / "push-main-associated-prs.json"),
         "--repository",
@@ -374,6 +435,8 @@ def test_cli_accepts_fixture_files_without_network_access() -> None:
 def test_cli_unknown_argument_exits_two_without_printing_raw_values() -> None:
     result = _run_cli(
         "main-push",
+        "--event-path",
+        str(FIXTURES / "push-main-event.json"),
         "--associated-prs-path",
         str(FIXTURES / "push-main-associated-prs.json"),
         "--repository",
@@ -429,6 +492,8 @@ def test_main_push_cli_rejects_non_array_schema_without_printing_raw_input(
 
     result = _run_cli(
         "main-push",
+        "--event-path",
+        str(input_path),
         "--associated-prs-path",
         str(input_path),
         "--repository",

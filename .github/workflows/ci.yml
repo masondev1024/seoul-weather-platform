@@ -170,9 +170,9 @@ jobs:
           gh api --method GET \
             --header "Accept: application/vnd.github+json" \
             "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
-            --jq '[.[] | {base: {ref: .base.ref, repo: {full_name: .base.repo.full_name}}, head: {ref: .head.ref, repo: {full_name: .head.repo.full_name}}, merged_at, merge_commit_sha}]' \
+            --jq '[.[] | {base: {ref: .base.ref, sha: .base.sha, repo: {full_name: .base.repo.full_name}}, head: {ref: .head.ref, repo: {full_name: .head.repo.full_name}}, merged_at, merge_commit_sha}]' \
             > "$associated_prs_path"
-          python -m tools.promotion_source main-push --associated-prs-path "$associated_prs_path" --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
+          python -m tools.promotion_source main-push --event-path "$GITHUB_EVENT_PATH" --associated-prs-path "$associated_prs_path" --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
       - name: Validate initial main bootstrap source
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.created == true
         env:

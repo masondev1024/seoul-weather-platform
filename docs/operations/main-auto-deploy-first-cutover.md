@@ -2,7 +2,7 @@
 
 ## 한 번만 필요한 승인
 
-이 절차의 “첫 `main` release”는 GitHub Release 생성이나 `Publish Release` 클릭이 아니다. 보호된 같은 저장소의 `dev → main` PR merge와 그 merge SHA의 `CI` 성공이 배포 승인이다. 최초 전환에서만 현재 조직 Weather 파이프라인을 안전하게 넘기기 위해 read-only 보고 후 사용자 승인을 받는다. 전환이 끝난 뒤에는 같은 보호 규칙을 통과한 이후 `main` merge가 별도 클릭 없이 자동 배포를 시작한다.
+이 절차의 “첫 `main` release”는 GitHub Release 생성이나 `Publish Release` 클릭이 아니다. 같은 저장소의 exact `dev → main` PR evidence와 그 merge SHA의 `CI` 성공을 매번 재검증한 결과가 배포 증거다. 이 evidence는 GitHub UI의 merge 버튼 사용 자체를 증명하지 않는다. 최초 전환에서만 현재 조직 Weather 파이프라인을 안전하게 넘기기 위해 target·baseline·capability의 read-only 보고 후 사용자 명시 승인을 받는다. 전환이 끝난 뒤에는 그 검증을 통과한 `main` merge가 별도 클릭 없이 자동 배포를 시작한다.
 
 승인 전에는 다음 상태를 유지한다.
 
@@ -12,7 +12,9 @@
 - local deploy target, stable generated overlay와 baseline rollback record를 설치하지 않는다.
 - Airflow pause/unpause, Docker `up`, pipeline stop/start와 dbt·Trino·D1·R2 write를 실행하지 않는다.
 
-`Deploy Main`의 두 job은 `WEATHER_GOVERNANCE_MODE=protected`와 `WEATHER_DEPLOYMENT_ENABLED=enabled`가 모두 정확할 때만 예약된다. enable 뒤 `WEATHER_GOVERNANCE_READ_TOKEN` secret이 없거나 비어 있으면 GitHub-hosted `verify-main`이 실패해야 하며, self-hosted `deploy-main`은 실행되지 않는다. secret 누락을 `skipped`나 성공으로 처리하지 않는다.
+`Deploy Main`의 두 job은 `WEATHER_DEPLOYMENT_ENABLED=enabled`와 허용 governance mode가 모두 정확할 때만 예약된다. `guarded_private`는 private 단일 소유자·사고 방지 경계에서만 사용할 수 있고, sole owner/no extra writer 상태는 최초 전환과 권한 변경 때 workflow 밖에서 확인하는 운영 전제다. public/internal visibility 또는 추가 writer가 있으면 다음 배포 전에 `WEATHER_DEPLOYMENT_ENABLED`를 비활성화하고 native protection 또는 저장소 밖 trusted controller로 전환한다. `protected`는 이보다 강한 native protection readback을 요구한다. protected mode에서 `WEATHER_GOVERNANCE_READ_TOKEN` secret이 없거나 비어 있으면 GitHub-hosted `verify-main`이 실패해야 하며 self-hosted `deploy-main`은 실행되지 않는다. guarded mode에는 이 secret을 설치하지 않는다.
+
+`guarded_private`에서 유일한 repository writer는 신뢰 대상이다. 열려 있는 same-repository `dev → main` PR의 `dev` head를 그 writer가 현재 `main`에 로컬 merge해 push하면 GitHub associated-PR evidence가 유효해질 수 있으므로, 이 mode는 로컬 merge와 GitHub UI merge를 기술적으로 구분하거나 악의적인 writer를 차단한다고 주장하지 않는다. exact associated PR이 없는 임의 직접 push, bootstrap, stale/history SHA, 다른 branch·fork와 실패한 CI는 계속 거부한다.
 
 ## 고정 배포 범위
 
@@ -44,7 +46,7 @@
 
 다음 항목을 읽어 사용자에게 먼저 보고하고 STOP한다. 절대경로, credential reference, token 값, raw Compose/Airflow payload는 보고하지 않는다.
 
-1. 배포 후보인 개인 저장소 `main` SHA와 source `CI` identity
+1. 배포 후보인 개인 저장소 `main` SHA, raw main push event에 결합된 `Promotion Source / required` attestation, same-repository `dev → main` merged PR와 source `CI` identity. guarded_private이면 private와 workflow 밖 sole owner/no extra writer 전제도 함께 확인
 2. 위 네 코드 서비스의 논리 이름과 현재 health/state
 3. 위 열 개 DAG 각각의 pause 상태
 4. writer allowlist 전체의 `running`·`queued` run 수와 drain timeout/poll 계약
@@ -54,16 +56,16 @@
 8. release 후보 overlay가 `/opt/airflow/dags`·`/opt/airflow/dbt`를 read-only로 바꾸고, 기존 writable `/opt/airflow/logs` mount와 exact SHA별 dbt artifact 환경 변수를 보존한다는 검증 결과. baseline 후보는 기존 조직 executor를 위해 dbt read-write·artifact 환경 변수 없음으로 구분함
 9. rollback 시 복원할 baseline과 rollback health 실패 시 열 개 DAG를 모두 paused로 유지한다는 동작
 10. dbt `run/build`, Trino·Iceberg·D1·R2 write가 모두 0이며 전체 stack/data services를 중지하지 않는다는 확인
-11. `WEATHER_GOVERNANCE_READ_TOKEN` secret 이름의 존재 여부, 만료일/rotation 담당과 최소권한 확인. 값은 조회하거나 출력하지 않음
+11. protected mode인 경우에만 `WEATHER_GOVERNANCE_READ_TOKEN` secret 이름의 존재 여부, 만료일/rotation 담당과 최소권한을 확인. guarded_private에는 이 항목을 요구하지 않으며 값은 어느 mode에서도 조회하거나 출력하지 않음
 12. `credential_source_kind=existing_local_env` target이면 runner 프로세스의 `COMPOSE_ENV_FILES`와 `ASK_SEOUL_PROD_ENV_FILE`이 동일한 기존 Compose credential 단일 파일을 가리키는지 확인. 값·절대경로·파일 내용은 출력하지 않음
 
 보고 시점에는 `compose config`, `compose ps`, Airflow list/help/version, ledger read처럼 검증된 read-only adapter만 사용한다. `compose up --dry-run`도 실제 전환 승인 뒤에 실행한다.
 
-## governance read credential
+## protected mode의 governance read credential
 
-`WEATHER_GOVERNANCE_READ_TOKEN`은 `masondev1024/seoul-weather-platform` 한 저장소로 제한한 fine-grained token이다. repository permissions는 identity GET에 필요한 `Administration: read`, `Actions: read`, `Checks: read`, `Contents: read`만 허용하고 write 권한과 다른 저장소 접근은 주지 않는다. 만료일을 두고 담당자가 만료 전에 rotation하며, 교체 뒤 다음 preflight의 성공/실패만 확인한다. 값은 workflow argv, 로그, report, local target 또는 repository 파일에 기록하지 않는다.
+`WEATHER_GOVERNANCE_READ_TOKEN`은 protected mode에서만 `masondev1024/seoul-weather-platform` 한 저장소로 제한해 설치하는 fine-grained token이다. repository permissions는 identity GET에 필요한 `Administration: read`, `Actions: read`, `Checks: read`, `Contents: read`, `Pull requests: read`만 허용하고 write 권한과 다른 저장소 접근은 주지 않는다. 만료일을 두고 담당자가 만료 전에 rotation하며, 교체 뒤 다음 preflight의 성공/실패만 확인한다. 값은 workflow argv, 로그, report, local target 또는 repository 파일에 기록하지 않는다.
 
-GitHub Actions repository secret에는 위 token을 `WEATHER_GOVERNANCE_READ_TOKEN` 이름으로 저장한다. workflow는 이를 CLI step의 `GH_TOKEN`으로만 전달한다. checkout은 계속 `persist-credentials: false`이며 `${{ github.token }}`으로 protection readback을 대체하지 않는다.
+protected mode의 GitHub Actions repository secret에는 위 token을 `WEATHER_GOVERNANCE_READ_TOKEN` 이름으로 저장한다. workflow는 이를 CLI step의 `GH_TOKEN`으로만 전달한다. checkout은 계속 `persist-credentials: false`이며 `${{ github.token }}`으로 protected protection readback을 대체하지 않는다. guarded mode는 private repository와 exact merged-PR evidence를 다시 읽고 workflow의 read-only `github.token` 권한(`Pull requests: read` 포함)으로 검증하므로 이 secret을 설치하지 않는다. 이 token은 repository writer 목록을 열거하거나 sole ownership을 자동 판정하지 않는다.
 
 ## 승인 후 최초 전환 순서
 
@@ -72,12 +74,12 @@ GitHub Actions repository secret에는 위 token을 `WEATHER_GOVERNANCE_READ_TOK
 1. 기존 Compose credential 파일은 복사하거나 repository에 넣지 않고 runner 관리 환경의 `COMPOSE_ENV_FILES`와 `ASK_SEOUL_PROD_ENV_FILE`이 동일한 단일 파일을 참조하게 한다. repository 밖 `WEATHER_DEPLOY_TARGET_PATH`와 함께 값·절대경로를 로그에 남기지 않은 채 존재 여부를 확인한다.
 2. repository 밖 local target과 현재 조직 DAG/dbt mount를 가리키는 baseline overlay를 설치한다. 이 cutover activation은 filesystem baseline 준비만 수행하고 DAG pause/unpause나 코드 서비스 배포를 하지 않는다.
 3. baseline checksum record를 원자 기록하고 Compose `config`·`up --dry-run`으로 네 코드 서비스 외 대상이 없는지 확인한다. baseline restore를 실제 stable overlay 교체와 같은 원자 경로로 rehearsal하고 health를 확인한다.
-4. repo-scoped governance read token을 GitHub Actions repository secret `WEATHER_GOVERNANCE_READ_TOKEN`으로 등록하고 이름·만료·최소권한을 확인한다. 입력값은 화면·명령 인자·로그·보고서에 출력하지 않는다.
+4. protected mode를 선택한 경우에만 repo-scoped governance read token을 GitHub Actions repository secret `WEATHER_GOVERNANCE_READ_TOKEN`으로 등록하고 이름·만료·최소권한(`Pull requests: read` 포함)을 확인한다. guarded_private에는 이 단계를 수행하지 않으며 입력값은 화면·명령 인자·로그·보고서에 출력하지 않는다. self-hosted runner에는 `gh` CLI가 설치되어 있어야 하고, sanitized `gh --version`과 `gh api` read-capability 준비 상태를 확인한다.
 5. workflow 밖의 승인된 runner 관리 절차로 Python `3.11` 환경과 PyYAML을 사전 설치한다. 이어 version/capability를 read-only로 다시 확인해 보고한 기대값과 일치시킨다. workflow는 `pip install`을 실행하지 않고 self-hosted job에서 `setup-python`도 사용하지 않는다.
 6. self-hosted runner를 시작한다. runner 서비스는 승인된 `WEATHER_DEPLOY_TARGET_PATH`, `COMPOSE_ENV_FILES`, `ASK_SEOUL_PROD_ENV_FILE`을 상속해야 하며 workflow YAML이 이 값을 덮어쓰지 않는다.
 7. `WEATHER_DEPLOYMENT_ENABLED=enabled`를 설정하고 exact readback한다. 이 전까지 deploy job은 계속 비활성이다.
-8. 개인 저장소에서 보호된 `dev → main` PR을 merge한다. GitHub Release나 tag를 만들지 않는다.
-9. exact merge SHA의 `CI`가 성공하면 `workflow_run`의 GitHub-hosted `verify-main`이 source workflow name `CI`, suffix 없는 path `.github/workflows/ci.yml`, 별도 `head_branch=main`, event/status/conclusion, remote `main`, protection과 branch-bound required checks를 검증한다.
+8. workflow 밖에서 private sole owner/no extra writer 전제를 확인한 guarded 경계 또는 protected 경계에서 같은 저장소의 `dev → main` PR을 merge한다. GitHub Release나 tag를 만들지 않는다.
+9. exact merge SHA의 `CI`가 성공하면 `Promotion Source / required`가 raw push event의 `before`/`after`와 associated PR `base.sha`/`merge_commit_sha`를 결합해 현재 push의 승격 attestation을 만든다. 이어 `workflow_run`의 GitHub-hosted `verify-main`이 source workflow name `CI`, suffix 없는 path `.github/workflows/ci.yml`, 별도 `head_branch=main`, event/status/conclusion, remote `main`, same-repository merged PR와 branch-bound required checks를 검증한다. guarded_private에서는 private visibility와 workflow `github.token` read capability만 runtime에서 확인하고, protected에서는 추가로 governance secret과 native protection readback을 확인한다.
 10. preflight 성공 뒤에만 self-hosted `deploy-main`이 같은 identity를 다시 검증하고 기존 조직 Weather DAG 열 개의 현재 pause snapshot을 캡처한다. 이어 정확한 열 개만 pause하고 writer allowlist의 `running`·`queued`가 모두 0이 될 때까지 bounded drain한다. timeout이면 snapshot을 복원하고 배포를 중단한다.
 11. drain 성공 뒤 exact SHA checkout·candidate overlay config/dry-run·네 코드 서비스 배포·health를 수행한다. Compose config는 release source가 read-only이고, 기존 logs volume이 writable이며, artifact root가 exact SHA에 결속됐는지 확인한다.
 12. 성공하면 deploy 시작 시 캡처한 snapshot에서 원래 unpaused였던 DAG만 복원해 개인 저장소 코드 기반 새 Weather pipeline을 시작한다. 원래 paused였던 DAG는 paused로 유지한다.
@@ -95,7 +97,7 @@ GitHub Actions repository secret에는 위 token을 `WEATHER_GOVERNANCE_READ_TOK
 
 ## 전환 후 운영 계약
 
-최초 전환이 성공한 뒤 protected `dev → main` merge가 배포 승인이다. 별도 Draft, Release, tag, 배포 보고서 확인 또는 Publish 클릭은 없다. 각 배포는 같은 pause snapshot·bounded drain·code-service-only deploy·health·restore·rollback 절차를 반복한다. governance/protection readback, runner isolation, read credential, target fingerprint 또는 baseline/직전 성공 record가 유효하지 않으면 자동 배포는 fail-closed한다.
+최초 전환이 성공한 뒤 private 단일 소유자 `guarded_private` 또는 더 강한 `protected` 경계에서 같은 저장소의 exact `dev → main` merge가 배포 증거다. public/internal visibility 또는 추가 writer는 guarded 배포를 즉시 중단하고, 다음 배포 전에 `WEATHER_DEPLOYMENT_ENABLED`를 비활성화한 뒤 protected mode 또는 저장소 밖 trusted controller로 전환해야 한다. 별도 Draft, Release, tag, 배포 보고서 확인 또는 Publish 클릭은 없다. 각 배포는 같은 pause snapshot·bounded drain·code-service-only deploy·health·restore·rollback 절차를 반복한다. governance/protection readback, runner isolation, 필요한 mode의 credential, target fingerprint 또는 baseline/직전 성공 record가 유효하지 않으면 자동 배포는 fail-closed한다.
 
 `Deploy Main`은 package manager를 실행하지 않는다. GitHub-hosted `verify-main`은 pinned checkout과 pinned `setup-python` 뒤 stdlib-only 검증 CLI만 호출하고, self-hosted `deploy-main`은 pinned checkout 뒤 승인 시점에 사전 준비한 Python/PyYAML 환경으로 배포 CLI만 호출한다. runner 환경의 version/capability drift는 workflow 실행 중 설치로 고치지 않고 deployment flag를 비활성화한 뒤 다음 승인된 maintenance에서 교정한다.
 
