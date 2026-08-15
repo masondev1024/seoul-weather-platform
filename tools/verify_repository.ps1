@@ -51,7 +51,7 @@ if ($actualPythonMinor -ne $expectedPythonMinor) {
 }
 
 Write-Output "Pinned toolchain: Python $($toolchain.tools.python.version); Airflow $($toolchain.tools.airflow.version); dbt-core $($toolchain.tools.dbt_core.version); dbt-trino $($toolchain.tools.dbt_adapter.version); Node $($toolchain.tools.node.version)."
-Write-Output "Secretless repository checks: policy, provenance integrity/coverage, tests/repository."
+Write-Output "Secretless repository checks: policy, provenance integrity/coverage, tests/repository and tests/deploy."
 
 # This script intentionally invokes only local Python policy/provenance/tests.
 # It never invokes Airflow, Docker, or pipeline-control commands.
@@ -60,7 +60,8 @@ try {
     Invoke-SecretlessPythonCheck @("-m", "tools.repository_policy", "--repo-root", $resolvedRepo)
     Invoke-SecretlessPythonCheck @("-m", "tools.verify_provenance", "--repo-root", $resolvedRepo)
     Invoke-SecretlessPythonCheck @("-m", "tools.refresh_provenance", "--repo-root", $resolvedRepo, "--check")
-    Invoke-SecretlessPythonCheck @("-m", "pytest", "tests/repository")
+    Invoke-SecretlessPythonCheck @("-m", "tools.workflow_policy", "--repo-root", $resolvedRepo)
+    Invoke-SecretlessPythonCheck @("-m", "pytest", "tests/repository", "tests/deploy")
 }
 finally {
     Pop-Location

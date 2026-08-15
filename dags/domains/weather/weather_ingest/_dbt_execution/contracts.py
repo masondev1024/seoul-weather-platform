@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 
@@ -15,6 +17,7 @@ DEFAULT_DBT_OL_BIN = "/home/airflow/dbt-venv/bin/dbt-ol"
 DEFAULT_DBT_PROJECT_DIR = "/opt/airflow/dbt/domains/traffic_weather"
 DBT_BIN_ENV = "ASK_SEOUL_DBT_BIN"
 DBT_PROJECT_DIR_ENV = "ASK_SEOUL_DBT_PROJECT_DIR"
+DBT_ARTIFACT_ROOT_ENV = "ASK_SEOUL_DBT_ARTIFACT_ROOT"
 ARTIFACT_RETENTION_ENV = "ASK_SEOUL_DBT_ARTIFACT_RETENTION_RUNS"
 DEFAULT_ARTIFACT_RETENTION_RUNS = 10
 MATERIALIZATION_COMMANDS = frozenset({"seed", "run", "test", "build", "snapshot"})
@@ -60,6 +63,53 @@ def dbt_bin() -> str:
 
 def dbt_project_dir(environment: Mapping[str, str] = os.environ) -> str:
     return (environment.get(DBT_PROJECT_DIR_ENV) or DEFAULT_DBT_PROJECT_DIR).strip()
+
+
+def _overlap(first: Path, second: Path) -> bool:
+    return (
+        first == second or first.is_relative_to(second) or second.is_relative_to(first)
+    )
+
+
+def dbt_artifact_root(
+    project_dir: str,
+    environment: Mapping[str, str] = os.environ,
+) -> str:
+    """Return a distinct generated-artifact root, or the legacy project root."""
+
+    if DBT_ARTIFACT_ROOT_ENV not in environment:
+        return project_dir
+    configured = environment[DBT_ARTIFACT_ROOT_ENV]
+    if (
+        not isinstance(configured, str)
+        or not configured
+        or configured != configured.strip()
+    ):
+        raise RuntimeError(
+            f"{DBT_ARTIFACT_ROOT_ENV} must be a clean absolute non-root path"
+        )
+    if {".", ".."} & set(re.split(r"[\\/]+", configured)):
+        raise RuntimeError(
+            f"{DBT_ARTIFACT_ROOT_ENV} must not contain lexical traversal"
+        )
+
+    artifact_path = Path(configured)
+    if not artifact_path.is_absolute():
+        raise RuntimeError(f"{DBT_ARTIFACT_ROOT_ENV} must be an absolute path")
+    if artifact_path == Path(artifact_path.anchor):
+        raise RuntimeError(f"{DBT_ARTIFACT_ROOT_ENV} must not be a filesystem root")
+
+    lexical_artifact = Path(os.path.abspath(artifact_path))
+    lexical_project = Path(os.path.abspath(project_dir))
+    resolved_artifact = lexical_artifact.resolve(strict=False)
+    resolved_project = lexical_project.resolve(strict=False)
+    if _overlap(lexical_artifact, lexical_project) or _overlap(
+        resolved_artifact, resolved_project
+    ):
+        raise RuntimeError(
+            f"{DBT_ARTIFACT_ROOT_ENV} must be distinct from and outside the dbt project"
+        )
+    return str(artifact_path)
 
 
 def safe_path_segment(value: str | None) -> str:

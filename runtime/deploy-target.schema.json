@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Weather local deployment target",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "target_id", "credential_source_kind", "credential_reference", "compose", "mounts", "airflow", "timeouts", "local_state"],
+  "$defs": {
+    "absolute_path": {
+      "type": "string",
+      "pattern": "^(?!.*(?:^|[\\\\/])\\.(?:[\\\\/]|$))(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))(?![A-Za-z]:[\\\\/](?:[\\\\/]|\\.(?:[\\\\/]|$))*$)(?!/(?:/|\\.(?:/|$))*$)(?:[A-Za-z]:[\\\\/]|/(?!/)).+$"
+    },
+    "absolute_directory_path": {
+      "type": "string",
+      "pattern": "^(?!.*(?:^|[\\\\/])\\.(?:[\\\\/]|$))(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))(?![A-Za-z]:[\\\\/](?:[\\\\/]|\\.(?:[\\\\/]|$))*$)(?!/(?:/|\\.(?:/|$))*$)(?!.*\\.(?:ya?ml|lock)$)(?:[A-Za-z]:[\\\\/]|/(?!/)).+$"
+    },
+    "absolute_lock_file": {
+      "type": "string",
+      "pattern": "^(?!.*(?:^|[\\\\/])\\.(?:[\\\\/]|$))(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))(?![A-Za-z]:[\\\\/](?:[\\\\/]|\\.(?:[\\\\/]|$))*$)(?!/(?:/|\\.(?:/|$))*$)(?:[A-Za-z]:[\\\\/]|/(?!/)).+\\.lock$"
+    },
+    "absolute_yaml_file": {
+      "type": "string",
+      "pattern": "^(?!.*(?:^|[\\\\/])\\.(?:[\\\\/]|$))(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))(?![A-Za-z]:[\\\\/](?:[\\\\/]|\\.(?:[\\\\/]|$))*$)(?!/(?:/|\\.(?:/|$))*$)(?:[A-Za-z]:[\\\\/]|/(?!/)).+\\.ya?ml$"
+    },
+    "weather_dag_id": {
+      "enum": ["common_admin_dong_bronze", "weather_serving_export", "weather_serving_freshness_watchdog", "weather_serving_snapshot_refresh", "weather_vilage_fcst_bronze", "weather_vilage_fcst_bronze_backfill", "weather_vilage_fcst_collection_slot_reconciliation", "weather_vilage_fcst_recollect", "weather_vilage_fcst_transform", "weather_w2_canonical_transform"]
+    },
+    "compose_service_name": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!.*[Aa][Ii][Rr][Ff][Ll][Oo][Ww]-[Ii][Nn][Ii][Tt])[A-Za-z0-9][A-Za-z0-9_.-]*$"
+    }
+  },
+  "properties": {
+    "schema_version": {"const": "weather-local-deploy-target/v1"},
+    "target_id": {"type": "string", "minLength": 1},
+    "credential_source_kind": {"enum": ["windows_credential_store", "existing_local_env"]},
+    "credential_reference": {"type": "string", "minLength": 1},
+    "compose": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_name", "working_directory", "files", "control_service", "airflow_code_services", "forbidden_data_services"],
+      "properties": {
+        "project_name": {"type": "string", "minLength": 1},
+        "working_directory": {"$ref": "#/$defs/absolute_path"},
+        "files": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/absolute_path"}},
+        "control_service": {"$ref": "#/$defs/compose_service_name"},
+        "airflow_code_services": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/compose_service_name"}},
+        "forbidden_data_services": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/compose_service_name"}}
+      }
+    },
+    "mounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dags_host_path", "dags_container_path", "dbt_host_path", "dbt_container_path", "runtime_root"],
+      "properties": {
+        "dags_host_path": {"$ref": "#/$defs/absolute_path"},
+        "dags_container_path": {"const": "/opt/airflow/dags"},
+        "dbt_host_path": {"$ref": "#/$defs/absolute_path"},
+        "dbt_container_path": {"const": "/opt/airflow/dbt"},
+        "runtime_root": {"$ref": "#/$defs/absolute_directory_path"}
+      }
+    },
+    "airflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dag_allowlist", "writer_dag_allowlist", "never_trigger"],
+      "properties": {
+        "dag_allowlist": {"type": "array", "minItems": 10, "maxItems": 10, "uniqueItems": true, "items": {"$ref": "#/$defs/weather_dag_id"}},
+        "writer_dag_allowlist": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/weather_dag_id"}},
+        "never_trigger": {"const": true}
+      }
+    },
+    "timeouts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["drain_timeout_seconds", "poll_interval_seconds"],
+      "properties": {
+        "drain_timeout_seconds": {"type": "integer", "minimum": 60, "maximum": 3600},
+        "poll_interval_seconds": {"type": "integer", "minimum": 5, "maximum": 60}
+      }
+    },
+    "local_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ledger_directory", "lock_file", "generated_overlay_file"],
+      "properties": {
+        "ledger_directory": {"$ref": "#/$defs/absolute_directory_path"},
+        "lock_file": {"$ref": "#/$defs/absolute_lock_file"},
+        "generated_overlay_file": {"$ref": "#/$defs/absolute_yaml_file"}
+      }
+    }
+  }
+}

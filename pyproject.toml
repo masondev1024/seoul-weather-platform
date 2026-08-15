@@ -10,6 +10,8 @@ requires-python = ">=3.11,<3.12"
 
 [project.optional-dependencies]
 dev = [
+  "jsonschema==4.26.0",
+  "PyYAML==6.0.2",
   "pytest==9.0.3",
 ]
 

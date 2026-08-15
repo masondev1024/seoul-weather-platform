@@ -19,8 +19,11 @@ for unit tests.
 from __future__ import annotations
 
 import json
+import os
+import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from common.ops.product_observability import record_product_event
 from common.pools import SERVING_D1_PUBLISH_POOL
@@ -28,6 +31,7 @@ from common.serving.publisher import ProductRecord, PublicationError
 
 # dbt project that owns each domain's manifest (weather+traffic share the monoproject).
 _DBT_PROJECT = {"weather": "traffic_weather", "traffic": "traffic_weather"}
+_DBT_ARTIFACT_ROOT_ENV = "ASK_SEOUL_DBT_ARTIFACT_ROOT"
 
 
 def publication_record_payload(record: ProductRecord) -> dict[str, object]:
@@ -107,9 +111,53 @@ def record_publication_events(
         )
 
 
-def _manifest_path(domain: str, dbt_project: str | None) -> str:
+def _paths_overlap(first: Path, second: Path) -> bool:
+    return (
+        first == second or first.is_relative_to(second) or second.is_relative_to(first)
+    )
+
+
+def _manifest_path(
+    domain: str,
+    dbt_project: str | None,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> str:
     project = dbt_project or _DBT_PROJECT.get(domain, domain)
-    return f"/opt/airflow/dbt/domains/{project}/target/manifest.json"
+    project_root = Path(f"/opt/airflow/dbt/domains/{project}")
+    environment = os.environ if env is None else env
+    if _DBT_ARTIFACT_ROOT_ENV not in environment:
+        return f"/opt/airflow/dbt/domains/{project}/target/manifest.json"
+
+    configured = environment[_DBT_ARTIFACT_ROOT_ENV]
+    if (
+        not isinstance(configured, str)
+        or not configured
+        or configured != configured.strip()
+    ):
+        raise RuntimeError(
+            f"{_DBT_ARTIFACT_ROOT_ENV} must be a clean absolute non-root path"
+        )
+    if {".", ".."} & set(re.split(r"[\\/]+", configured)):
+        raise RuntimeError(
+            f"{_DBT_ARTIFACT_ROOT_ENV} must not contain lexical traversal"
+        )
+    artifact_root = Path(configured)
+    if not artifact_root.is_absolute():
+        raise RuntimeError(f"{_DBT_ARTIFACT_ROOT_ENV} must be an absolute path")
+    if artifact_root == Path(artifact_root.anchor):
+        raise RuntimeError(f"{_DBT_ARTIFACT_ROOT_ENV} must not be a filesystem root")
+
+    lexical_artifact = Path(os.path.abspath(artifact_root))
+    lexical_project = Path(os.path.abspath(project_root))
+    if _paths_overlap(lexical_artifact, lexical_project) or _paths_overlap(
+        lexical_artifact.resolve(strict=False),
+        lexical_project.resolve(strict=False),
+    ):
+        raise RuntimeError(
+            f"{_DBT_ARTIFACT_ROOT_ENV} must be distinct from and outside the dbt project"
+        )
+    return str(artifact_root / "target" / "manifest.json")
 
 
 def retire_domain_catalog_entries(
@@ -363,8 +411,6 @@ def build_serving_export_dag(
     partitioned_domain_scope: bool = False,
 ):
     """Build a serving-export DAG for one domain. Returns an Airflow ``DAG``."""
-    import os
-
     import pendulum
     from airflow import DAG
     from airflow.providers.standard.operators.python import PythonOperator

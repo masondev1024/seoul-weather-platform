@@ -1,0 +1,262 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  repository-contract:
+    name: Repository Contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: 3.11.15
+      - name: Install repository test dependencies
+        run: python -m pip install -e .[dev]
+      - name: Verify repository contracts
+        run: pwsh -File tools/verify_repository.ps1
+
+  dbt-weather:
+    name: dbt-weather
+    runs-on: ubuntu-latest
+    env:
+      DBT_LOG_PATH: /tmp/weather-dbt-runtime/logs
+      DBT_PACKAGES_INSTALL_PATH: /tmp/weather-dbt-runtime/dbt_packages
+      DBT_TARGET_PATH: /tmp/weather-dbt-runtime/target
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: 3.11.15
+      - name: Install pinned dbt dependencies
+        run: python -m pip install -r runtime/requirements-dbt.lock.txt
+      - name: Install pytest
+        run: python -m pip install pytest==9.0.3
+      - name: Prepare read-only dbt source contract
+        run: |
+          mkdir -p /tmp/weather-dbt-runtime/dbt_packages /tmp/weather-dbt-runtime/logs /tmp/weather-dbt-runtime/target
+          chmod -R a-w dbt/domains/traffic_weather dbt/packages
+      - name: Resolve local dbt packages
+        run: dbt deps --project-dir dbt/domains/traffic_weather --profiles-dir dbt/domains/traffic_weather
+      - name: Verify dbt source remained immutable
+        run: git diff --exit-code -- dbt/domains/traffic_weather dbt/packages
+      - name: Parse Weather dbt project
+        run: dbt parse --project-dir dbt/domains/traffic_weather --profiles-dir dbt/domains/traffic_weather --target ci --no-partial-parse
+      - name: Validate serving contracts
+        run: python dbt/serving_contract/validate_serving_contract.py --source dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_current_outlook.yml dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_precipitation_window.yml dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_risk_window.yml dbt/domains/traffic_weather/models/weather/transform/gold/gold_weather_place_forecast_change_daily.yml --manifest /tmp/weather-dbt-runtime/target/manifest.json --format text
+      - name: Test Weather dbt and contracts
+        run: python -m pytest dbt/serving_contract/tests dbt/domains/traffic_weather/tests/weather tests/contracts -q
+
+  airflow-tests:
+    name: airflow-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: 3.11.15
+      - name: Install pinned Airflow dependencies
+        run: python -m pip install -r runtime/requirements-airflow.lock.txt
+      - name: Install pytest
+        run: python -m pip install pytest==9.0.3
+      - name: Compile Python sources
+        run: python -m compileall dags tools release
+      - name: Test Weather Airflow boundary
+        run: python -m pytest dags/common/serving/tests dags/domains/weather/tests tests/repository/test_airflow_boundary.py -q
+
+  dagbag-policy:
+    name: dagbag-policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: 3.11.15
+      - name: Install policy test dependencies
+        run: python -m pip install -e .[dev]
+      - name: Test secretless DagBag policy
+        run: python -m pytest tests/repository/test_dagbag_harness.py tests/repository/test_scaffold_contract.py -q
+
+  dagbag-runtime:
+    name: dagbag-runtime
+    if: >
+      vars.WEATHER_GOVERNANCE_MODE == 'protected' &&
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
+    runs-on: [self-hosted, windows, weather-prod]
+    steps:
+      - name: Checkout protected branch commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Check isolated runtime DagBag
+        run: python -m tools.dagbag_check --repo-root .
+
+  promotion-source:
+    name: Promotion Source / required
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: 3.11.15
+      - name: Validate pull request promotion source
+        if: github.event_name == 'pull_request'
+        run: python -m tools.promotion_source pull-request --event-path "$GITHUB_EVENT_PATH" --repository "$GITHUB_REPOSITORY"
+      - name: Require protected dev DagBag evidence
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        env:
+          DEV_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          workflow_runs_path="${RUNNER_TEMP}/dagbag-runtime-workflow-runs.json"
+          runtime_evidence_path="${RUNNER_TEMP}/dagbag-runtime-check.json"
+          gh api --method GET \
+            --header "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
+            -f branch=dev \
+            -f event=push \
+            -f head_sha="${DEV_HEAD_SHA}" \
+            -f status=success \
+            --jq "[.workflow_runs[] | select(.name == \"CI\" and .path == \".github/workflows/ci.yml\" and .event == \"push\" and .head_branch == \"dev\" and .head_sha == \"${DEV_HEAD_SHA}\" and .status == \"completed\" and .conclusion == \"success\")] | map({id})" \
+            > "$workflow_runs_path"
+          run_id="$(jq -r '.[0].id // empty' "$workflow_runs_path")"
+          test "$run_id" -gt 0
+          gh api --method GET \
+            --header "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs" \
+            --jq "[.jobs[] | select(.run_id == ${run_id} and .name == \"dagbag-runtime\" and .status == \"completed\" and .conclusion == \"success\" and .head_sha == \"${DEV_HEAD_SHA}\")] | {matching: length}" \
+            > "$runtime_evidence_path"
+          test "$(jq -r '.matching' "$runtime_evidence_path")" -ge 1
+      - name: Validate main push promotion source
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.created != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          associated_prs_path="${RUNNER_TEMP}/associated-prs.json"
+          gh api --method GET \
+            --header "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+            --jq '[.[] | {base: {ref: .base.ref, repo: {full_name: .base.repo.full_name}}, head: {ref: .head.ref, repo: {full_name: .head.repo.full_name}}, merged_at, merge_commit_sha}]' \
+            > "$associated_prs_path"
+          python -m tools.promotion_source main-push --associated-prs-path "$associated_prs_path" --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
+      - name: Validate initial main bootstrap source
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.created == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GOVERNANCE_MODE: ${{ vars.WEATHER_GOVERNANCE_MODE }}
+        run: |
+          repository_readback_path="${RUNNER_TEMP}/bootstrap-repository.json"
+          dev_readback_path="${RUNNER_TEMP}/bootstrap-dev.json"
+          main_readback_path="${RUNNER_TEMP}/bootstrap-main.json"
+          gh api --method GET \
+            --header "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}" \
+            --jq '{full_name, default_branch}' \
+            > "$repository_readback_path"
+          gh api --method GET \
+            --header "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/branches/dev" \
+            --jq '{name, sha: .commit.sha}' \
+            > "$dev_readback_path"
+          gh api --method GET \
+            --header "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/branches/main" \
+            --jq '{name, sha: .commit.sha}' \
+            > "$main_readback_path"
+          python -m tools.promotion_source initial-main-bootstrap --event-path "$GITHUB_EVENT_PATH" --repository-readback-path "$repository_readback_path" --dev-branch-readback-path "$dev_readback_path" --main-branch-readback-path "$main_readback_path" --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" --governance-mode "$GOVERNANCE_MODE"
+      - name: Accept non-promotion dev push
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        run: echo "not-required"
+
+  governance-mode:
+    name: governance-mode
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate repository governance mode
+        env:
+          GOVERNANCE_MODE: ${{ vars.WEATHER_GOVERNANCE_MODE }}
+        run: |
+          case "$GOVERNANCE_MODE" in
+            "protected"|"guarded_private") ;;
+            *) echo "Unsupported or missing WEATHER_GOVERNANCE_MODE." >&2; exit 1 ;;
+          esac
+
+  required:
+    name: CI / required
+    needs:
+      - repository-contract
+      - dbt-weather
+      - airflow-tests
+      - dagbag-policy
+      - dagbag-runtime
+      - promotion-source
+      - governance-mode
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: 3.11.15
+      - name: Evaluate required CI results
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GIT_REF: ${{ github.ref }}
+          GOVERNANCE_MODE: ${{ vars.WEATHER_GOVERNANCE_MODE }}
+          REPOSITORY_CONTRACT: ${{ needs.repository-contract.result }}
+          DBT_WEATHER: ${{ needs.dbt-weather.result }}
+          AIRFLOW_TESTS: ${{ needs.airflow-tests.result }}
+          DAGBAG_POLICY: ${{ needs.dagbag-policy.result }}
+          DAGBAG_RUNTIME: ${{ needs.dagbag-runtime.result }}
+          PROMOTION_SOURCE: ${{ needs.promotion-source.result }}
+          GOVERNANCE_MODE_RESULT: ${{ needs.governance-mode.result }}
+        run: |
+          python -m tools.ci_required_gate \
+            --event-name "$EVENT_NAME" \
+            --git-ref "$GIT_REF" \
+            --governance-mode "$GOVERNANCE_MODE" \
+            --result "repository-contract=${REPOSITORY_CONTRACT}" \
+            --result "dbt-weather=${DBT_WEATHER}" \
+            --result "airflow-tests=${AIRFLOW_TESTS}" \
+            --result "dagbag-policy=${DAGBAG_POLICY}" \
+            --result "dagbag-runtime=${DAGBAG_RUNTIME}" \
+            --result "promotion-source=${PROMOTION_SOURCE}" \
+            --result "governance-mode=${GOVERNANCE_MODE_RESULT}"

@@ -1,0 +1,35 @@
+{
+  "schema_version": "weather-local-deploy-target/v1",
+  "target_id": "example-local-weather",
+  "credential_source_kind": "windows_credential_store",
+  "credential_reference": "example-weather-runtime",
+  "compose": {
+    "project_name": "example-weather-compose",
+    "working_directory": "C:/ProgramData/example-weather/runtime",
+    "files": ["C:/ProgramData/example-weather/runtime/docker-compose.yml"],
+    "control_service": "example-airflow-api",
+    "airflow_code_services": ["example-airflow-api", "example-airflow-scheduler", "example-airflow-dag-processor", "example-airflow-triggerer"],
+    "forbidden_data_services": ["example-postgres", "example-trino"]
+  },
+  "mounts": {
+    "dags_host_path": "C:/ProgramData/example-weather/runtime/dags",
+    "dags_container_path": "/opt/airflow/dags",
+    "dbt_host_path": "C:/ProgramData/example-weather/runtime/dbt",
+    "dbt_container_path": "/opt/airflow/dbt",
+    "runtime_root": "C:/ProgramData/example-weather/runtime"
+  },
+  "airflow": {
+    "dag_allowlist": ["common_admin_dong_bronze", "weather_serving_export", "weather_serving_freshness_watchdog", "weather_serving_snapshot_refresh", "weather_vilage_fcst_bronze", "weather_vilage_fcst_bronze_backfill", "weather_vilage_fcst_collection_slot_reconciliation", "weather_vilage_fcst_recollect", "weather_vilage_fcst_transform", "weather_w2_canonical_transform"],
+    "writer_dag_allowlist": ["common_admin_dong_bronze", "weather_serving_export", "weather_serving_freshness_watchdog", "weather_serving_snapshot_refresh", "weather_vilage_fcst_bronze", "weather_vilage_fcst_bronze_backfill", "weather_vilage_fcst_collection_slot_reconciliation", "weather_vilage_fcst_recollect", "weather_vilage_fcst_transform", "weather_w2_canonical_transform"],
+    "never_trigger": true
+  },
+  "timeouts": {
+    "drain_timeout_seconds": 1800,
+    "poll_interval_seconds": 15
+  },
+  "local_state": {
+    "ledger_directory": "C:/ProgramData/example-weather/runtime/ledger",
+    "lock_file": "C:/ProgramData/example-weather/runtime/deploy.lock",
+    "generated_overlay_file": "C:/ProgramData/example-weather/runtime/generated/main-deploy.override.yml"
+  }
+}

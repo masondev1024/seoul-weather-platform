@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -16,6 +18,7 @@ from .contracts import (
     DbtAttemptPaths,
     DbtExecution,
     command_name,
+    dbt_artifact_root,
     dbt_bin,
     dbt_project_dir,
 )
@@ -25,6 +28,18 @@ from .paths import (
     prune_pipeline_runs,
     reset_execution_directories,
     retention_runs,
+    stable_manifest_path,
+    validate_attempt_artifact_paths,
+)
+
+
+_REQUIRED_MANIFEST_METADATA_FIELDS = (
+    "dbt_schema_version",
+    "dbt_version",
+    "generated_at",
+    "invocation_id",
+    "project_name",
+    "adapter_type",
 )
 
 
@@ -84,6 +99,67 @@ def _prepare_attempt_directories(paths: DbtAttemptPaths) -> None:
             ) from exc
 
 
+def _valid_manifest(path: str | None) -> str | None:
+    if path is None:
+        return None
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    metadata = payload.get("metadata")
+    nodes = payload.get("nodes")
+    if not isinstance(metadata, dict) or not isinstance(nodes, dict) or not nodes:
+        return None
+    if any(
+        not isinstance(metadata.get(field), str) or not metadata[field].strip()
+        for field in _REQUIRED_MANIFEST_METADATA_FIELDS
+    ):
+        return None
+    schema_version = metadata["dbt_schema_version"]
+    if not schema_version.startswith("https://schemas.getdbt.com/dbt/manifest/"):
+        return None
+    if not schema_version.endswith(".json"):
+        return None
+    if any(
+        not isinstance(unique_id, str)
+        or not unique_id
+        or not isinstance(node, dict)
+        for unique_id, node in nodes.items()
+    ):
+        return None
+    return path
+
+
+def _publish_stable_manifest(source_path: str, destination_path: str) -> None:
+    source = Path(source_path)
+    destination = Path(destination_path)
+    temporary_path: Path | None = None
+    try:
+        content = source.read_bytes()
+        with NamedTemporaryFile(
+            dir=destination.parent,
+            prefix=".weather-dbt-manifest-",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary.write(content)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+            temporary_path = Path(temporary.name)
+        os.replace(temporary_path, destination)
+    except OSError as exc:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise RuntimeError(
+            f"weather dbt stable manifest publication failed: {destination}"
+        ) from exc
+
+
 def execute_dbt_phase(
     *,
     dbt_command: str,
@@ -103,11 +179,14 @@ def execute_dbt_phase(
     environ: Mapping[str, str] | None = None,
 ) -> DbtExecution:
     """Run raw preflight and one isolated dbt phase without stale artifacts."""
-    resolved_project = project_dir or dbt_project_dir()
+    config_env = os.environ if environ is None else environ
+    resolved_project = project_dir or dbt_project_dir(config_env)
+    resolved_artifact_root = dbt_artifact_root(resolved_project, config_env)
     resolved_executable = executable or dbt_bin()
     phase = command_name(dbt_command)
     paths = attempt_paths(
         project_dir=resolved_project,
+        artifact_root=resolved_artifact_root,
         pipeline=pipeline,
         run_id=run_id,
         task_id=task_id,
@@ -115,6 +194,7 @@ def execute_dbt_phase(
         invocation_id=invocation_id,
         dbt_command=dbt_command,
     )
+    validate_attempt_artifact_paths(paths, artifact_root=resolved_artifact_root)
     raw_env = environment.raw_environment(
         project_dir=resolved_project,
         packages_path=paths.packages_path,
@@ -232,19 +312,32 @@ def execute_dbt_phase(
             pipeline=pipeline,
             run_id=run_id,
             retention_runs=retained_runs,
+            artifact_root=resolved_artifact_root,
         )
 
     existing_run_results = existing(
         paths.run_results_path, actual_attempted=actual_attempted
     )
     existing_sources = existing(paths.sources_path, actual_attempted=actual_attempted)
-    existing_manifest = existing(paths.manifest_path, actual_attempted=actual_attempted)
+    existing_manifest = _valid_manifest(
+        existing(paths.manifest_path, actual_attempted=actual_attempted)
+    )
     observed = {existing_run_results, existing_sources, existing_manifest}
     missing = tuple(
         path
         for path in (paths.run_results_path, paths.sources_path, paths.manifest_path)
         if actual_attempted and path is not None and path not in observed
     )
+    if (
+        actual_attempted
+        and attempts[-1].returncode == 0
+        and existing_manifest is not None
+        and not missing
+    ):
+        _publish_stable_manifest(
+            existing_manifest,
+            stable_manifest_path(resolved_artifact_root),
+        )
     return DbtExecution(
         attempts=tuple(attempts),
         paths=paths,

@@ -1,0 +1,255 @@
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import NoReturn
+
+
+_SHA_RE = re.compile(r"[0-9a-f]{40}")
+_ZERO_SHA = "0" * 40
+
+
+@dataclass(frozen=True)
+class PromotionDecision:
+    allowed: bool
+    reason: str
+
+
+class _SanitizedArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> NoReturn:
+        del message
+        self.exit(2, "invalid-input\n")
+
+
+def _blocked(reason: str) -> PromotionDecision:
+    return PromotionDecision(allowed=False, reason=reason)
+
+
+def _required_string(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _promotion_fields(
+    pull_request: object,
+) -> tuple[str, str, str, str] | None:
+    if not isinstance(pull_request, Mapping):
+        return None
+    base = pull_request.get("base")
+    head = pull_request.get("head")
+    if not isinstance(base, Mapping) or not isinstance(head, Mapping):
+        return None
+    base_repo = base.get("repo")
+    head_repo = head.get("repo")
+    if not isinstance(base_repo, Mapping) or not isinstance(head_repo, Mapping):
+        return None
+
+    base_ref = _required_string(base.get("ref"))
+    base_repository = _required_string(base_repo.get("full_name"))
+    head_ref = _required_string(head.get("ref"))
+    head_repository = _required_string(head_repo.get("full_name"))
+    if (
+        base_ref is None
+        or base_repository is None
+        or head_ref is None
+        or head_repository is None
+    ):
+        return None
+    return base_ref, base_repository, head_ref, head_repository
+
+
+def validate_pull_request_event(
+    event: Mapping[str, object], repository: str
+) -> PromotionDecision:
+    if not repository or not isinstance(event, Mapping):
+        return _blocked("invalid-event")
+    fields = _promotion_fields(event.get("pull_request"))
+    if fields is None:
+        return _blocked("invalid-event")
+    base_ref, base_repository, head_ref, head_repository = fields
+    if base_repository != repository:
+        return _blocked("invalid-promotion-source")
+    if base_ref == "dev":
+        return PromotionDecision(allowed=True, reason="not-required")
+    if base_ref != "main":
+        return _blocked("unsupported-base")
+    if head_ref != "dev" or head_repository != repository:
+        return _blocked("invalid-promotion-source")
+    return PromotionDecision(allowed=True, reason="allowed")
+
+
+def validate_main_push_associated_prs(
+    prs: Sequence[Mapping[str, object]], repository: str, sha: str
+) -> PromotionDecision:
+    if (
+        not repository
+        or not sha
+        or not isinstance(prs, Sequence)
+        or isinstance(prs, (str, bytes, bytearray))
+    ):
+        return _blocked("invalid-associated-prs")
+
+    exact_promotion_found = False
+    for pull_request in prs:
+        if not isinstance(pull_request, Mapping):
+            return _blocked("invalid-associated-prs")
+        fields = _promotion_fields(pull_request)
+        if fields is None:
+            return _blocked("invalid-associated-prs")
+        base_ref, base_repository, head_ref, head_repository = fields
+        merged_at = _required_string(pull_request.get("merged_at"))
+        merge_commit_sha = _required_string(pull_request.get("merge_commit_sha"))
+        if (
+            base_ref == "main"
+            and base_repository == repository
+            and head_ref == "dev"
+            and head_repository == repository
+            and merged_at is not None
+            and merge_commit_sha == sha
+        ):
+            exact_promotion_found = True
+    if exact_promotion_found:
+        return PromotionDecision(allowed=True, reason="allowed")
+    return _blocked("missing-promotion-evidence")
+
+
+def validate_initial_main_bootstrap_push(
+    event: Mapping[str, object],
+    repository_readback: Mapping[str, object],
+    dev_branch_readback: Mapping[str, object],
+    main_branch_readback: Mapping[str, object],
+    repository: str,
+    sha: str,
+    governance_mode: str,
+) -> PromotionDecision:
+    event_repository = event.get("repository")
+    if (
+        governance_mode != "guarded_private"
+        or not isinstance(repository, str)
+        or not repository
+        or not isinstance(sha, str)
+        or _SHA_RE.fullmatch(sha) is None
+        or event.get("ref") != "refs/heads/main"
+        or event.get("created") is not True
+        or event.get("deleted") is not False
+        or event.get("before") != _ZERO_SHA
+        or event.get("after") != sha
+        or not isinstance(event_repository, Mapping)
+        or event_repository.get("full_name") != repository
+        or set(repository_readback) != {"full_name", "default_branch"}
+        or repository_readback.get("full_name") != repository
+        or repository_readback.get("default_branch") != "dev"
+        or set(dev_branch_readback) != {"name", "sha"}
+        or dev_branch_readback.get("name") != "dev"
+        or dev_branch_readback.get("sha") != sha
+        or set(main_branch_readback) != {"name", "sha"}
+        or main_branch_readback.get("name") != "main"
+        or main_branch_readback.get("sha") != sha
+    ):
+        return _blocked("invalid-bootstrap-source")
+    return PromotionDecision(allowed=True, reason="initial-bootstrap")
+
+
+def _read_json(path: Path) -> object:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid-input") from exc
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = _SanitizedArgumentParser(
+        description="Validate dev-to-main promotion evidence from local GitHub JSON."
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    pull_request = commands.add_parser("pull-request")
+    pull_request.add_argument("--event-path", type=Path, required=True)
+    pull_request.add_argument("--repository", required=True)
+
+    main_push = commands.add_parser("main-push")
+    main_push.add_argument("--associated-prs-path", type=Path, required=True)
+    main_push.add_argument("--repository", required=True)
+    main_push.add_argument("--sha", required=True)
+
+    initial_bootstrap = commands.add_parser("initial-main-bootstrap")
+    initial_bootstrap.add_argument("--event-path", type=Path, required=True)
+    initial_bootstrap.add_argument(
+        "--repository-readback-path", type=Path, required=True
+    )
+    initial_bootstrap.add_argument(
+        "--dev-branch-readback-path", type=Path, required=True
+    )
+    initial_bootstrap.add_argument(
+        "--main-branch-readback-path", type=Path, required=True
+    )
+    initial_bootstrap.add_argument("--repository", required=True)
+    initial_bootstrap.add_argument("--sha", required=True)
+    initial_bootstrap.add_argument("--governance-mode", required=True)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        if args.command == "pull-request":
+            payloads = (_read_json(args.event_path),)
+        elif args.command == "main-push":
+            payloads = (_read_json(args.associated_prs_path),)
+        else:
+            payloads = (
+                _read_json(args.event_path),
+                _read_json(args.repository_readback_path),
+                _read_json(args.dev_branch_readback_path),
+                _read_json(args.main_branch_readback_path),
+            )
+    except ValueError:
+        print("invalid-input")
+        return 1
+
+    if args.command == "pull-request":
+        (payload,) = payloads
+        if not isinstance(payload, Mapping):
+            decision = _blocked("invalid-input")
+        else:
+            decision = validate_pull_request_event(payload, args.repository)
+    elif args.command == "main-push":
+        (payload,) = payloads
+        if not isinstance(payload, list):
+            decision = _blocked("invalid-input")
+        else:
+            decision = validate_main_push_associated_prs(
+                payload, args.repository, args.sha
+            )
+    else:
+        event, repository_readback, dev_readback, main_readback = payloads
+        if not all(
+            isinstance(payload, Mapping)
+            for payload in (
+                event,
+                repository_readback,
+                dev_readback,
+                main_readback,
+            )
+        ):
+            decision = _blocked("invalid-input")
+        else:
+            decision = validate_initial_main_bootstrap_push(
+                event,
+                repository_readback,
+                dev_readback,
+                main_readback,
+                args.repository,
+                args.sha,
+                args.governance_mode,
+            )
+
+    print(decision.reason)
+    return 0 if decision.allowed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

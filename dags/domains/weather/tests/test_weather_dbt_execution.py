@@ -1,4 +1,6 @@
 import os
+import json
+from pathlib import Path
 
 import pytest
 
@@ -25,6 +27,71 @@ def test_weather_execution_uses_project_env_override(monkeypatch):
     monkeypatch.setenv("ASK_SEOUL_DBT_PROJECT_DIR", "/tmp/root-dbt")
 
     assert module.dbt_project_dir() == "/tmp/root-dbt"
+
+
+def test_weather_external_artifact_root_keeps_source_project_read_only(
+    tmp_path, monkeypatch
+):
+    module = load_execution_module()
+    project_dir = tmp_path / "source" / "traffic_weather"
+    artifact_root = tmp_path / "artifacts" / "release-1"
+    project_dir.mkdir(parents=True)
+    assert not artifact_root.exists()
+    original_mkdir = Path.mkdir
+    resolved_project = project_dir.resolve()
+
+    def reject_project_writes(path, *args, **kwargs):
+        resolved = path.resolve(strict=False)
+        if resolved == resolved_project or resolved.is_relative_to(resolved_project):
+            raise AssertionError(f"dbt attempted to write into source project: {path}")
+        return original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", reject_project_writes)
+    observed = []
+
+    def runner(command, **kwargs):
+        observed.append((command, kwargs))
+        assert kwargs["cwd"] == str(project_dir)
+        assert kwargs["env"]["DBT_PROJECT_DIR"] == str(project_dir)
+        assert kwargs["env"]["DBT_PROFILES_DIR"] == str(project_dir)
+        assert Path(kwargs["env"]["DBT_PACKAGES_INSTALL_PATH"]).is_relative_to(
+            artifact_root
+        )
+        assert Path(option(command, "--log-path")).is_relative_to(artifact_root)
+        if command[1] == "ls":
+            assert Path(option(command, "--target-path")).is_relative_to(artifact_root)
+            return completed(
+                command,
+                stdout='{"unique_id":"model.asac_seoul.silver","resource_type":"model"}\n',
+            )
+        write_artifacts(command)
+        return completed(command)
+
+    execution = module.execute_dbt_phase(
+        dbt_command="run",
+        selector="ask_seoul_weather_transform_silver",
+        invocation_id="read-only-source",
+        pipeline="weather-transform",
+        run_id="scheduled__1",
+        task_id="dbt_run_silver",
+        try_number=1,
+        target="dev",
+        variables=None,
+        project_dir=str(project_dir),
+        executable=RAW_DBT,
+        runner=runner,
+        environ={"ASK_SEOUL_DBT_ARTIFACT_ROOT": str(artifact_root)},
+    )
+
+    assert [command[1] for command, _kwargs in observed] == ["ls", "run"]
+    assert Path(execution.paths.execution_target_path).is_relative_to(artifact_root)
+    stable_manifest = json.loads(
+        (artifact_root / "target" / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert stable_manifest["metadata"]["project_name"] == "asac_seoul"
+    assert tuple(stable_manifest["nodes"]) == ("model.asac_seoul.weather_test",)
+    assert not (project_dir / "target").exists()
+    assert not (project_dir / "logs").exists()
 
 
 def test_weather_openlineage_env_exists_only_on_dbt_ol_actual(tmp_path, monkeypatch):
