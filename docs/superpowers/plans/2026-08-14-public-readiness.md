@@ -261,7 +261,7 @@ jobs:
         with: {fetch-depth: 0, persist-credentials: false}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with: {python-version: '3.11.15'}
-      - run: python -m pip install -e .[dev]
+      - run: python -m pip install jsonschema==4.26.0 PyYAML==6.0.2 pytest==9.0.3
       - id: readiness
         continue-on-error: true
         run: python -m tools.public_readiness --repo-root . --output public-readiness-report.json

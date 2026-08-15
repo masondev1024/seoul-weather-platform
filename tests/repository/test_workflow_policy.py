@@ -19,6 +19,9 @@ CHECKOUT_USE = f"actions/checkout@{PINNED_SHA}"
 SETUP_PYTHON_USE = f"actions/setup-python@{SETUP_PYTHON_SHA}"
 DAGBAG_COMMAND = "python -m tools.dagbag_check --repo-root ."
 LEGACY_PACKAGE_INSTALL_COMMAND = "python -m pip install -e .[dev]"
+DEV_DEPENDENCY_INSTALL_COMMAND = (
+    "python -m pip install jsonschema==4.26.0 PyYAML==6.0.2 pytest==9.0.3"
+)
 LEGACY_PREPARE_COMMAND = (
     "python -m deployment.prepare_cli "
     "--repository masondev1024/seoul-weather-platform "
@@ -490,7 +493,7 @@ def test_repository_ci_runs_the_exact_secretless_verification_commands() -> None
 
     expected_commands = {
         "repository-contract": [
-            "python -m pip install -e .[dev]",
+            DEV_DEPENDENCY_INSTALL_COMMAND,
             "pwsh -File tools/verify_repository.ps1",
         ],
         "dbt-weather": [
@@ -508,6 +511,7 @@ def test_repository_ci_runs_the_exact_secretless_verification_commands() -> None
             "python -m pytest dags/common/serving/tests dags/domains/weather/tests tests/repository/test_airflow_boundary.py -q",
         ],
         "dagbag-policy": [
+            DEV_DEPENDENCY_INSTALL_COMMAND,
             "python -m pytest tests/repository/test_dagbag_harness.py tests/repository/test_scaffold_contract.py -q",
         ],
     }
@@ -515,6 +519,7 @@ def test_repository_ci_runs_the_exact_secretless_verification_commands() -> None
         actual = _run_commands(jobs[job_id])
         for command in commands:
             assert command in actual
+        assert LEGACY_PACKAGE_INSTALL_COMMAND not in actual
 
 
 def test_repository_ci_dbt_job_proves_read_only_source_and_external_artifacts() -> None:

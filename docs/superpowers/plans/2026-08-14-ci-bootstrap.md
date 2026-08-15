@@ -277,7 +277,7 @@ Use `ubuntu-latest`, pinned checkout/setup-python, Python `3.11.15`. Exact comma
 
 ```text
 Repository Contract:
-  python -m pip install -e .[dev]
+  python -m pip install jsonschema==4.26.0 PyYAML==6.0.2 pytest==9.0.3
   pwsh -File tools/verify_repository.ps1
 
 dbt-weather:
