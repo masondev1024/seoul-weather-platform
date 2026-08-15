@@ -8,10 +8,12 @@ from tools.github_governance import classify, protection_matches
 
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_BOOTSTRAP_SHA = "0" * 40
 _CHECK_RUN_URL_RE = re.compile(
     r"^https://api\.github\.com/repos/(?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/check-runs/(?P<id>[1-9][0-9]*)$"
 )
 _REQUIRED_CHECKS = ("CI / required", "Promotion Source / required")
+_DAGBAG_RUNTIME_JOB = "dagbag-runtime"
 _SAFE_CATEGORY = "invalid-main-deploy-identity"
 _PROTECTION_TOP_LEVEL_KEYS = {
     "required_status_checks",
@@ -112,6 +114,13 @@ def _sha(value: object) -> str:
     return text
 
 
+def _deploy_sha(value: object) -> str:
+    sha = _sha(value)
+    if sha == _BOOTSTRAP_SHA:
+        _reject()
+    return sha
+
+
 def _repo_full_name(value: object) -> str:
     mapping = _exact_mapping(value, {"full_name"})
     return _string(mapping["full_name"])
@@ -149,7 +158,10 @@ def _validate_repo(repo: object, repository: str, sha: str) -> dict[str, Any]:
     if type(repo_map["private"]) is not bool:
         _reject()
     visibility = _string(repo_map["visibility"])
-    if visibility.casefold() not in {"private", "public", "internal"}:
+    if (
+        visibility not in {"private", "public", "internal"}
+        or repo_map["private"] is not (visibility == "private")
+    ):
         _reject()
     return repo_map
 
@@ -185,11 +197,19 @@ def _validate_source_run(source_run: object, repository: str, sha: str) -> int:
 
 
 def _validate_jobs(
-    source_jobs: object, repository: str, run_id: int, sha: str
+    source_jobs: object,
+    repository: str,
+    run_id: int,
+    sha: str,
+    governance_mode: object,
 ) -> dict[str, str]:
-    jobs = _exact_list(source_jobs, length=len(_REQUIRED_CHECKS))
+    jobs = _exact_list(source_jobs, length=len(_REQUIRED_CHECKS) + 1)
     endpoints: dict[str, str] = {}
     urls: set[str] = set()
+    runtime_seen = False
+    expected_runtime_conclusion = (
+        "success" if governance_mode == "protected" else "skipped"
+    )
     for job_value in jobs:
         job = _exact_mapping(
             job_value,
@@ -204,7 +224,7 @@ def _validate_jobs(
             },
         )
         name = _string(job["name"])
-        if name not in _REQUIRED_CHECKS or name in endpoints:
+        if name in endpoints or (name == _DAGBAG_RUNTIME_JOB and runtime_seen):
             _reject()
         url = _string(job["check_run_url"])
         if url in urls:
@@ -216,11 +236,17 @@ def _validate_jobs(
             or job["head_branch"] != "main"
             or _sha(job["head_sha"]) != sha
             or job["status"] != "completed"
-            or job["conclusion"] != "success"
         ):
             _reject()
+        if name == _DAGBAG_RUNTIME_JOB:
+            if job["conclusion"] != expected_runtime_conclusion:
+                _reject()
+            runtime_seen = True
+            continue
+        if name not in _REQUIRED_CHECKS or job["conclusion"] != "success":
+            _reject()
         endpoints[name] = endpoint
-    if set(endpoints) != set(_REQUIRED_CHECKS):
+    if set(endpoints) != set(_REQUIRED_CHECKS) or not runtime_seen:
         _reject()
     return endpoints
 
@@ -264,9 +290,20 @@ def _validate_linked_checks(
 
 def _validate_governance(
     repo: dict[str, Any],
+    governance_mode: object,
     protections: object,
     expected_app_ids: dict[str, int],
 ) -> None:
+    if governance_mode == "guarded_private":
+        if (
+            repo["visibility"] != "private"
+            or repo["private"] is not True
+            or protections is not None
+        ):
+            _reject()
+        return
+    if governance_mode != "protected":
+        _reject()
     protections_map = _exact_mapping(protections, {"dev", "main"})
     _validate_exact_protection("dev", protections_map["dev"], expected_app_ids)
     _validate_exact_protection("main", protections_map["main"], expected_app_ids)
@@ -274,6 +311,24 @@ def _validate_governance(
         _reject()
     main = protections_map["main"]
     if not protection_matches("main", main, expected_app_ids):
+        _reject()
+
+
+def _validate_promotion_pr(value: object, repository: str, sha: str) -> None:
+    pull_request = _exact_mapping(
+        value, {"number", "merged_at", "merge_commit_sha", "base", "head"}
+    )
+    base = _exact_mapping(pull_request["base"], {"ref", "repo"})
+    head = _exact_mapping(pull_request["head"], {"ref", "repo"})
+    if (
+        _positive_int(pull_request["number"]) <= 0
+        or _string(pull_request["merged_at"]) == ""
+        or _sha(pull_request["merge_commit_sha"]) != sha
+        or base["ref"] != "main"
+        or _repo_full_name(base["repo"]) != repository
+        or head["ref"] != "dev"
+        or _repo_full_name(head["repo"]) != repository
+    ):
         _reject()
 
 
@@ -337,6 +392,8 @@ def validate_main_deploy_identity(
     workflow_sha: object,
     repository: object,
     repo: object,
+    governance_mode: object,
+    promotion_pr: object,
     protections: object,
     source_run: object,
     source_jobs: object,
@@ -347,6 +404,8 @@ def validate_main_deploy_identity(
     workflow_sha_s = _snapshot(workflow_sha)
     repository_s = _snapshot(repository)
     repo_s = _snapshot(repo)
+    governance_mode_s = _snapshot(governance_mode)
+    promotion_pr_s = _snapshot(promotion_pr)
     protections_s = _snapshot(protections)
     source_run_s = _snapshot(source_run)
     source_jobs_s = _snapshot(source_jobs)
@@ -354,7 +413,7 @@ def validate_main_deploy_identity(
 
     repository_text = _string(repository_s)
     workflow_ref_text = _string(workflow_ref_s)
-    workflow_sha_text = _sha(workflow_sha_s)
+    workflow_sha_text = _deploy_sha(workflow_sha_s)
     if (
         workflow_ref_text
         != f"{repository_text}/.github/workflows/deploy-main.yml@refs/heads/main"
@@ -363,15 +422,22 @@ def validate_main_deploy_identity(
 
     _validate_event(event_s, repository_text, workflow_sha_text)
     repo_map = _validate_repo(repo_s, repository_text, workflow_sha_text)
+    _validate_promotion_pr(promotion_pr_s, repository_text, workflow_sha_text)
     run_id = _validate_source_run(source_run_s, repository_text, workflow_sha_text)
     endpoints_by_name = _validate_jobs(
-        source_jobs_s, repository_text, run_id, workflow_sha_text
+        source_jobs_s,
+        repository_text,
+        run_id,
+        workflow_sha_text,
+        governance_mode_s,
     )
     checks = _validate_linked_checks(
         linked_checks_s, endpoints_by_name, repository_text, workflow_sha_text
     )
     expected_app_ids = {name: app_id for name, _, app_id in checks}
-    _validate_governance(repo_map, protections_s, expected_app_ids)
+    _validate_governance(
+        repo_map, governance_mode_s, protections_s, expected_app_ids
+    )
     return MainDeployIdentity(
         repository=repository_text,
         workflow_ref=workflow_ref_text,

@@ -26,6 +26,22 @@ _DRY_RUN_CONTAINER = re.compile(
     r"(?:\s+\d+(?:\.\d+)?s)?$"
 )
 _DRY_RUN_PROGRESS = re.compile(r"^\[\+\]\s+Running\s+\d+/\d+$")
+_DRY_RUN_V5_CONTAINER = re.compile(
+    r"^Container\s+(?:(?P<prefix>[0-9a-f]{12})_)?"
+    r"(?P<container>[A-Za-z0-9][A-Za-z0-9_.-]*)\s+"
+    r"(?P<status>Recreate|Recreated|Starting|Started|Waiting|Healthy)$"
+)
+
+
+def _compose_volume_dict(volume: Mapping[str, object], expected: Mapping[str, object]) -> dict[str, object]:
+    normalized = dict(volume)
+    if "read_only" in expected and type(expected["read_only"]) is not bool:
+        raise ValueError
+    if "read_only" in normalized and type(normalized["read_only"]) is not bool:
+        raise ValueError
+    if expected.get("read_only") is False and "read_only" not in normalized:
+        normalized["read_only"] = False
+    return normalized
 
 
 def _safe_atom(value: object) -> str:
@@ -150,6 +166,10 @@ class ComposeCommandAdapter:
         dry_output = self._dry_run_checked(
             (
                 *candidate_prefix,
+                "--ansi",
+                "never",
+                "--progress",
+                "plain",
                 "--dry-run",
                 "up",
                 "-d",
@@ -201,7 +221,7 @@ class ComposeCommandAdapter:
                         if isinstance(volume, Mapping)
                         and volume.get("target") == expected["target"]
                     ]
-                    if len(matches) != 1 or dict(matches[0]) != expected:
+                    if len(matches) != 1 or _compose_volume_dict(matches[0], expected) != expected:
                         raise ValueError
                 expected_environment = overlay_body.get("environment")
                 if expected_environment is not None:
@@ -264,19 +284,79 @@ class ComposeCommandAdapter:
                 raise ValueError
             seen: set[str] = set()
             progress_lines = 0
+            classic_output = True
             for line in lines:
                 if _DRY_RUN_PROGRESS.fullmatch(line):
                     progress_lines += 1
                     continue
                 match = _DRY_RUN_CONTAINER.fullmatch(line)
                 if match is None:
-                    raise ValueError
+                    classic_output = False
+                    break
                 service = by_container.get(match.group(1))
                 if service not in self._target.airflow_code_services:
                     raise ValueError
                 seen.add(service)
-            if progress_lines == 0 or seen != set(self._services):
+            if classic_output:
+                if progress_lines == 0 or seen != set(self._services):
+                    raise ValueError
+                return
+
+            lifecycle = {
+                service: {"base": [], "temporary": []}
+                for service in self._services
+            }
+            prefixes: dict[str, str] = {}
+            for line in lines:
+                match = _DRY_RUN_V5_CONTAINER.fullmatch(line)
+                if match is None:
+                    raise ValueError
+                service = by_container.get(match.group("container"))
+                if service not in self._target.airflow_code_services:
+                    raise ValueError
+                prefix = match.group("prefix")
+                status = match.group("status")
+                if prefix is None:
+                    if status not in {"Recreate", "Recreated", "Waiting", "Healthy"}:
+                        raise ValueError
+                    lifecycle[service]["base"].append(status)
+                else:
+                    if status not in {"Starting", "Started", "Waiting", "Healthy"}:
+                        raise ValueError
+                    if service in prefixes and prefixes[service] != prefix:
+                        raise ValueError
+                    prefixes[service] = prefix
+                    lifecycle[service]["temporary"].append(status)
+            if len(set(prefixes.values())) != len(self._services):
                 raise ValueError
+            for states in lifecycle.values():
+                base_states = states["base"]
+                temporary_states = states["temporary"]
+                if (
+                    base_states.count("Recreate") != 1
+                    or base_states.count("Recreated") != 1
+                    or base_states.index("Recreate") > base_states.index("Recreated")
+                ):
+                    raise ValueError
+                if (
+                    temporary_states.count("Starting") != 1
+                    or temporary_states.count("Started") != 1
+                    or temporary_states.index("Starting")
+                    > temporary_states.index("Started")
+                ):
+                    raise ValueError
+                if any(
+                    index < base_states.index("Recreated")
+                    for index, status in enumerate(base_states)
+                    if status in {"Waiting", "Healthy"}
+                ):
+                    raise ValueError
+                if any(
+                    index < temporary_states.index("Started")
+                    for index, status in enumerate(temporary_states)
+                    if status in {"Waiting", "Healthy"}
+                ):
+                    raise ValueError
         except Exception:
             raise ComposeAdapterError("compose_adapter_dry_run_rejected") from None
 

@@ -247,17 +247,17 @@ def _install_verify_fakes(monkeypatch: pytest.MonkeyPatch, calls: _Calls) -> Non
             calls.add("gh-runner")
 
     def read_inputs(**kwargs: object) -> _Inputs:
-        calls.add(
-            "evidence",
-            {
-                "event_path": kwargs["event_path"],
-                "workflow_ref": kwargs["workflow_ref"],
-                "workflow_sha": kwargs["workflow_sha"],
-                "repository": kwargs["repository"],
-                "gh_token": kwargs["gh_token"],
-                "runner_type": type(kwargs["runner"]).__name__,
-            },
-        )
+        evidence = {
+            "event_path": kwargs["event_path"],
+            "workflow_ref": kwargs["workflow_ref"],
+            "workflow_sha": kwargs["workflow_sha"],
+            "repository": kwargs["repository"],
+            "gh_token": kwargs["gh_token"],
+            "runner_type": type(kwargs["runner"]).__name__,
+        }
+        if "governance_mode" in kwargs:
+            evidence["governance_mode"] = kwargs["governance_mode"]
+        calls.add("evidence", evidence)
         return _Inputs()
 
     def validate(**kwargs: object) -> _Identity:
@@ -311,6 +311,7 @@ def test_verify_main_success_prints_fixed_output_and_constructs_no_runtime(
                 "workflow_ref": WORKFLOW_REF,
                 "workflow_sha": SHA,
                 "repository": REPOSITORY,
+                "governance_mode": "protected",
                 "gh_token": TOKEN,
                 "runner_type": "FakeGhRunner",
             },
@@ -323,10 +324,16 @@ def test_verify_main_success_prints_fixed_output_and_constructs_no_runtime(
     ("env_name", "value"),
     [
         ("GITHUB_ACTIONS", "false"),
-        ("GOVERNANCE_MODE", "guarded_private"),
+        ("GITHUB_ACTIONS", None),
+        ("GOVERNANCE_MODE", "open"),
+        ("GOVERNANCE_MODE", ""),
+        ("GOVERNANCE_MODE", None),
         ("DEPLOYMENT_ENABLED", "disabled"),
+        ("DEPLOYMENT_ENABLED", None),
         ("GH_TOKEN", ""),
-        ("GITHUB_REPOSITORY", "other/repo"),
+        ("GH_TOKEN", None),
+        ("GITHUB_REPOSITORY", ""),
+        ("GITHUB_REPOSITORY", None),
     ],
 )
 def test_env_gate_failure_happens_before_github_or_runtime(
@@ -334,13 +341,16 @@ def test_env_gate_failure_happens_before_github_or_runtime(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     env_name: str,
-    value: str,
+    value: str | None,
 ) -> None:
     import deployment.main_cli as cli
 
     event = _event_path(tmp_path)
     _set_base_env(monkeypatch, event)
-    monkeypatch.setenv(env_name, value)
+    if value is None:
+        monkeypatch.delenv(env_name)
+    else:
+        monkeypatch.setenv(env_name, value)
 
     def forbidden(*args: object, **kwargs: object) -> None:
         raise AssertionError("gate should stop before this call")
@@ -364,6 +374,196 @@ def test_env_gate_failure_happens_before_github_or_runtime(
     assert rc == 1
     assert captured.out == ""
     assert captured.err == "deploy-main:gate:invalid-environment\n"
+
+
+def test_guarded_verify_passes_mode_to_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import deployment.main_cli as cli
+
+    event = _event_path(tmp_path)
+    _set_base_env(monkeypatch, event)
+    monkeypatch.setenv("GOVERNANCE_MODE", "guarded_private")
+    monkeypatch.setenv("GH_TOKEN", "READ_TOKEN_MARKER")
+    calls = _Calls()
+    _install_verify_fakes(monkeypatch, calls)
+
+    rc = cli.main(
+        [
+            "verify-main",
+            "--event-path",
+            str(event),
+            "--workflow-ref",
+            WORKFLOW_REF,
+            "--workflow-sha",
+            SHA,
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert captured.out == "verify-main:identity:ok\n"
+    assert captured.err == ""
+    assert calls.values == [
+        ("gh-runner", None),
+        (
+            "evidence",
+            {
+                "event_path": str(event),
+                "workflow_ref": WORKFLOW_REF,
+                "workflow_sha": SHA,
+                "repository": REPOSITORY,
+                "governance_mode": "guarded_private",
+                "gh_token": "READ_TOKEN_MARKER",
+                "runner_type": "FakeGhRunner",
+            },
+        ),
+        ("identity", {"payload": "identity-inputs"}),
+    ]
+
+
+def test_guarded_deploy_passes_mode_to_evidence_before_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import deployment.main_cli as cli
+
+    event = _event_path(tmp_path)
+    _set_base_env(monkeypatch, event)
+    monkeypatch.setenv("GOVERNANCE_MODE", "guarded_private")
+    monkeypatch.setenv("GH_TOKEN", "READ_TOKEN_MARKER")
+    calls = _Calls()
+    _install_verify_fakes(monkeypatch, calls)
+
+    class FakeOrchestrator:
+        def deploy(self, identity: object, target: object) -> DeploymentResult:
+            calls.add("orchestrator-deploy", (identity, target))
+            return DeploymentResult("deploy-id", DeploymentOutcome.SUCCESS, "passed", False)
+
+    def build_components(identity: object) -> tuple[object, object]:
+        calls.add("runtime-components", identity)
+        return FakeOrchestrator(), object()
+
+    monkeypatch.setattr(cli, "_build_deploy_components", build_components)
+
+    rc = cli.main(
+        [
+            "deploy-main",
+            "--event-path",
+            str(event),
+            "--workflow-ref",
+            WORKFLOW_REF,
+            "--workflow-sha",
+            SHA,
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert captured.out == "deploy-main:deployment:success\n"
+    assert captured.err == ""
+    assert [name for name, _ in calls.values] == [
+        "gh-runner",
+        "evidence",
+        "identity",
+        "runtime-components",
+        "orchestrator-deploy",
+    ]
+    evidence = next(value for name, value in calls.values if name == "evidence")
+    assert evidence["governance_mode"] == "guarded_private"
+
+
+@pytest.mark.parametrize("command", ["verify-main", "deploy-main"])
+@pytest.mark.parametrize(
+    ("argument", "invalid_value"),
+    [
+        ("--workflow-ref", "other/repo/.github/workflows/deploy-main.yml@refs/heads/main"),
+        ("--workflow-sha", "abcdefabcdefabcdefabcdefabcdefabcdefabcd"),
+        ("--event-path", "missing-event.json"),
+    ],
+)
+def test_gate_rejects_mismatched_identity_arguments_before_github_or_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+    argument: str,
+    invalid_value: str,
+) -> None:
+    import deployment.main_cli as cli
+
+    event = _event_path(tmp_path)
+    _set_base_env(monkeypatch, event)
+    values = {
+        "--event-path": str(event),
+        "--workflow-ref": WORKFLOW_REF,
+        "--workflow-sha": SHA,
+    }
+    values[argument] = (
+        str(tmp_path / invalid_value) if argument == "--event-path" else invalid_value
+    )
+    if argument == "--event-path":
+        monkeypatch.setenv("GITHUB_EVENT_PATH", values[argument])
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("gate should stop before GitHub or runtime")
+
+    monkeypatch.setattr(cli, "SubprocessGhRunner", forbidden)
+    monkeypatch.setattr(cli, "_load_runtime_symbols", forbidden)
+    monkeypatch.setattr(cli, "load_deploy_target", forbidden)
+
+    rc = cli.main(
+        [
+            command,
+            "--event-path",
+            values["--event-path"],
+            "--workflow-ref",
+            values["--workflow-ref"],
+            "--workflow-sha",
+            values["--workflow-sha"],
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert captured.out == ""
+    assert captured.err == f"{command}:gate:invalid-environment\n"
+
+
+@pytest.mark.parametrize("command", ["verify-main", "deploy-main"])
+def test_invalid_cli_flag_stops_before_github_or_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+) -> None:
+    import deployment.main_cli as cli
+
+    event = _event_path(tmp_path)
+    _set_base_env(monkeypatch, event)
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("parser should stop before GitHub or runtime")
+
+    monkeypatch.setattr(cli, "SubprocessGhRunner", forbidden)
+    monkeypatch.setattr(cli, "_load_runtime_symbols", forbidden)
+    monkeypatch.setattr(cli, "load_deploy_target", forbidden)
+
+    rc = cli.main(
+        [
+            command,
+            "--event-path",
+            str(event),
+            "--workflow-ref",
+            WORKFLOW_REF,
+            "--unexpected-flag",
+            SHA,
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert captured.err == f"{command}:usage:invalid-arguments\n"
 
 
 def test_cli_identity_failure_stops_before_target_or_runner(

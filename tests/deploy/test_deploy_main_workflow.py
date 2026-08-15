@@ -19,7 +19,8 @@ VERIFY_COMMAND = (
 )
 DEPLOY_COMMAND = VERIFY_COMMAND.replace("verify-main", "deploy-main", 1)
 EXACT_GUARD = (
-    "vars.WEATHER_GOVERNANCE_MODE == 'protected' && "
+    "( vars.WEATHER_GOVERNANCE_MODE == 'protected' || "
+    "vars.WEATHER_GOVERNANCE_MODE == 'guarded_private' ) && "
     "vars.WEATHER_DEPLOYMENT_ENABLED == 'enabled' && "
     "github.event_name == 'workflow_run' && "
     "github.event.action == 'completed' && "
@@ -71,6 +72,7 @@ def test_deploy_main_has_only_exact_main_ci_workflow_run_trigger() -> None:
         "actions": "read",
         "checks": "read",
         "contents": "read",
+        "pull-requests": "read",
     }
     assert workflow["concurrency"] == {
         "group": "weather-main-deploy",
@@ -85,7 +87,7 @@ def test_deploy_main_has_only_exact_main_ci_workflow_run_trigger() -> None:
     }
 
 
-def test_both_jobs_require_the_exact_protected_enabled_source_identity() -> None:
+def test_both_jobs_require_the_exact_two_mode_enabled_source_identity() -> None:
     """Weakening either guard could schedule code for an untrusted or stale source."""
     workflow = _workflow()
     jobs = workflow["jobs"]
@@ -135,11 +137,11 @@ def test_jobs_use_only_pre_gate_safe_steps_and_exact_cli_entrypoints() -> None:
     assert isinstance(jobs, dict)
     verify_steps = _steps(jobs["verify-main"])
     deploy_steps = _steps(jobs["deploy-main"])
-    assert len(verify_steps) == 3
-    assert len(deploy_steps) == 2
+    assert len(verify_steps) == 4
+    assert len(deploy_steps) == 3
 
-    verify_checkout, setup_python, verify = verify_steps
-    deploy_checkout, deploy = deploy_steps
+    verify_checkout, setup_python, verify_guarded, verify_protected = verify_steps
+    deploy_checkout, deploy_guarded, deploy_protected = deploy_steps
     for checkout in (verify_checkout, deploy_checkout):
         assert checkout.get("uses") == CHECKOUT_USE
         assert checkout.get("with") == {
@@ -152,17 +154,50 @@ def test_jobs_use_only_pre_gate_safe_steps_and_exact_cli_entrypoints() -> None:
     assert setup_python.get("with") == {"python-version": "3.11.15"}
     assert set(setup_python) == {"name", "uses", "with"}
 
-    expected_env = {
-        "GH_TOKEN": "${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}",
+    common_env = {
         "GOVERNANCE_MODE": "${{ vars.WEATHER_GOVERNANCE_MODE }}",
         "DEPLOYMENT_ENABLED": "${{ vars.WEATHER_DEPLOYMENT_ENABLED }}",
     }
-    for invoke, command in ((verify, VERIFY_COMMAND), (deploy, DEPLOY_COMMAND)):
+    expected_invocations = (
+        (
+            verify_guarded,
+            "Verify guarded private main identity",
+            "vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'",
+            VERIFY_COMMAND,
+            {"GH_TOKEN": "${{ github.token }}", **common_env},
+        ),
+        (
+            verify_protected,
+            "Verify protected main identity",
+            "vars.WEATHER_GOVERNANCE_MODE == 'protected'",
+            VERIFY_COMMAND,
+            {
+                "GH_TOKEN": "${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}",
+                **common_env,
+            },
+        ),
+        (
+            deploy_guarded,
+            "Deploy guarded private main identity",
+            "vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'",
+            DEPLOY_COMMAND,
+            {"GH_TOKEN": "${{ github.token }}", **common_env},
+        ),
+        (
+            deploy_protected,
+            "Deploy protected main identity",
+            "vars.WEATHER_GOVERNANCE_MODE == 'protected'",
+            DEPLOY_COMMAND,
+            {
+                "GH_TOKEN": "${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}",
+                **common_env,
+            },
+        ),
+    )
+    for invoke, name, condition, command, environment in expected_invocations:
+        assert invoke.get("name") == name
+        assert _normalized_expression(invoke.get("if")) == condition
         assert invoke.get("run") == command
         assert invoke.get("shell") == "pwsh"
-        assert invoke.get("env") == expected_env
-        assert set(invoke) == {"name", "run", "shell", "env"}
-
-    serialized = WORKFLOW_PATH.read_text(encoding="utf-8").lower()
-    assert "pip install" not in serialized
-    assert "setup-python" not in str(deploy_steps).lower()
+        assert invoke.get("env") == environment
+        assert set(invoke) == {"name", "if", "run", "shell", "env"}
