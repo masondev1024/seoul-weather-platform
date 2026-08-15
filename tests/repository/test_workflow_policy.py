@@ -120,7 +120,11 @@ jobs:
     name: Promotion Source / required
     runs-on: ubuntu-latest
     steps:
-      - run: echo safe
+      - name: Validate main push promotion source
+        run: |
+          gh api "repos/${{GITHUB_REPOSITORY}}/commits/${{GITHUB_SHA}}/pulls" \
+            --jq '[.[] | {{base: {{sha: .base.sha}}}}]' > "$associated_prs_path"
+          python -m tools.promotion_source main-push --event-path "$GITHUB_EVENT_PATH" --associated-prs-path "$associated_prs_path" --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
   required:
     name: CI / required
     if: always()
@@ -616,6 +620,38 @@ def test_repository_ci_promotion_uses_sanitized_read_only_evidence() -> None:
         in commands
     )
     assert '> "$associated_prs_path"' in commands
+
+
+def test_ci_promotion_contract_fails_closed_without_main_push_validation_step(
+    tmp_path: Path,
+) -> None:
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    step_start = workflow.index(
+        "      - name: Validate main push promotion source\n"
+    )
+    next_step = workflow.index(
+        "      - name: Validate initial main bootstrap source\n",
+        step_start,
+    )
+    repo_root = _write_repo(
+        tmp_path,
+        workflow[:step_start] + workflow[next_step:],
+    )
+
+    assert "promotion_source_contract" in _rules(repo_root)
+
+
+def test_ci_promotion_contract_fails_closed_when_validation_step_is_renamed(
+    tmp_path: Path,
+) -> None:
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8").replace(
+        "      - name: Validate main push promotion source\n",
+        "      - name: Validate main promotion evidence\n",
+        1,
+    )
+    repo_root = _write_repo(tmp_path, workflow)
+
+    assert "promotion_source_contract" in _rules(repo_root)
 
 
 def test_repository_ci_promotion_policy_binds_main_push_event_and_pr_base_sha(

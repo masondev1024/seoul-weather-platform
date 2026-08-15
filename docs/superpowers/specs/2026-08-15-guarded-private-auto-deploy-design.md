@@ -6,14 +6,14 @@
 
 이 fallback의 목적은 개인 저장소 운영 중 다음 실수를 차단하는 것이다.
 
-- PR 없이 `main`에 직접 push한 commit 배포
+- exact same-repository `dev → main` PR evidence 없이 `main`에 직접 push한 commit 배포
 - 다른 branch 또는 fork에서 온 PR 배포
 - 실패·취소·과거 SHA의 CI 결과 재사용
 - 검증된 SHA와 다른 checkout 배포
 - 허용되지 않은 Compose service 또는 Airflow DAG 변경
 - writer가 실행 중인 상태에서 DAG·dbt mount 교체
 
-이 설계는 native protection과 같은 강한 보안 경계를 주장하지 않는다. 저장소 write 권한과 GitHub 계정이 탈취되거나, 권한을 가진 사용자가 workflow·검증 코드를 함께 악의적으로 변경하는 상황은 보호 범위 밖이다. 현재 private 저장소의 write 권한을 신뢰 경계로 두고, 오작동과 우발적인 직접 배포를 막는 운영 안전장치로 사용한다.
+이 설계는 native protection과 같은 강한 보안 경계를 주장하지 않는다. 저장소 write 권한과 GitHub 계정이 탈취되거나, 권한을 가진 사용자가 workflow·검증 코드를 함께 악의적으로 변경하는 상황은 보호 범위 밖이다. 현재 private 저장소의 유일한 writer를 신뢰 경계로 두고, exact PR evidence가 없는 임의 push와 우발적인 직접 배포를 막는 운영 안전장치로 사용한다.
 
 ## 2. 기존 설계와의 관계
 
@@ -82,7 +82,7 @@ GitHub REST `GET /repos/{owner}/{repo}/commits/{sha}/pulls` 응답에서 다음 
 
 0개, 2개 이상, fork, feature branch, open/closed-but-unmerged PR, 다른 merge SHA, stale `base.sha`, bootstrap zero SHA는 모두 차단한다. 이 조회에는 `pull-requests: read` permission을 명시한다. GitHub 문서상 commit-associated PR endpoint는 Pull requests read 권한을 요구한다.
 
-이 검증으로 최초 bootstrap SHA, 로컬 merge push, commit message만 위조한 push는 배포 후보가 되지 않는다.
+이 검증으로 최초 bootstrap SHA, exact associated PR이 없는 임의 직접 push, commit message만 위조한 push는 배포 후보가 되지 않는다. 다만 commit-associated PR API는 commit을 만든 행위가 GitHub UI의 merge 버튼이었는지까지 서명해 주지 않는다. 신뢰된 유일 writer가 열려 있는 same-repository `dev → main` PR의 `dev` head를 현재 `main`에 로컬 merge하고 그 결과를 `main`에 push하면, GitHub가 해당 PR을 merged/associated로 기록해 raw push `before`/`after`와 PR `base.sha`/`merge_commit_sha` 조건을 모두 만족할 수 있다. `guarded_private`는 이 trusted-writer 행동을 보호 범위 밖으로 두며 GitHub UI merge만 강제한다고 주장하지 않는다. 이를 기술적으로 차단해야 하거나 writer가 추가되면 native protection 또는 저장소 밖 trusted controller가 필요하다.
 
 ## 6. workflow와 credential 분리
 
@@ -171,7 +171,8 @@ governance fallback은 배포 상태 머신을 단순화하거나 우회하지 �
 
 ### negative
 
-- 직접 main push, local merge push, bootstrap-created main SHA
+- exact associated PR evidence 없는 임의 main push, bootstrap-created main SHA
+- trusted sole writer가 open same-repository `dev → main` PR을 로컬 merge해 push하는 경로는 guarded threat model 밖임을 문서로 검증
 - feature branch·fork·다른 repository·미병합 PR
 - associated PR 0개·중복·truncated/paginated 응답·wrong merge SHA
 - CI failure/cancelled/skipped/neutral 또는 다른 SHA의 성공 check
@@ -215,7 +216,7 @@ repo visibility가 public/internal로 바뀌거나, writer가 추가되거나, G
 
 - `guarded_private`가 protection 성공으로 기록되지 않는다.
 - exact same-repo merged `dev → main` PR 없는 SHA는 self-hosted runner에 도달하지 않는다.
-- bootstrap·직접 push·stale SHA·failed CI가 모두 차단된다.
+- bootstrap·exact associated PR evidence 없는 임의 push·stale SHA·failed CI가 모두 차단된다.
 - guarded/private와 protected token·evidence 경로가 명시적으로 분리된다.
 - runtime service·DAG·rollback 안전 계약은 기존보다 약해지지 않는다.
 - 최초 cutover 전 실제 Airflow·Docker state change는 없다.

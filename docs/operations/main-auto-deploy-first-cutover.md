@@ -2,7 +2,7 @@
 
 ## 한 번만 필요한 승인
 
-이 절차의 “첫 `main` release”는 GitHub Release 생성이나 `Publish Release` 클릭이 아니다. 같은 저장소의 exact `dev → main` PR merge와 그 merge SHA의 `CI` 성공을 매번 재검증한 결과가 배포 증거다. 최초 전환에서만 현재 조직 Weather 파이프라인을 안전하게 넘기기 위해 target·baseline·capability의 read-only 보고 후 사용자 명시 승인을 받는다. 전환이 끝난 뒤에는 그 검증을 통과한 `main` merge가 별도 클릭 없이 자동 배포를 시작한다.
+이 절차의 “첫 `main` release”는 GitHub Release 생성이나 `Publish Release` 클릭이 아니다. 같은 저장소의 exact `dev → main` PR evidence와 그 merge SHA의 `CI` 성공을 매번 재검증한 결과가 배포 증거다. 이 evidence는 GitHub UI의 merge 버튼 사용 자체를 증명하지 않는다. 최초 전환에서만 현재 조직 Weather 파이프라인을 안전하게 넘기기 위해 target·baseline·capability의 read-only 보고 후 사용자 명시 승인을 받는다. 전환이 끝난 뒤에는 그 검증을 통과한 `main` merge가 별도 클릭 없이 자동 배포를 시작한다.
 
 승인 전에는 다음 상태를 유지한다.
 
@@ -13,6 +13,8 @@
 - Airflow pause/unpause, Docker `up`, pipeline stop/start와 dbt·Trino·D1·R2 write를 실행하지 않는다.
 
 `Deploy Main`의 두 job은 `WEATHER_DEPLOYMENT_ENABLED=enabled`와 허용 governance mode가 모두 정확할 때만 예약된다. `guarded_private`는 private 단일 소유자·사고 방지 경계에서만 사용할 수 있고, sole owner/no extra writer 상태는 최초 전환과 권한 변경 때 workflow 밖에서 확인하는 운영 전제다. public/internal visibility 또는 추가 writer가 있으면 다음 배포 전에 `WEATHER_DEPLOYMENT_ENABLED`를 비활성화하고 native protection 또는 저장소 밖 trusted controller로 전환한다. `protected`는 이보다 강한 native protection readback을 요구한다. protected mode에서 `WEATHER_GOVERNANCE_READ_TOKEN` secret이 없거나 비어 있으면 GitHub-hosted `verify-main`이 실패해야 하며 self-hosted `deploy-main`은 실행되지 않는다. guarded mode에는 이 secret을 설치하지 않는다.
+
+`guarded_private`에서 유일한 repository writer는 신뢰 대상이다. 열려 있는 same-repository `dev → main` PR의 `dev` head를 그 writer가 현재 `main`에 로컬 merge해 push하면 GitHub associated-PR evidence가 유효해질 수 있으므로, 이 mode는 로컬 merge와 GitHub UI merge를 기술적으로 구분하거나 악의적인 writer를 차단한다고 주장하지 않는다. exact associated PR이 없는 임의 직접 push, bootstrap, stale/history SHA, 다른 branch·fork와 실패한 CI는 계속 거부한다.
 
 ## 고정 배포 범위
 

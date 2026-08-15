@@ -1444,7 +1444,7 @@ def _ci_promotion_source_contract_matches(
         and step.get("name") == "Validate main push promotion source"
     ]
     if not main_push_steps:
-        return True
+        return False
     if len(main_push_steps) != 1:
         return False
     command = main_push_steps[0].get("run")
