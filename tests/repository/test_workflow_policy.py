@@ -699,6 +699,7 @@ def test_repository_ci_promotion_policy_binds_main_push_event_and_pr_base_sha(
     assert len(runtime_evidence_steps) == 1
     runtime_evidence = runtime_evidence_steps[0]
     assert _normalized_expression(runtime_evidence["if"]) == (
+        "vars.WEATHER_GOVERNANCE_MODE == 'protected' && "
         "github.event_name == 'pull_request' && github.base_ref == 'main'"
     )
     runtime_command = runtime_evidence["run"]

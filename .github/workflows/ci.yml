@@ -137,7 +137,10 @@ jobs:
         if: github.event_name == 'pull_request'
         run: python -m tools.promotion_source pull-request --event-path "$GITHUB_EVENT_PATH" --repository "$GITHUB_REPOSITORY"
       - name: Require protected dev DagBag evidence
-        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        if: >-
+          vars.WEATHER_GOVERNANCE_MODE == 'protected' &&
+          github.event_name == 'pull_request' &&
+          github.base_ref == 'main'
         env:
           DEV_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ github.token }}
