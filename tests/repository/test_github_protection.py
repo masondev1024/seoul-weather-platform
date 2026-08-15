@@ -992,6 +992,7 @@ def test_subprocess_runner_uses_only_gh_api_argv_and_stdin_without_token_or_env(
     for argv, kwargs in observed:
         assert argv[:2] == ["gh", "api"]
         assert "--method" in argv
+        assert "X-GitHub-Api-Version: 2022-11-28" in argv
         assert not any("token" in value.lower() for value in argv)
         assert "env" not in kwargs
         assert kwargs["shell"] is False
