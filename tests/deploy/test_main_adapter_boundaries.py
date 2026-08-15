@@ -160,6 +160,31 @@ def _dry_run_output(target, services: tuple[str, ...] | None = None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _compose_v5_dry_run_output(target) -> str:
+    lines = []
+    for index, service in enumerate(sorted(target.airflow_code_services), start=1):
+        container = f"{target.project_name}-{service}-1"
+        temporary = f"{index:012x}_{container}"
+        lines.extend(
+            [
+                f"Container {container} Recreate",
+                f"Container {container} Recreated",
+                f"Container {temporary} Starting",
+                f"Container {temporary} Started",
+            ]
+        )
+        if service == "airflow-apiserver":
+            lines.extend(
+                [
+                    f"Container {container} Waiting",
+                    f"Container {temporary} Waiting",
+                    f"Container {container} Healthy",
+                    f"Container {temporary} Healthy",
+                ]
+            )
+    return "\n".join(lines) + "\n"
+
+
 def _airflow_322_output(payload: object) -> str:
     plugins = (
         "schemas",
@@ -372,6 +397,10 @@ def test_compose_candidate_uses_only_staged_overlay_then_exact_dry_run(tmp_path:
         (*candidate_prefix, "config", "--format", "json"),
         (
             *candidate_prefix,
+            "--ansi",
+            "never",
+            "--progress",
+            "plain",
             "--dry-run",
             "up",
             "-d",
@@ -621,6 +650,87 @@ def test_compose_accepts_omitted_read_only_false_for_writable_baseline_bind(
     )
 
     ComposeCommandAdapter(target, runner).validate_candidate(target, staged)
+
+
+def test_compose_accepts_compose_v5_dry_run_lifecycle(tmp_path: Path):
+    target, artifact, staged = _baseline_candidate(tmp_path)
+    base, candidate = _compose_documents(target, artifact)
+    runner = _QueueRunner(
+        [
+            _ok(json.dumps(base)),
+            _ok(json.dumps(candidate)),
+            _ok(_compose_v5_dry_run_output(target)),
+        ]
+    )
+
+    ComposeCommandAdapter(target, runner).validate_candidate(target, staged)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "missing-base-transition",
+        "missing-temporary-transition",
+        "temporary-prefix-drift",
+        "forbidden-container",
+        "mixed-output-grammar",
+        "unknown-status",
+        "reversed-base-transition",
+        "reversed-temporary-transition",
+        "premature-base-wait",
+        "premature-temporary-wait",
+    ],
+)
+def test_compose_v5_dry_run_rejects_unproven_lifecycle(tmp_path: Path, case: str):
+    target, artifact, staged = _baseline_candidate(tmp_path)
+    base, candidate = _compose_documents(target, artifact)
+    service = sorted(target.airflow_code_services)[0]
+    container = f"{target.project_name}-{service}-1"
+    temporary = f"{'1':0>12}_{container}"
+    output = _compose_v5_dry_run_output(target)
+    if case == "missing-base-transition":
+        output = output.replace(f"Container {container} Recreated\n", "")
+    elif case == "missing-temporary-transition":
+        output = output.replace(f"Container {temporary} Started\n", "")
+    elif case == "temporary-prefix-drift":
+        output = output.replace(
+            f"Container {temporary} Started\n",
+            f"Container {'f' * 12}_{container} Started\n",
+        )
+    elif case == "forbidden-container":
+        forbidden = sorted(target.forbidden_data_services)[0]
+        output += f"Container {target.project_name}-{forbidden}-1 Recreate\n"
+    elif case == "mixed-output-grammar":
+        output += _dry_run_output(target)
+    elif case == "unknown-status":
+        output = output.replace(
+            f"Container {container} Recreated\n",
+            f"Container {container} Removed\n",
+        )
+    elif case == "reversed-base-transition":
+        output = output.replace(
+            f"Container {container} Recreate\nContainer {container} Recreated\n",
+            f"Container {container} Recreated\nContainer {container} Recreate\n",
+        )
+    elif case == "reversed-temporary-transition":
+        output = output.replace(
+            f"Container {temporary} Starting\nContainer {temporary} Started\n",
+            f"Container {temporary} Started\nContainer {temporary} Starting\n",
+        )
+    elif case == "premature-base-wait":
+        output = output.replace(f"Container {container} Waiting\n", "", 1)
+        output = f"Container {container} Waiting\n" + output
+    else:
+        output = output.replace(f"Container {temporary} Waiting\n", "", 1)
+        output = f"Container {temporary} Waiting\n" + output
+    runner = _QueueRunner(
+        [_ok(json.dumps(base)), _ok(json.dumps(candidate)), _ok(output)]
+    )
+
+    with pytest.raises(
+        ComposeAdapterError, match="^compose_adapter_dry_run_rejected$"
+    ):
+        ComposeCommandAdapter(target, runner).validate_candidate(target, staged)
 
 
 @pytest.mark.parametrize(
