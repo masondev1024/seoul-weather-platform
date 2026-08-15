@@ -2,35 +2,61 @@
 
 ## 적용 범위
 
-Airflow 이미지 build/deploy, scheduler·dag-processor·api-server·triggerer의 recreate/restart, DAG enable/unpause, trigger, backfill, collection/transform/publication pipeline의 start/stop에는 사용자 사전 승인이 필요하다.
+Airflow 코드 서비스 배포, DAG pause/unpause, pipeline start/stop에는 승인된 전환 경계가 필요하다. 수동 trigger, backfill, clear, retry, mark-success와 dbt·Trino·D1·R2 write는 자동 배포 범위가 아니다.
+
+최초 전환 전에는 모든 Airflow state change에 사용자 사전 승인이 필요하다. 최초 전환이 성공한 뒤에는 보호된 같은 저장소의 `dev → main` PR merge와 exact merge SHA의 `CI` 성공이 해당 SHA 배포의 승인이다. GitHub Release, tag, Draft 또는 Publish 클릭은 사용하지 않는다.
 
 ## 승인 전 허용 작업
 
-승인 전에는 repository policy, provenance, unit test 같은 secretless·read-only 검증만 수행한다. 표준 검증 경로는 다음이며 Airflow·Docker·컨테이너·파이프라인을 호출하지 않는다.
+승인 전에는 상태를 바꾸지 않는 secretless L0 검증과 read-only inventory만 수행한다.
 
 ```powershell
 ./tools/verify_repository.ps1
 ```
 
-이 스크립트는 `runtime/toolchain.lock.json`의 Python/Airflow/dbt/adapter/Node 고정값을 읽고, 현재 Python minor가 계약과 일치하는지 확인한 다음 아래 경로만 실행한다.
+표준 L0 경로는 repository policy, provenance, workflow policy와 unit test이며 Airflow·Docker·pipeline을 호출하지 않는다. 최초 전환 보고를 준비할 때만 검증된 read adapter로 다음을 읽을 수 있다.
 
-```text
-python -m tools.repository_policy --repo-root <repository>
-python -m tools.verify_provenance --repo-root <repository>
-python -m pytest tests/repository
-```
+- local deploy-target schema·permission과 sanitized fingerprint
+- `docker compose config --services`, `docker compose ps`
+- Airflow version/help, DAG 목록과 exact 열 개 DAG의 pause 상태
+- writer allowlist의 running·queued run 수
+- ledger의 baseline·직전 성공 SHA/checksum 요약
+- Airflow CLI capability fingerprint
+- self-hosted runner Python `3.11`과 PyYAML의 sanitized version/capability proof
 
-## 필수 사전 통지와 승인
+절대경로, 로컬 IP, credential reference, token 값, `.env` 값과 raw inspect payload는 보고하지 않는다.
 
-운영 변경을 요청하기 전에 사용자에게 기존 로컬 파이프라인을 중지할 수 있도록 먼저 알린다. 보고에는 다음을 포함한다.
+## 저장소 보호와 자동 배포 비활성 기본값
 
-1. 배포 대상 commit과 변경될 서비스
-2. 기존 로컬 파이프라인에서 중지할 DAG 및 running/queued run
-3. pause·drain·배포·health check·rollback의 순서
-4. dbt/Trino/D1 영향과 데이터 write 여부
+`dev`·`main` native protection readback과 `WEATHER_GOVERNANCE_MODE=protected`가 확인되기 전에는 production runner를 시작하지 않는다. `guarded_private`는 GitHub-hosted 진단 상태일 뿐 자동 배포를 허용하지 않는다.
 
-사용자가 위 통지를 확인하고 명시적으로 승인할 때까지 어떤 Airflow state change도 수행하지 않는다. 사전 승인이 없으면 deploy/restart/enable/unpause/trigger/backfill/start/stop을 실행하지 않는다.
+최초 전환 승인 전에는 `WEATHER_DEPLOYMENT_ENABLED`를 unset으로 두고 `[self-hosted, windows, weather-prod]` runner를 offline으로 유지한다. 보호 규칙, required checks의 GitHub Actions App 결속, read credential 또는 target 계약이 달라지면 runner와 deployment enable flag를 먼저 비활성화한다.
 
-## 승인 후에도 필요한 절차
+protection readback용 `WEATHER_GOVERNANCE_READ_TOKEN`은 대상 저장소 하나에 제한한 fine-grained read-only token이다. `Administration`, `Actions`, `Checks`, `Contents`의 read만 부여하고 repository secret으로 저장한다. 값은 읽거나 출력하지 않으며 만료와 rotation을 관리한다. secret이 없거나 비어 있으면 GitHub-hosted preflight가 실패하고 self-hosted job은 실행되지 않아야 한다.
 
-승인 자체는 안전한 전환을 대체하지 않는다. 기존 writer를 pause하고 running transform을 drain한 뒤, 변경 대상만 배포한다. health·DAG import·manifest를 확인한 다음 writer 충돌이 없을 때에만 정해진 전환 절차로 DAG를 활성화한다. 실패하면 last-known-good 상태로 rollback한다.
+## 최초 전환 보고와 STOP
+
+실제 변경 전에 [main 자동 배포 최초 전환 절차](./main-auto-deploy-first-cutover.md)의 항목을 사용자에게 보고하고 STOP한다. 핵심 보고 내용은 다음과 같다.
+
+1. 대상 `main` SHA와 변경되는 네 Airflow 코드 서비스
+2. exact 열 개 Weather DAG의 pause snapshot과 writer running·queued 수
+3. target/CLI/baseline candidate의 sanitized fingerprint, stable overlay 존재 여부 boolean, runner Python `3.11`·PyYAML capability proof
+4. baseline 설치·rehearsal → read secret·runner Python/PyYAML 사전 준비 → runner·flag 활성화 → protected `dev → main` merge → deploy기가 원 상태 capture → exact 열 개 pause·drain → deploy·health → capture 상태 복원 순서
+5. rollback 성공과 rollback 실패 시 fail-closed pause 동작
+6. 전체 stack/data service stop이 없고 dbt·Trino·D1·R2 write가 0이라는 확인
+
+사용자 승인 전에는 Docker `up`·`up --dry-run`, DAG pause/unpause, pipeline stop/start, local target/baseline 설치, runner Python/PyYAML 설치·업그레이드, runner 시작, secret/variable write를 실행하지 않는다.
+
+## 승인 후 최초 전환
+
+승인 뒤에는 local target과 baseline overlay를 설치하고 config/dry-run 및 baseline restore rehearsal을 통과시킨 뒤 repo-scoped governance read token을 `WEATHER_GOVERNANCE_READ_TOKEN` repository secret으로 등록한다. 값은 화면·명령 인자·로그·보고서에 출력하지 않는다. 이어 workflow 밖 runner 관리 절차로 Python `3.11` 환경과 PyYAML을 한 번 사전 설치하고 sanitized version/capability readback을 확인한다. 그 다음 runner를 시작하고 `WEATHER_DEPLOYMENT_ENABLED=enabled`를 exact readback한 뒤 개인 저장소의 보호된 `dev → main` PR merge와 successful main CI로 첫 자동 배포를 시작한다.
+
+운영자가 전환 전에 열 개 DAG를 수동 pause하거나 drain하지 않는다. 첫 self-hosted 배포기가 기존 조직 Weather DAG의 현재 pause 상태를 캡처한 뒤 exact 열 개만 pause하고 writer를 bounded drain해야 성공 후 같은 상태로 새 pipeline을 시작할 수 있다. cutover activation은 filesystem baseline 준비만 수행하며 Airflow state를 바꾸지 않는다.
+
+배포는 `airflow-apiserver`, `airflow-scheduler`, `airflow-dag-processor`, `airflow-triggerer`에만 `up -d --no-deps`를 적용한다. `airflow-init`, Postgres, Trino, Marquez, `compose down`, `restart`, `--force-recreate`는 금지한다. 성공하면 최초 snapshot에서 원래 unpaused였던 DAG만 복원한다. 실패하면 승인·rehearsal된 baseline으로 rollback하고, rollback도 실패하면 exact 열 개 DAG를 모두 paused로 유지한다.
+
+`Deploy Main` workflow 안에서는 `pip` 또는 다른 package install을 실행하지 않는다. hosted preflight만 pinned `setup-python`을 사용하며 self-hosted job은 runner의 사전 준비된 Python/PyYAML을 그대로 사용한다. capability drift가 있으면 workflow가 환경을 고치지 않고 fail-closed해야 한다.
+
+## 전환 후 승인 모델
+
+최초 cutover 이후 추가 수동 Release 승인은 없다. 보호된 `dev → main` merge와 exact main CI 성공이 배포 승인이고, `Deploy Main`은 GitHub-hosted identity preflight 뒤에만 self-hosted 배포를 실행한다. stale SHA, 다른 workflow/event/branch, `guarded_private`, disabled flag, missing read secret, invalid target/ledger/baseline은 모두 mutation 전에 fail-closed한다.

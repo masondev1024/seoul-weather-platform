@@ -32,8 +32,9 @@ def test_weather_deps_phase_does_not_self_heal_recursively(tmp_path):
         variables=None,
         project_dir=str(tmp_path),
         executable=RAW_DBT,
-        runner=lambda command, **_kwargs: observed.append(command)
-        or completed(command),
+        runner=lambda command, **_kwargs: (
+            observed.append(command) or completed(command)
+        ),
         environ={},
     )
 
@@ -167,7 +168,9 @@ def test_weather_non_deps_phase_self_heals_missing_packages_before_ls(tmp_path):
     assert [command[0][1] for command in observed] == ["deps", "ls", "run"]
     deps_command, deps_kwargs = observed[0]
     assert "--target-path" not in deps_command
-    assert deps_kwargs["env"]["DBT_PACKAGES_INSTALL_PATH"] == execution.paths.packages_path
+    assert (
+        deps_kwargs["env"]["DBT_PACKAGES_INSTALL_PATH"] == execution.paths.packages_path
+    )
 
 
 def test_weather_preflight_creates_target_and_log_directories_before_dbt_ls(
@@ -342,8 +345,9 @@ def test_weather_non_deps_phase_fails_closed_when_sentinel_still_missing_after_d
         variables=None,
         project_dir=str(tmp_path),
         executable=RAW_DBT,
-        runner=lambda command, **_kwargs: observed.append(command)
-        or completed(command),
+        runner=lambda command, **_kwargs: (
+            observed.append(command) or completed(command)
+        ),
         environ={},
     )
 
@@ -458,6 +462,120 @@ def test_weather_actual_resets_only_current_execution_directory(tmp_path):
     assert execution.existing_run_results_path == paths.run_results_path
     assert execution.existing_manifest_path == paths.manifest_path
     assert sibling.is_file()
+
+
+def test_weather_failed_phase_never_replaces_stable_manifest(tmp_path):
+    module = load_execution_module()
+    project_dir = tmp_path / "source" / "traffic_weather"
+    artifact_root = tmp_path / "artifacts" / "release-1"
+    project_dir.mkdir(parents=True)
+    stable_manifest = artifact_root / "target" / "manifest.json"
+    stable_manifest.parent.mkdir(parents=True)
+    stable_manifest.write_text('{"stable":"previous"}', encoding="utf-8")
+
+    def runner(command, **_kwargs):
+        if command[1] == "ls":
+            return completed(
+                command,
+                stdout='{"unique_id":"model.asac.silver","resource_type":"model"}\n',
+            )
+        write_artifacts(command)
+        Path(command[command.index("--target-path") + 1], "manifest.json").write_text(
+            '{"metadata":{"invocation_id":"failed"}}', encoding="utf-8"
+        )
+        return completed(command, returncode=1, stderr="dbt run failed")
+
+    execution = module.execute_dbt_phase(
+        dbt_command="run",
+        selector="ask_seoul_weather_transform_silver",
+        invocation_id="failed-manifest",
+        pipeline="weather-transform",
+        run_id="manual__1",
+        task_id="dbt_run_silver",
+        try_number=1,
+        target="dev",
+        variables=None,
+        project_dir=str(project_dir),
+        executable=RAW_DBT,
+        runner=runner,
+        environ={"ASK_SEOUL_DBT_ARTIFACT_ROOT": str(artifact_root)},
+    )
+
+    assert Path(execution.paths.execution_target_path).is_relative_to(artifact_root)
+    assert execution.completed.returncode == 1
+    assert stable_manifest.read_text(encoding="utf-8") == '{"stable":"previous"}'
+
+
+@pytest.mark.parametrize(
+    "manifest_payload",
+    [
+        None,
+        "not-json",
+        "[]",
+        "{}",
+        '{"metadata":[],"nodes":{"model.asac.weather":{}}}',
+        (
+            '{"metadata":{"dbt_schema_version":'
+            '"https://schemas.getdbt.com/dbt/manifest/v12.json",'
+            '"dbt_version":"1.10.22","generated_at":"2026-08-15T00:00:00Z",'
+            '"invocation_id":"test","project_name":"asac_seoul",'
+            '"adapter_type":"trino"},"nodes":[]}'
+        ),
+        (
+            '{"metadata":{"dbt_schema_version":'
+            '"https://schemas.getdbt.com/dbt/manifest/v12.json",'
+            '"dbt_version":"1.10.22","generated_at":"2026-08-15T00:00:00Z",'
+            '"invocation_id":"test","project_name":"asac_seoul",'
+            '"adapter_type":"trino"},"nodes":{}}'
+        ),
+    ],
+)
+def test_weather_missing_or_invalid_execution_manifest_never_replaces_stable_manifest(
+    manifest_payload, tmp_path
+):
+    module = load_execution_module()
+    project_dir = tmp_path / "source" / "traffic_weather"
+    artifact_root = tmp_path / "artifacts" / "release-1"
+    project_dir.mkdir(parents=True)
+    stable_manifest = artifact_root / "target" / "manifest.json"
+    stable_manifest.parent.mkdir(parents=True)
+    stable_manifest.write_text('{"stable":"previous"}', encoding="utf-8")
+
+    def runner(command, **_kwargs):
+        if command[1] == "ls":
+            return completed(
+                command,
+                stdout='{"unique_id":"model.asac.silver","resource_type":"model"}\n',
+            )
+        target_path = Path(command[command.index("--target-path") + 1])
+        target_path.mkdir(parents=True, exist_ok=True)
+        (target_path / "run_results.json").write_text("{}", encoding="utf-8")
+        if manifest_payload is not None:
+            (target_path / "manifest.json").write_text(
+                manifest_payload, encoding="utf-8"
+            )
+        return completed(command)
+
+    execution = module.execute_dbt_phase(
+        dbt_command="run",
+        selector="ask_seoul_weather_transform_silver",
+        invocation_id="missing-or-invalid-manifest",
+        pipeline="weather-transform",
+        run_id="manual__1",
+        task_id="dbt_run_silver",
+        try_number=1,
+        target="dev",
+        variables=None,
+        project_dir=str(project_dir),
+        executable=RAW_DBT,
+        runner=runner,
+        environ={"ASK_SEOUL_DBT_ARTIFACT_ROOT": str(artifact_root)},
+    )
+
+    assert Path(execution.paths.execution_target_path).is_relative_to(artifact_root)
+    assert execution.existing_manifest_path is None
+    assert execution.paths.manifest_path in execution.missing_expected_artifacts
+    assert stable_manifest.read_text(encoding="utf-8") == '{"stable":"previous"}'
 
 
 def test_weather_deps_retention_preserves_current_and_other_pipeline(tmp_path):

@@ -21,6 +21,7 @@ from .contracts import (
 def attempt_paths(
     *,
     project_dir: str,
+    artifact_root: str | None = None,
     pipeline: str,
     run_id: str | None,
     task_id: str | None,
@@ -30,7 +31,7 @@ def attempt_paths(
 ) -> DbtAttemptPaths:
     if not isinstance(invocation_id, str) or not invocation_id.strip():
         raise ValueError("invocation_id must be a non-empty string")
-    root = PurePosixPath(project_dir.replace("\\", "/"))
+    root = PurePosixPath((artifact_root or project_dir).replace("\\", "/"))
     safe_pipeline = safe_path_segment(pipeline)
     safe_run_id = safe_path_segment(run_id)
     attempt_suffix = (
@@ -73,6 +74,11 @@ def attempt_paths(
             str(execution_target / "manifest.json") if has_manifest else None
         ),
     )
+
+
+def stable_manifest_path(artifact_root: str) -> str:
+    root = PurePosixPath(artifact_root.replace("\\", "/"))
+    return str(root / "target" / "manifest.json")
 
 
 def _absolute_lexical(path: Path) -> Path:
@@ -121,6 +127,24 @@ def _trusted_descendant(candidate: Path, *, trusted_root: Path) -> tuple[Path, P
             f"dbt cleanup target resolved outside the trusted artifact root: {candidate}"
         )
     return lexical_candidate, resolved_candidate
+
+
+def validate_attempt_artifact_paths(
+    paths: DbtAttemptPaths, *, artifact_root: str
+) -> None:
+    root = _absolute_lexical(Path(artifact_root))
+    if _is_symlink_or_reparse(root):
+        raise RuntimeError(
+            f"refusing dbt artifacts through symlink or reparse-point root: {root}"
+        )
+    for path_value, root_name in (
+        (paths.preflight_target_path, "target"),
+        (paths.preflight_log_path, "logs"),
+        (paths.execution_target_path, "target"),
+        (paths.execution_log_path, "logs"),
+        (paths.packages_path, "target"),
+    ):
+        _trusted_descendant(Path(path_value), trusted_root=root / root_name)
 
 
 def _safe_remove_tree(
@@ -218,18 +242,23 @@ def _prune_run_root(
 
 
 def prune_pipeline_runs(
-    *, project_dir: str, pipeline: str, run_id: str | None, retention_runs: int
+    *,
+    project_dir: str,
+    pipeline: str,
+    run_id: str | None,
+    retention_runs: int,
+    artifact_root: str | None = None,
 ) -> None:
     safe_pipeline = safe_path_segment(pipeline)
     safe_run = safe_path_segment(run_id)
-    project_root = Path(project_dir)
+    project_root = Path(artifact_root or project_dir)
     for root_name in ("target", "logs"):
-        artifact_root = project_root / root_name
+        kind_root = project_root / root_name
         _prune_run_root(
-            artifact_root / safe_pipeline,
+            kind_root / safe_pipeline,
             current_run=safe_run,
             retention_runs=retention_runs,
-            trusted_root=artifact_root,
+            trusted_root=kind_root,
         )
 
 

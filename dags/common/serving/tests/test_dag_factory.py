@@ -72,6 +72,29 @@ def test_serving_export_factory_keeps_content_parity_opt_in_default_false():
     ].default is False
 
 
+def test_manifest_path_uses_external_stable_manifest_only_when_configured(tmp_path):
+    artifact_root = tmp_path / "artifacts" / "release-1"
+
+    assert dag_factory._manifest_path(
+        "weather",
+        None,
+        env={"ASK_SEOUL_DBT_ARTIFACT_ROOT": str(artifact_root)},
+    ) == str(artifact_root / "target" / "manifest.json")
+    assert dag_factory._manifest_path("weather", None, env={}) == (
+        "/opt/airflow/dbt/domains/traffic_weather/target/manifest.json"
+    )
+
+
+@pytest.mark.parametrize("configured", ["", "relative", ".", ".."])
+def test_manifest_path_rejects_unsafe_configured_artifact_root(configured):
+    with pytest.raises(RuntimeError, match="ASK_SEOUL_DBT_ARTIFACT_ROOT"):
+        dag_factory._manifest_path(
+            "weather",
+            None,
+            env={"ASK_SEOUL_DBT_ARTIFACT_ROOT": configured},
+        )
+
+
 def test_serving_export_factory_serializes_all_publishers_in_shared_d1_pool():
     dag = dag_factory.build_serving_export_dag(
         domain="test_domain",

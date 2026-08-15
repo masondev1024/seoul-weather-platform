@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from weather_dbt_execution_test_support import VALID_MANIFEST
 from weather_transform_test_support import (
     FakeAirflowException,
     FakeAirflowFailException,
@@ -89,7 +90,9 @@ def test_weather_dbt_model_command_writes_isolated_artifact(tmp_path, monkeypatc
         target_path = Path(command[command.index("--target-path") + 1])
         target_path.mkdir(parents=True, exist_ok=True)
         (target_path / "run_results.json").write_text("{}", encoding="utf-8")
-        (target_path / "manifest.json").write_text("{}", encoding="utf-8")
+        (target_path / "manifest.json").write_text(
+            json.dumps(VALID_MANIFEST), encoding="utf-8"
+        )
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
@@ -173,7 +176,9 @@ def test_weather_dbt_model_command_uses_the_frozen_serving_as_of_hour(tmp_path, 
         target_path = Path(command[command.index("--target-path") + 1])
         target_path.mkdir(parents=True, exist_ok=True)
         (target_path / "run_results.json").write_text("{}", encoding="utf-8")
-        (target_path / "manifest.json").write_text("{}", encoding="utf-8")
+        (target_path / "manifest.json").write_text(
+            json.dumps(VALID_MANIFEST), encoding="utf-8"
+        )
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
@@ -328,7 +333,9 @@ def test_weather_dbt_test_contract_failure_is_not_retried(tmp_path, monkeypatch)
             )
         target_path = Path(command[command.index("--target-path") + 1])
         target_path.mkdir(parents=True, exist_ok=True)
-        (target_path / "manifest.json").write_text("{}", encoding="utf-8")
+        (target_path / "manifest.json").write_text(
+            json.dumps(VALID_MANIFEST), encoding="utf-8"
+        )
         (target_path / "run_results.json").write_text(
             json.dumps(
                 {

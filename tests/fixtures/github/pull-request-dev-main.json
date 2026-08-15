@@ -1,0 +1,16 @@
+{
+  "pull_request": {
+    "base": {
+      "ref": "main",
+      "repo": {
+        "full_name": "masondev1024/seoul-weather-platform"
+      }
+    },
+    "head": {
+      "ref": "dev",
+      "repo": {
+        "full_name": "masondev1024/seoul-weather-platform"
+      }
+    }
+  }
+}

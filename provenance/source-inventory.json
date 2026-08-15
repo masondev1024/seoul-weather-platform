@@ -336,7 +336,10 @@
       "source_path": "common/serving/dag_factory.py",
       "target_path": "dags/common/serving/dag_factory.py",
       "scope": "airflow_weather_serving_dependency",
-      "reason": "Part of the complete fixed-SHA common/serving publication compatibility slice imported by Weather serving DAGs."
+      "reason": "Part of the complete fixed-SHA common/serving publication compatibility slice imported by Weather serving DAGs.",
+      "record_type": "derived",
+      "derivation": "Read the Weather serving manifest from the configured external stable artifact root while preserving the legacy env-absent path.",
+      "validator": "python -m pytest dags/common/serving/tests/test_dag_factory.py -q"
     },
     {
       "source_id": "airflow_weather",
@@ -429,8 +432,8 @@
       "scope": "airflow_weather_serving_test",
       "reason": "Secretless test or fixture for the complete Weather serving publication compatibility slice.",
       "record_type": "derived",
-      "derivation": "Keep the upstream regression suite but skip the non-target Citydata, Culture, and Transit wrapper assertion when those wrappers are intentionally absent.",
-      "validator": "python -m pytest dags/common/serving/tests -q"
+      "derivation": "Keep the upstream regression suite, skip intentionally absent non-target wrappers, and validate external stable manifest lookup.",
+      "validator": "python -m pytest dags/common/serving/tests/test_dag_factory.py -q"
     },
     {
       "source_id": "airflow_weather",
@@ -577,21 +580,30 @@
       "source_path": "domains/weather/tests/test_weather_dbt_execution_artifacts.py",
       "target_path": "dags/domains/weather/tests/test_weather_dbt_execution_artifacts.py",
       "scope": "airflow_weather_test",
-      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes.",
+      "record_type": "derived",
+      "derivation": "Validate external Weather dbt artifact isolation, retention, and stable manifest preservation across success and failure paths.",
+      "validator": "python -m pytest dags/domains/weather/tests -q"
     },
     {
       "source_id": "airflow_weather",
       "source_path": "domains/weather/tests/test_weather_dbt_execution_paths.py",
       "target_path": "dags/domains/weather/tests/test_weather_dbt_execution_paths.py",
       "scope": "airflow_weather_test",
-      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes.",
+      "record_type": "derived",
+      "derivation": "Validate external Weather dbt artifact paths and cleanup containment while preserving legacy project-local defaults.",
+      "validator": "python -m pytest dags/domains/weather/tests -q"
     },
     {
       "source_id": "airflow_weather",
       "source_path": "domains/weather/tests/test_weather_dbt_execution.py",
       "target_path": "dags/domains/weather/tests/test_weather_dbt_execution.py",
       "scope": "airflow_weather_test",
-      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes.",
+      "record_type": "derived",
+      "derivation": "Validate Weather dbt execution with immutable source, external runtime artifacts, and valid stable manifest publication.",
+      "validator": "python -m pytest dags/domains/weather/tests -q"
     },
     {
       "source_id": "airflow_weather",
@@ -717,7 +729,10 @@
       "source_path": "domains/weather/tests/test_weather_transform_execution.py",
       "target_path": "dags/domains/weather/tests/test_weather_transform_execution.py",
       "scope": "airflow_weather_test",
-      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes.",
+      "record_type": "derived",
+      "derivation": "Replace placeholder manifests with structurally valid dbt manifests required by stable publication validation.",
+      "validator": "python -m pytest dags/domains/weather/tests -q"
     },
     {
       "source_id": "airflow_weather",
@@ -738,7 +753,10 @@
       "source_path": "domains/weather/tests/weather_dbt_execution_test_support.py",
       "target_path": "dags/domains/weather/tests/weather_dbt_execution_test_support.py",
       "scope": "airflow_weather_test",
-      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes."
+      "reason": "Selected unit, import, execution, or contract test for the included Weather Airflow lanes.",
+      "record_type": "derived",
+      "derivation": "Provide a deterministic structurally valid dbt manifest fixture for external artifact and stable publication tests.",
+      "validator": "python -m pytest dags/domains/weather/tests -q"
     },
     {
       "source_id": "airflow_weather",
@@ -794,7 +812,10 @@
       "source_path": "domains/weather/weather_ingest/_dbt_execution/contracts.py",
       "target_path": "dags/domains/weather/weather_ingest/_dbt_execution/contracts.py",
       "scope": "airflow_weather_dependency",
-      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes.",
+      "record_type": "derived",
+      "derivation": "Add a validated repository-external Weather dbt artifact root while preserving the env-absent project-local contract.",
+      "validator": "python -m pytest dags/domains/weather/tests -q"
     },
     {
       "source_id": "airflow_weather",
@@ -808,14 +829,20 @@
       "source_path": "domains/weather/weather_ingest/_dbt_execution/executor.py",
       "target_path": "dags/domains/weather/weather_ingest/_dbt_execution/executor.py",
       "scope": "airflow_weather_dependency",
-      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes.",
+      "record_type": "derived",
+      "derivation": "Run Weather dbt with immutable source and external artifacts, then atomically publish only structurally valid successful manifests.",
+      "validator": "python -m pytest dags/domains/weather/tests -q"
     },
     {
       "source_id": "airflow_weather",
       "source_path": "domains/weather/weather_ingest/_dbt_execution/paths.py",
       "target_path": "dags/domains/weather/weather_ingest/_dbt_execution/paths.py",
       "scope": "airflow_weather_dependency",
-      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes."
+      "reason": "Transitive Weather-local import, KMA grid resource, or required package initializer for the selected lanes.",
+      "record_type": "derived",
+      "derivation": "Place Weather dbt target, log, and package attempts below a validated external root while retaining cleanup and retention guards.",
+      "validator": "python -m pytest dags/domains/weather/tests -q"
     },
     {
       "source_id": "airflow_weather",

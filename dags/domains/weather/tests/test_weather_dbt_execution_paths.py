@@ -12,6 +12,11 @@ def _paths_module():
     return importlib.import_module("weather_ingest._dbt_execution.paths")
 
 
+def _contracts_module():
+    load_execution_module()
+    return importlib.import_module("weather_ingest._dbt_execution.contracts")
+
+
 def _directory_symlink(link: Path, target: Path) -> None:
     link.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -98,6 +103,76 @@ def test_weather_attempt_paths_separate_invocations_within_one_task_attempt(tmp_
     assert first.execution_log_path != second.execution_log_path
     assert "/window-0001/" in first.execution_target_path.replace("\\", "/")
     assert "/window-0002/" in second.execution_target_path.replace("\\", "/")
+
+
+def test_weather_attempt_paths_move_generated_files_to_distinct_artifact_root(tmp_path):
+    module = load_execution_module()
+    project_dir = tmp_path / "read-only-project"
+    artifact_root = tmp_path / "dbt-artifacts" / "release-1"
+
+    paths = module.attempt_paths(
+        project_dir=str(project_dir),
+        artifact_root=str(artifact_root),
+        pipeline="weather-transform",
+        run_id="scheduled__1",
+        task_id="dbt_run_silver",
+        try_number=1,
+        invocation_id="run-silver",
+        dbt_command="run",
+    )
+
+    generated_paths = (
+        paths.preflight_target_path,
+        paths.preflight_log_path,
+        paths.execution_target_path,
+        paths.execution_log_path,
+        paths.packages_path,
+        paths.run_results_path,
+        paths.manifest_path,
+    )
+    assert all(
+        Path(path).resolve().is_relative_to(artifact_root.resolve())
+        for path in generated_paths
+    )
+    assert all(
+        not Path(path).resolve().is_relative_to(project_dir.resolve())
+        for path in generated_paths
+    )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "blank",
+        "relative",
+        "filesystem-root",
+        "project",
+        "inside-project",
+        "contains-project",
+        "lexical-traversal",
+    ],
+)
+def test_weather_configured_artifact_root_fails_closed_when_not_clean_and_disjoint(
+    case, tmp_path
+):
+    contracts = _contracts_module()
+    project_dir = tmp_path / "source" / "traffic_weather"
+    project_dir.mkdir(parents=True)
+    values = {
+        "blank": "   ",
+        "relative": "relative-artifacts",
+        "filesystem-root": str(Path(tmp_path.anchor)),
+        "project": str(project_dir),
+        "inside-project": str(project_dir / "target-external"),
+        "contains-project": str(tmp_path / "source"),
+        "lexical-traversal": str(tmp_path / "artifacts" / ".." / "other"),
+    }
+
+    with pytest.raises(RuntimeError, match="ASK_SEOUL_DBT_ARTIFACT_ROOT"):
+        contracts.dbt_artifact_root(
+            str(project_dir),
+            {"ASK_SEOUL_DBT_ARTIFACT_ROOT": values[case]},
+        )
 
 
 def test_weather_attempt_paths_are_collision_resistant_and_contained(tmp_path):

@@ -1,0 +1,18 @@
+[
+  {
+    "base": {
+      "ref": "main",
+      "repo": {
+        "full_name": "masondev1024/seoul-weather-platform"
+      }
+    },
+    "head": {
+      "ref": "dev",
+      "repo": {
+        "full_name": "masondev1024/seoul-weather-platform"
+      }
+    },
+    "merge_commit_sha": "0123456789abcdef0123456789abcdef01234567",
+    "merged_at": "2026-08-14T01:23:45Z"
+  }
+]

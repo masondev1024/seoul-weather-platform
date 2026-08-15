@@ -41,7 +41,10 @@ def test_weather_reconciliation_dag_is_paused_api_free_control_plane():
     assert module.dag.is_paused_upon_creation is True
     assert module.dag.catchup is False
     assert module.dag.max_active_runs == 1
-    assert module.dag.schedule_interval == "20 3,6,9,12,15,18,21,0 * * *"
+    schedule = getattr(module.dag, "schedule", None)
+    if schedule is None:
+        schedule = getattr(module.dag, "schedule_interval", None)
+    assert schedule == "20 3,6,9,12,15,18,21,0 * * *"
     assert task.python_callable is module.reconcile_due_weather_collection_slots
     assert "build_weather_landing" not in source
     assert "KmaHttpAdapter" not in source
