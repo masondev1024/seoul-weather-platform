@@ -50,12 +50,14 @@ class GitCommandAdapter:
         if not self._source.is_dir() or not (self._source / ".git").exists():
             raise GitAdapterError("git_adapter_input_rejected")
 
-    def _checked(self, argv: Sequence[str], cwd: Path) -> str:
+    def _checked(
+        self, argv: Sequence[str], cwd: Path, *, allow_progress_stderr: bool = False
+    ) -> str:
         try:
             result: CompletedCommand = self._runner.run(argv, cwd)
         except Exception:
             raise GitAdapterError("git_adapter_command_failed") from None
-        if result.returncode != 0 or result.stderr:
+        if result.returncode != 0 or (result.stderr and not allow_progress_stderr):
             raise GitAdapterError("git_adapter_command_failed")
         return result.stdout
 
@@ -144,6 +146,8 @@ class GitCommandAdapter:
             )
         )
         try:
+            # Git emits successful clone/checkout progress on stderr. Each
+            # resulting repository is still verified below before activation.
             self._checked(
                 (
                     "git",
@@ -155,8 +159,13 @@ class GitCommandAdapter:
                     str(temp),
                 ),
                 parent,
+                allow_progress_stderr=True,
             )
-            self._checked(("git", "checkout", "--detach", candidate_sha), temp)
+            self._checked(
+                ("git", "checkout", "--detach", candidate_sha),
+                temp,
+                allow_progress_stderr=True,
+            )
             self._verify_release(temp, candidate_sha)
             if destination.exists():
                 raise GitAdapterError("git_adapter_release_rejected")

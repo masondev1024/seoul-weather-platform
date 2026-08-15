@@ -959,6 +959,22 @@ class _CheckoutFailureGitRunner(_GitRunner):
         return super().run(argv, cwd)
 
 
+class _GitProgressRunner(_GitRunner):
+    def run(self, argv, cwd: Path) -> CompletedCommand:
+        result = super().run(argv, cwd)
+        if tuple(argv)[1] in {"clone", "checkout"}:
+            return CompletedCommand(stdout=result.stdout, stderr="progress", returncode=0)
+        return result
+
+
+class _GitSourceWarningRunner(_GitRunner):
+    def run(self, argv, cwd: Path) -> CompletedCommand:
+        result = super().run(argv, cwd)
+        if tuple(argv) == ("git", "rev-parse", "HEAD") and cwd == self.source:
+            return CompletedCommand(stdout=result.stdout, stderr="warning", returncode=0)
+        return result
+
+
 def test_git_creates_standalone_local_detached_release_with_exact_commands(tmp_path: Path):
     target = _native_target(tmp_path)
     source = tmp_path / "trusted-source"
@@ -979,6 +995,34 @@ def test_git_creates_standalone_local_detached_release_with_exact_commands(tmp_p
     assert temp.parent == destination.parent
     assert temp.name.startswith(f".{SHA}.") and temp.name.endswith(".tmp")
     assert ("git", "checkout", "--detach", SHA) in [argv for argv, _ in runner.calls]
+
+
+def test_git_allows_successful_progress_stderr_only_for_clone_and_checkout(tmp_path: Path):
+    target = _native_target(tmp_path)
+    source = tmp_path / "trusted-source"
+    source.mkdir()
+    (source / ".git").mkdir()
+    destination = Path(str(target.runtime_root)) / "releases" / SHA
+
+    assert (
+        GitCommandAdapter(target, source, _GitProgressRunner(source)).detached_checkout(
+            REPOSITORY, SHA, destination
+        )
+        == destination
+    )
+
+
+def test_git_rejects_successful_stderr_from_source_verification(tmp_path: Path):
+    target = _native_target(tmp_path)
+    source = tmp_path / "trusted-source"
+    source.mkdir()
+    (source / ".git").mkdir()
+    destination = Path(str(target.runtime_root)) / "releases" / SHA
+
+    with pytest.raises(GitAdapterError, match="^git_adapter_command_failed$"):
+        GitCommandAdapter(target, source, _GitSourceWarningRunner(source)).detached_checkout(
+            REPOSITORY, SHA, destination
+        )
 
 
 def test_git_checkout_failure_removes_only_its_bounded_sibling_temp(tmp_path: Path):
