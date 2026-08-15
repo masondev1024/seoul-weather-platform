@@ -52,7 +52,7 @@ _VERIFY_MAIN_COMMAND = (
 _DEPLOY_MAIN_COMMAND = _VERIFY_MAIN_COMMAND.replace("verify-main", "deploy-main", 1)
 _SELF_HOSTED_COMMANDS = {
     "protected_push": (_DAGBAG_COMMAND,),
-    "deploy_main": (_DEPLOY_MAIN_COMMAND,),
+    "deploy_main": (_DEPLOY_MAIN_COMMAND, _DEPLOY_MAIN_COMMAND),
 }
 _PROTECTED_CHECKOUT_INPUTS = (("persist-credentials", "false"),)
 _TRUSTED_CHECKOUT_INPUTS = (
@@ -66,14 +66,26 @@ _SELF_HOSTED_ACTION_CONTRACTS = {
         (0, _CHECKOUT_ACTION, _TRUSTED_CHECKOUT_INPUTS),
     ),
 }
-_MAIN_CLI_ENV = (
+_GUARDED_MAIN_CLI_ENV = (
+    ("GH_TOKEN", "${{ github.token }}"),
+    ("GOVERNANCE_MODE", "${{ vars.WEATHER_GOVERNANCE_MODE }}"),
+    ("DEPLOYMENT_ENABLED", "${{ vars.WEATHER_DEPLOYMENT_ENABLED }}"),
+)
+_PROTECTED_MAIN_CLI_ENV = (
     ("GH_TOKEN", "${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}"),
     ("GOVERNANCE_MODE", "${{ vars.WEATHER_GOVERNANCE_MODE }}"),
     ("DEPLOYMENT_ENABLED", "${{ vars.WEATHER_DEPLOYMENT_ENABLED }}"),
 )
+_GUARDED_PRIVATE_STEP_CONDITION = (
+    "vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'"
+)
+_PROTECTED_STEP_CONDITION = "vars.WEATHER_GOVERNANCE_MODE == 'protected'"
 _SELF_HOSTED_RUN_CONTRACTS = {
-    "protected_push": ((None, None),),
-    "deploy_main": (("pwsh", _MAIN_CLI_ENV),),
+    "protected_push": ((None, None, None),),
+    "deploy_main": (
+        (_GUARDED_PRIVATE_STEP_CONDITION, "pwsh", _GUARDED_MAIN_CLI_ENV),
+        (_PROTECTED_STEP_CONDITION, "pwsh", _PROTECTED_MAIN_CLI_ENV),
+    ),
 }
 _SELF_HOSTED_EXECUTION_ENV_NAMES = frozenset(
     {
@@ -944,6 +956,7 @@ def _required_guard_clauses(
 ) -> set[_GuardClause] | None:
     required: set[_GuardClause] = set()
     protected = _value_atom(_MODE, "protected")
+    guarded_private = _value_atom(_MODE, "guarded_private")
 
     if "push" in events and workflow_name == "CI":
         push = _value_atom(_EVENT, "push")
@@ -959,25 +972,26 @@ def _required_guard_clauses(
         and set(events) == {"workflow_run"}
         and _workflow_run_config_is_trusted(events)
     ):
-        required.add(
-            frozenset(
-                {
-                    protected,
-                    _value_atom(_DEPLOYMENT_ENABLED, "enabled"),
-                    _value_atom(_EVENT, "workflow_run"),
-                    _value_atom(_ACTION, "completed"),
-                    _value_atom(_WORKFLOW_RUN_NAME, "CI"),
-                    _value_atom(
-                        _WORKFLOW_RUN_PATH,
-                        ".github/workflows/ci.yml",
-                    ),
-                    _value_atom(_WORKFLOW_RUN_STATUS, "completed"),
-                    _value_atom(_WORKFLOW_RUN_CONCLUSION, "success"),
-                    _value_atom(_WORKFLOW_RUN_EVENT, "push"),
-                    _value_atom(_WORKFLOW_RUN_HEAD_BRANCH, "main"),
-                    _field_equality_atom(_WORKFLOW_SHA, _WORKFLOW_RUN_HEAD_SHA),
-                }
-            )
+        common = {
+            _value_atom(_DEPLOYMENT_ENABLED, "enabled"),
+            _value_atom(_EVENT, "workflow_run"),
+            _value_atom(_ACTION, "completed"),
+            _value_atom(_WORKFLOW_RUN_NAME, "CI"),
+            _value_atom(
+                _WORKFLOW_RUN_PATH,
+                ".github/workflows/ci.yml",
+            ),
+            _value_atom(_WORKFLOW_RUN_STATUS, "completed"),
+            _value_atom(_WORKFLOW_RUN_CONCLUSION, "success"),
+            _value_atom(_WORKFLOW_RUN_EVENT, "push"),
+            _value_atom(_WORKFLOW_RUN_HEAD_BRANCH, "main"),
+            _field_equality_atom(_WORKFLOW_SHA, _WORKFLOW_RUN_HEAD_SHA),
+        }
+        required.update(
+            {
+                frozenset({protected, *common}),
+                frozenset({guarded_private, *common}),
+            }
         )
 
     return required or None
@@ -993,7 +1007,12 @@ def _trusted_self_hosted_guard_clauses(
     if tree is None or required is None:
         return None
     clauses = _guard_clauses(tree)
-    if not clauses or not clauses <= required:
+    if not clauses:
+        return None
+    if workflow_name == _DEPLOY_MAIN_WORKFLOW_NAME:
+        if clauses != required:
+            return None
+    elif not clauses <= required:
         return None
     return clauses
 
@@ -1106,7 +1125,7 @@ def _self_hosted_execution_context_is_safe(
     if steps is None:
         return False
     run_contracts: list[
-        tuple[str | None, tuple[tuple[str, str], ...] | None]
+        tuple[str | None, str | None, tuple[tuple[str, str], ...] | None]
     ] = []
     for step in steps:
         if not isinstance(step, Mapping):
@@ -1126,18 +1145,22 @@ def _self_hosted_execution_context_is_safe(
             {"run", "env"},
             {"run", "shell"},
             {"run", "shell", "env"},
+            {"if", "run", "shell", "env"},
         ):
             return False
         shell = step.get("shell")
         if shell is not None and not isinstance(shell, str):
             return False
+        condition = step.get("if")
+        if condition is not None and not isinstance(condition, str):
+            return False
         if "env" not in step:
-            run_contracts.append((shell, None))
+            run_contracts.append((condition, shell, None))
             continue
         environment = _exact_string_mapping(step.get("env"))
         if environment is None:
             return False
-        run_contracts.append((shell, environment))
+        run_contracts.append((condition, shell, environment))
     expected = _SELF_HOSTED_RUN_CONTRACTS.get(route) if route is not None else None
     return expected is None or tuple(run_contracts) == expected
 
@@ -1232,7 +1255,7 @@ def _deploy_main_guard_is_exact(
 ) -> bool:
     tree = _expression_tree(condition)
     required = _required_guard_clauses(workflow_name, events)
-    if tree is None or required is None or len(required) != 1:
+    if tree is None or required is None or len(required) != 2:
         return False
     return _guard_clauses(tree) == required
 
@@ -1254,7 +1277,7 @@ def _contract_step(
 def _deploy_main_steps_match(
     steps: object, command: str, *, hosted: bool
 ) -> bool:
-    expected_length = 3 if hosted else 2
+    expected_length = 4 if hosted else 3
     if (
         not isinstance(steps, Sequence)
         or isinstance(steps, (str, bytes, bytearray))
@@ -1266,18 +1289,33 @@ def _deploy_main_steps_match(
         _contract_step(steps[1], {"uses", "with"}) if hosted else None
     )
     invoke_index = 2 if hosted else 1
-    invoke = _contract_step(steps[invoke_index], {"run", "shell", "env"})
-    required = (checkout, setup_python, invoke) if hosted else (checkout, invoke)
+    guarded = _contract_step(
+        steps[invoke_index], {"if", "run", "shell", "env"}
+    )
+    protected = _contract_step(
+        steps[invoke_index + 1], {"if", "run", "shell", "env"}
+    )
+    required = (
+        (checkout, setup_python, guarded, protected)
+        if hosted
+        else (checkout, guarded, protected)
+    )
     if any(item is None for item in required):
         return False
     assert checkout is not None
-    assert invoke is not None
+    assert guarded is not None
+    assert protected is not None
     if (
         checkout.get("uses") == _CHECKOUT_ACTION
         and _exact_string_mapping(checkout.get("with")) == _TRUSTED_CHECKOUT_INPUTS
-        and invoke.get("run") == command
-        and invoke.get("shell") == "pwsh"
-        and _exact_string_mapping(invoke.get("env")) == _MAIN_CLI_ENV
+        and guarded.get("if") == _GUARDED_PRIVATE_STEP_CONDITION
+        and guarded.get("run") == command
+        and guarded.get("shell") == "pwsh"
+        and _exact_string_mapping(guarded.get("env")) == _GUARDED_MAIN_CLI_ENV
+        and protected.get("if") == _PROTECTED_STEP_CONDITION
+        and protected.get("run") == command
+        and protected.get("shell") == "pwsh"
+        and _exact_string_mapping(protected.get("env")) == _PROTECTED_MAIN_CLI_ENV
     ):
         if not hosted:
             return True
@@ -1346,6 +1384,7 @@ def _deploy_main_contract_matches(
         "actions": "read",
         "checks": "read",
         "contents": "read",
+        "pull-requests": "read",
     }:
         return False
     if workflow.get("concurrency") != {
