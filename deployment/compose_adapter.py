@@ -30,6 +30,10 @@ _DRY_RUN_PROGRESS = re.compile(r"^\[\+\]\s+Running\s+\d+/\d+$")
 
 def _compose_volume_dict(volume: Mapping[str, object], expected: Mapping[str, object]) -> dict[str, object]:
     normalized = dict(volume)
+    if "read_only" in expected and type(expected["read_only"]) is not bool:
+        raise ValueError
+    if "read_only" in normalized and type(normalized["read_only"]) is not bool:
+        raise ValueError
     if expected.get("read_only") is False and "read_only" not in normalized:
         normalized["read_only"] = False
     return normalized

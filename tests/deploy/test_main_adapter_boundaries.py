@@ -624,6 +624,35 @@ def test_compose_accepts_omitted_read_only_false_for_writable_baseline_bind(
 
 
 @pytest.mark.parametrize(
+    ("candidate_factory", "mount_target", "invalid_value"),
+    [
+        (_baseline_candidate, "/opt/airflow/dbt", 0),
+        (_candidate, "/opt/airflow/dags", 1),
+    ],
+)
+def test_compose_rejects_bool_like_read_only_values(
+    tmp_path: Path, candidate_factory, mount_target: str, invalid_value: int
+):
+    target, artifact, staged = candidate_factory(tmp_path)
+    base, candidate = _compose_documents(target, artifact)
+    service = sorted(target.airflow_code_services)[0]
+    mount = next(
+        volume
+        for volume in candidate["services"][service]["volumes"]
+        if volume["target"] == mount_target
+    )
+    mount["read_only"] = invalid_value
+    runner = _QueueRunner([_ok(json.dumps(base)), _ok(json.dumps(candidate))])
+
+    with pytest.raises(
+        ComposeAdapterError, match="^compose_adapter_config_rejected$"
+    ):
+        ComposeCommandAdapter(target, runner).validate_candidate(target, staged)
+
+    assert len(runner.calls) == 2
+
+
+@pytest.mark.parametrize(
     "case",
     [
         "missing-artifact-env",
