@@ -91,7 +91,7 @@ jobs:
       - name: Deploy guarded private main identity
         if: vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'
         run: python -m deployment.main_cli deploy-main --event-path "$env:GITHUB_EVENT_PATH" --workflow-ref "$env:GITHUB_WORKFLOW_REF" --workflow-sha "$env:GITHUB_WORKFLOW_SHA"
-        shell: pwsh
+        shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
           GOVERNANCE_MODE: ${{ vars.WEATHER_GOVERNANCE_MODE }}
@@ -99,7 +99,7 @@ jobs:
       - name: Deploy protected main identity
         if: vars.WEATHER_GOVERNANCE_MODE == 'protected'
         run: python -m deployment.main_cli deploy-main --event-path "$env:GITHUB_EVENT_PATH" --workflow-ref "$env:GITHUB_WORKFLOW_REF" --workflow-sha "$env:GITHUB_WORKFLOW_SHA"
-        shell: pwsh
+        shell: powershell
         env:
           GH_TOKEN: ${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}
           GOVERNANCE_MODE: ${{ vars.WEATHER_GOVERNANCE_MODE }}

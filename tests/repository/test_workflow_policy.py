@@ -287,10 +287,10 @@ jobs:
           persist-credentials: false
       - if: vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'
         run: {DEPLOY_MAIN_COMMAND}
-        shell: pwsh
+        shell: powershell
 {GUARDED_MAIN_CLI_ENV}      - if: vars.WEATHER_GOVERNANCE_MODE == 'protected'
         run: {DEPLOY_MAIN_COMMAND}
-        shell: pwsh
+        shell: powershell
 {MAIN_CLI_ENV}"""
 
 
@@ -951,10 +951,11 @@ def test_deploy_main_rejects_every_weakened_source_boundary(
             "          ref: ${{ github.event.workflow_run.head_sha }}",
         ),
         ("        shell: pwsh", "        shell: powershell"),
+        ("        shell: powershell", "        shell: pwsh"),
         (
             "      - if: vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'\n",
             f"      - run: {FORBIDDEN_MAIN_INSTALL_COMMAND}\n"
-            "        shell: pwsh\n"
+            "        shell: powershell\n"
             "      - if: vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'\n",
         ),
         (DEPLOY_MAIN_COMMAND, "python -m deployment.main_cli deploy-main"),
