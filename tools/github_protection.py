@@ -64,6 +64,8 @@ class GhRunner(Protocol):
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
 
+    def api_list(self, method: str, endpoint: str) -> list[dict[str, Any]]: ...
+
 
 class SubprocessGhRunner:
     def __init__(self, *, run: Callable[..., object] | None = None) -> None:
@@ -81,6 +83,26 @@ class SubprocessGhRunner:
             raise GhApiError(method, endpoint, None)
         if method == "PUT" and payload is None:
             raise GhApiError(method, endpoint, None)
+
+        value = self._read_json(method, endpoint, payload)
+        if not isinstance(value, dict):
+            raise GhApiError(method, endpoint, None)
+        return value
+
+    def api_list(self, method: str, endpoint: str) -> list[dict[str, Any]]:
+        if method != "GET":
+            raise GhApiError(method, endpoint, None)
+        value = self._read_json(method, endpoint, None)
+        if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+            raise GhApiError(method, endpoint, None)
+        return value
+
+    def _read_json(
+        self,
+        method: str,
+        endpoint: str,
+        payload: dict[str, Any] | None,
+    ) -> Any:
 
         argv = [
             "gh",
@@ -124,12 +146,9 @@ class SubprocessGhRunner:
             status = int(match.group(1)) if match else None
             raise GhApiError(method, endpoint, status)
         try:
-            value = json.loads(stdout)
+            return json.loads(stdout)
         except (TypeError, json.JSONDecodeError) as exc:
             raise GhApiError(method, endpoint, None) from exc
-        if not isinstance(value, dict):
-            raise GhApiError(method, endpoint, None)
-        return value
 
 
 class _SanitizedArgumentParser(argparse.ArgumentParser):

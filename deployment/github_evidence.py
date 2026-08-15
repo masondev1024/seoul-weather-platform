@@ -14,6 +14,7 @@ from tools.github_protection import GhRunner
 
 _SAFE_CATEGORY = "invalid-github-evidence"
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_BOOTSTRAP_SHA = "0" * 40
 _REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _REQUIRED_CHECKS = ("CI / required", "Promotion Source / required")
 _DEFAULT_MAX_EVENT_BYTES = 65_536
@@ -151,6 +152,13 @@ def _sha(value: object) -> str:
     return text
 
 
+def _deploy_sha(value: object) -> str:
+    sha = _sha(value)
+    if sha == _BOOTSTRAP_SHA:
+        _reject()
+    return sha
+
+
 def _repository(value: object) -> str:
     text = _string(value)
     if _REPOSITORY_RE.fullmatch(text) is None:
@@ -180,9 +188,11 @@ class MainIdentityInputs:
     workflow_ref: str
     workflow_sha: str
     repository: str
+    governance_mode: str
     _event_json: str
     _repo_json: str
     _protections_json: str
+    _promotion_pr_json: str
     _source_run_json: str
     _source_jobs_json: str
     _linked_checks_json: str
@@ -203,8 +213,12 @@ class MainIdentityInputs:
         return self._decode(self._repo_json)
 
     @property
-    def protections(self) -> dict[str, Any]:
+    def protections(self) -> dict[str, Any] | None:
         return self._decode(self._protections_json)
+
+    @property
+    def promotion_pr(self) -> dict[str, Any]:
+        return self._decode(self._promotion_pr_json)
 
     @property
     def source_run(self) -> dict[str, Any]:
@@ -225,6 +239,8 @@ class MainIdentityInputs:
             "workflow_sha": self.workflow_sha,
             "repository": self.repository,
             "repo": self.repo,
+            "governance_mode": self.governance_mode,
+            "promotion_pr": self.promotion_pr,
             "protections": self.protections,
             "source_run": self.source_run,
             "source_jobs": self.source_jobs,
@@ -238,8 +254,10 @@ def _build_inputs(
     workflow_ref: str,
     workflow_sha: str,
     repository: str,
+    governance_mode: str,
     repo: dict[str, Any],
-    protections: dict[str, Any],
+    protections: dict[str, Any] | None,
+    promotion_pr: dict[str, Any],
     source_run: dict[str, Any],
     source_jobs: list[dict[str, Any]],
     linked_checks: list[dict[str, Any]],
@@ -248,9 +266,11 @@ def _build_inputs(
         workflow_ref=workflow_ref,
         workflow_sha=workflow_sha,
         repository=repository,
+        governance_mode=governance_mode,
         _event_json=_canonical_json(event),
         _repo_json=_canonical_json(repo),
         _protections_json=_canonical_json(protections),
+        _promotion_pr_json=_canonical_json(promotion_pr),
         _source_run_json=_canonical_json(source_run),
         _source_jobs_json=_canonical_json(source_jobs),
         _linked_checks_json=_canonical_json(linked_checks),
@@ -264,7 +284,7 @@ def _validate_local_envelope(
     repository: object,
 ) -> tuple[str, str, int, dict[str, Any]]:
     repository_text = _repository(repository)
-    workflow_sha_text = _sha(workflow_sha)
+    workflow_sha_text = _deploy_sha(workflow_sha)
     if (
         _string(workflow_ref)
         != f"{repository_text}/.github/workflows/deploy-main.yml@refs/heads/main"
@@ -304,6 +324,17 @@ def _api_get(runner: GhRunner, endpoint: str) -> dict[str, Any]:
     except Exception:
         _reject()
     return _mapping(snapshot)
+
+
+def _api_list(runner: GhRunner, endpoint: str) -> list[dict[str, Any]]:
+    try:
+        response = runner.api_list("GET", endpoint)
+        snapshot = _snapshot_json(response)
+    except GithubEvidenceError:
+        raise
+    except Exception:
+        _reject()
+    return [_mapping(value) for value in _sequence(snapshot)]
 
 
 def _normalize_repo(response: dict[str, Any], repository: str) -> dict[str, Any]:
@@ -447,6 +478,34 @@ def _normalize_protection(
     return protection_payload(branch, app_ids)  # type: ignore[arg-type]
 
 
+def _normalize_promotion_pr(
+    values: list[dict[str, Any]], repository: str, sha: str
+) -> dict[str, Any]:
+    if len(values) != 1:
+        _reject()
+    value = values[0]
+    base = _mapping(value.get("base"))
+    head = _mapping(value.get("head"))
+    number = _positive_int(value.get("number"))
+    merged_at = _string(value.get("merged_at"))
+    merge_commit_sha = _sha(value.get("merge_commit_sha"))
+    if (
+        merge_commit_sha != sha
+        or base.get("ref") != "main"
+        or _repository_name(base.get("repo")) != repository
+        or head.get("ref") != "dev"
+        or _repository_name(head.get("repo")) != repository
+    ):
+        _reject()
+    return {
+        "number": number,
+        "merged_at": merged_at,
+        "merge_commit_sha": sha,
+        "base": {"ref": "main", "repo": {"full_name": repository}},
+        "head": {"ref": "dev", "repo": {"full_name": repository}},
+    }
+
+
 def _validate_main_branch(response: dict[str, Any], sha: str) -> None:
     commit = _mapping(response.get("commit"))
     if response.get("name") != "main" or _sha(commit.get("sha")) != sha:
@@ -459,6 +518,7 @@ def read_main_identity_inputs(
     workflow_ref: object,
     workflow_sha: object,
     repository: object,
+    governance_mode: object,
     gh_token: object,
     runner: GhRunner,
     max_event_bytes: int = _DEFAULT_MAX_EVENT_BYTES,
@@ -468,12 +528,17 @@ def read_main_identity_inputs(
         repository_text, sha, run_id, event = _validate_local_envelope(
             event_seed, workflow_ref, workflow_sha, repository
         )
+        mode = governance_mode if type(governance_mode) is str else ""
+        if mode not in {"protected", "guarded_private"}:
+            _reject()
         if type(gh_token) is not str or not gh_token:
             _reject()
 
         repo = _normalize_repo(
             _api_get(runner, f"/repos/{repository_text}"), repository_text
         )
+        if mode == "guarded_private" and repo["private"] is not True:
+            _reject()
         source_run = _normalize_source_run(
             _api_get(runner, f"/repos/{repository_text}/actions/runs/{run_id}"),
             repository_text,
@@ -504,17 +569,27 @@ def read_main_identity_inputs(
         if len(set(check_app_ids.values())) != 1:
             _reject()
 
-        protections = {
-            branch: _normalize_protection(
-                branch,
-                _api_get(
-                    runner,
-                    f"/repos/{repository_text}/branches/{branch}/protection",
-                ),
-                check_app_ids,
-            )
-            for branch in ("dev", "main")
-        }
+        promotion_pr = _normalize_promotion_pr(
+            _api_list(
+                runner,
+                f"/repos/{repository_text}/commits/{sha}/pulls?per_page=2&page=1",
+            ),
+            repository_text,
+            sha,
+        )
+        protections: dict[str, Any] | None = None
+        if mode == "protected":
+            protections = {
+                branch: _normalize_protection(
+                    branch,
+                    _api_get(
+                        runner,
+                        f"/repos/{repository_text}/branches/{branch}/protection",
+                    ),
+                    check_app_ids,
+                )
+                for branch in ("dev", "main")
+            }
         _validate_main_branch(
             _api_get(runner, f"/repos/{repository_text}/branches/main"), sha
         )
@@ -524,8 +599,10 @@ def read_main_identity_inputs(
             workflow_ref=_string(workflow_ref),
             workflow_sha=sha,
             repository=repository_text,
+            governance_mode=mode,
             repo=repo,
             protections=protections,
+            promotion_pr=promotion_pr,
             source_run=source_run,
             source_jobs=source_jobs,
             linked_checks=linked_checks,
