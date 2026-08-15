@@ -109,13 +109,14 @@ def _regular_size_bounded_absolute_file(value: str) -> bool:
         return False
 
 
-def _validate_gate(invocation: _Invocation) -> tuple[str, str]:
+def _validate_gate(invocation: _Invocation) -> tuple[str, str, str]:
     env = os.environ
     repository = env.get("GITHUB_REPOSITORY", "")
     token = env.get("GH_TOKEN", "")
+    governance_mode = env.get("GOVERNANCE_MODE", "")
     if (
         env.get("GITHUB_ACTIONS") != "true"
-        or env.get("GOVERNANCE_MODE") != "protected"
+        or governance_mode not in {"protected", "guarded_private"}
         or env.get("DEPLOYMENT_ENABLED") != "enabled"
         or not token
         or not repository
@@ -127,17 +128,18 @@ def _validate_gate(invocation: _Invocation) -> tuple[str, str]:
         or not _regular_size_bounded_absolute_file(invocation.event_path)
     ):
         _fail(invocation.command, "gate", "invalid-environment")
-    return repository, token
+    return repository, token, governance_mode
 
 
 def _verify_identity(invocation: _Invocation) -> MainDeployIdentity:
-    repository, token = _validate_gate(invocation)
+    repository, token, governance_mode = _validate_gate(invocation)
     try:
         inputs = read_main_identity_inputs(
             event_path=invocation.event_path,
             workflow_ref=invocation.workflow_ref,
             workflow_sha=invocation.workflow_sha,
             repository=repository,
+            governance_mode=governance_mode,
             gh_token=token,
             runner=SubprocessGhRunner(),
         )
