@@ -176,5 +176,8 @@ class AirflowCommandAdapter:
             observed = parse_airflow_bool(rows[0].get("is_paused"))
         except Exception:
             raise AirflowAdapterError("airflow_adapter_invalid_output") from None
-        if observed is not expected:
+        # Airflow 3.2.2 reports the state before a successful pause/unpause
+        # transition. The orchestrator verifies the resulting state separately
+        # with capture_pause_state after the mutation batch.
+        if observed is expected:
             raise AirflowAdapterError("airflow_adapter_invalid_output")
