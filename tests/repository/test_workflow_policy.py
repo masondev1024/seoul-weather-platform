@@ -936,6 +936,41 @@ def test_deploy_main_requires_both_exact_mode_clauses(
     assert "deploy_main_contract" in _rules(repo_root)
 
 
+@pytest.mark.parametrize("occurrence", ["first", "last"])
+def test_deploy_main_rejects_duplicate_guard_clause_before_set_normalization(
+    tmp_path: Path, occurrence: str
+) -> None:
+    duplicate_clause = (
+        "(vars.WEATHER_GOVERNANCE_MODE == 'protected' ||\n"
+        "      vars.WEATHER_GOVERNANCE_MODE == 'guarded_private' ||\n"
+        "      vars.WEATHER_GOVERNANCE_MODE == 'guarded_private')"
+    )
+    workflow = (
+        VALID_DEPLOY_MAIN.replace(TWO_MODE_GUARD, duplicate_clause, 1)
+        if occurrence == "first"
+        else _replace_last(VALID_DEPLOY_MAIN, TWO_MODE_GUARD, duplicate_clause)
+    )
+    repo_root = _write_repo(tmp_path, workflow, filename="deploy-main.yml")
+
+    assert "deploy_main_contract" in _rules(repo_root)
+
+
+@pytest.mark.parametrize("occurrence", ["first", "last"])
+def test_deploy_main_rejects_duplicate_guard_atom_before_frozenset_normalization(
+    tmp_path: Path, occurrence: str
+) -> None:
+    atom = "vars.WEATHER_DEPLOYMENT_ENABLED == 'enabled' &&"
+    duplicate_atom = f"{atom}\n      {atom}"
+    workflow = (
+        VALID_DEPLOY_MAIN.replace(atom, duplicate_atom, 1)
+        if occurrence == "first"
+        else _replace_last(VALID_DEPLOY_MAIN, atom, duplicate_atom)
+    )
+    repo_root = _write_repo(tmp_path, workflow, filename="deploy-main.yml")
+
+    assert "deploy_main_contract" in _rules(repo_root)
+
+
 @pytest.mark.parametrize(
     ("old", "new"),
     [

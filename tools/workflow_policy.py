@@ -930,15 +930,30 @@ def _guard_clauses(node: ast.AST) -> set[_GuardClause] | None:
             return None
         known_children = [clauses for clauses in child_clauses if clauses is not None]
         if isinstance(node.op, ast.Or):
-            result = set().union(*known_children)
-            return result if len(result) <= _MAX_GUARD_CLAUSES else None
+            result: set[_GuardClause] = set()
+            for clauses in known_children:
+                if result & clauses:
+                    return None
+                result.update(clauses)
+                if len(result) > _MAX_GUARD_CLAUSES:
+                    return None
+            return result
         if not isinstance(node.op, ast.And):
             return None
         result: set[_GuardClause] = {frozenset()}
         for clauses in known_children:
-            result = {left | right for left in result for right in clauses}
-            if len(result) > _MAX_GUARD_CLAUSES:
-                return None
+            combined: set[_GuardClause] = set()
+            for left in result:
+                for right in clauses:
+                    if left & right:
+                        return None
+                    clause = left | right
+                    if clause in combined:
+                        return None
+                    combined.add(clause)
+                    if len(combined) > _MAX_GUARD_CLAUSES:
+                        return None
+            result = combined
         return result
 
     atom = _comparison_atom(node)
