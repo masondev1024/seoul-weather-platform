@@ -83,8 +83,8 @@ _PROTECTED_STEP_CONDITION = "vars.WEATHER_GOVERNANCE_MODE == 'protected'"
 _SELF_HOSTED_RUN_CONTRACTS = {
     "protected_push": ((None, None, None),),
     "deploy_main": (
-        (_GUARDED_PRIVATE_STEP_CONDITION, "pwsh", _GUARDED_MAIN_CLI_ENV),
-        (_PROTECTED_STEP_CONDITION, "pwsh", _PROTECTED_MAIN_CLI_ENV),
+        (_GUARDED_PRIVATE_STEP_CONDITION, "powershell", _GUARDED_MAIN_CLI_ENV),
+        (_PROTECTED_STEP_CONDITION, "powershell", _PROTECTED_MAIN_CLI_ENV),
     ),
 }
 _SELF_HOSTED_EXECUTION_ENV_NAMES = frozenset(
@@ -1293,6 +1293,7 @@ def _deploy_main_steps_match(
     steps: object, command: str, *, hosted: bool
 ) -> bool:
     expected_length = 4 if hosted else 3
+    expected_shell = "pwsh" if hosted else "powershell"
     if (
         not isinstance(steps, Sequence)
         or isinstance(steps, (str, bytes, bytearray))
@@ -1325,11 +1326,11 @@ def _deploy_main_steps_match(
         and _exact_string_mapping(checkout.get("with")) == _TRUSTED_CHECKOUT_INPUTS
         and guarded.get("if") == _GUARDED_PRIVATE_STEP_CONDITION
         and guarded.get("run") == command
-        and guarded.get("shell") == "pwsh"
+        and guarded.get("shell") == expected_shell
         and _exact_string_mapping(guarded.get("env")) == _GUARDED_MAIN_CLI_ENV
         and protected.get("if") == _PROTECTED_STEP_CONDITION
         and protected.get("run") == command
-        and protected.get("shell") == "pwsh"
+        and protected.get("shell") == expected_shell
         and _exact_string_mapping(protected.get("env")) == _PROTECTED_MAIN_CLI_ENV
     ):
         if not hosted:
