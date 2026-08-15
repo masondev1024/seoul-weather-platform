@@ -33,6 +33,30 @@ def _mapping_rows(value: object) -> list[Mapping[str, object]]:
     return value
 
 
+def _airflow_322_preamble_matches(lines: list[str]) -> bool:
+    if len(lines) != len(_AIRFLOW_PLUGINS):
+        return False
+    observed: list[str] = []
+    for line in lines:
+        match = _AIRFLOW_PLUGIN_LINE.fullmatch(line)
+        if match is None:
+            return False
+        observed.append(match.group(1))
+    return tuple(observed) == _AIRFLOW_PLUGINS
+
+
+def is_airflow_322_noop(stdout: str, expected_message: str) -> bool:
+    """Accept only the known Airflow 3.2.2 no-op output with its log preamble."""
+    if type(stdout) is not str or type(expected_message) is not str or not expected_message:
+        return False
+    lines = [line.rstrip("\r") for line in stdout.splitlines() if line.strip()]
+    return (
+        len(lines) == len(_AIRFLOW_PLUGINS) + 1
+        and lines[-1] == expected_message
+        and _airflow_322_preamble_matches(lines[:-1])
+    )
+
+
 def parse_airflow_json_rows(stdout: str) -> list[Mapping[str, object]]:
     """Parse Airflow 3.2.2 JSON, allowing only its known Alembic log preamble."""
     if type(stdout) is not str:
@@ -41,17 +65,8 @@ def parse_airflow_json_rows(stdout: str) -> list[Mapping[str, object]]:
     if not lines:
         raise OutputContractError("invalid_output")
     preamble = lines[:-1]
-    if preamble:
-        if len(preamble) != len(_AIRFLOW_PLUGINS):
-            raise OutputContractError("invalid_output")
-        observed: list[str] = []
-        for line in preamble:
-            match = _AIRFLOW_PLUGIN_LINE.fullmatch(line)
-            if match is None:
-                raise OutputContractError("invalid_output")
-            observed.append(match.group(1))
-        if tuple(observed) != _AIRFLOW_PLUGINS:
-            raise OutputContractError("invalid_output")
+    if preamble and not _airflow_322_preamble_matches(preamble):
+        raise OutputContractError("invalid_output")
     try:
         payload = json.loads(lines[-1])
     except (TypeError, ValueError):
