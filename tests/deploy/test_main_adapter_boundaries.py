@@ -13,7 +13,7 @@ from deployment.compose_adapter import ComposeAdapterError, ComposeCommandAdapte
 from deployment.git_adapter import GitAdapterError, GitCommandAdapter
 from deployment.health_adapter import HealthAdapterError, HealthCommandAdapter
 from deployment.models import WriterRunCounts
-from deployment.overlay import OverlayArtifact, render_release_overlay
+from deployment.overlay import OverlayArtifact, render_baseline_overlay, render_release_overlay
 from tests.deploy.test_release_inventory import _target
 
 
@@ -81,6 +81,17 @@ def _candidate(tmp_path: Path):
     artifact = render_release_overlay(target, checkout, SHA)
     staged = Path(str(target.generated_overlay_file)).with_name(
         f".{Path(str(target.generated_overlay_file)).name}.candidate.tmp"
+    )
+    staged.parent.mkdir(parents=True)
+    staged.write_bytes(artifact.content)
+    return target, artifact, staged
+
+
+def _baseline_candidate(tmp_path: Path):
+    target = _native_target(tmp_path)
+    artifact = render_baseline_overlay(target)
+    staged = Path(str(target.generated_overlay_file)).with_name(
+        f".{Path(str(target.generated_overlay_file)).name}.baseline.tmp"
     )
     staged.parent.mkdir(parents=True)
     staged.write_bytes(artifact.content)
@@ -587,6 +598,29 @@ def test_compose_rejects_non_read_only_code_mount_and_unproven_dry_run(tmp_path:
     runner = _QueueRunner([_ok(json.dumps(base)), _ok(json.dumps(candidate)), _ok("")])
     with pytest.raises(ComposeAdapterError, match="^compose_adapter_dry_run_rejected$"):
         ComposeCommandAdapter(target, runner).validate_candidate(target, staged)
+
+
+def test_compose_accepts_omitted_read_only_false_for_writable_baseline_bind(
+    tmp_path: Path,
+):
+    target, artifact, staged = _baseline_candidate(tmp_path)
+    base, candidate = _compose_documents(target, artifact)
+    service = sorted(target.airflow_code_services)[0]
+    dbt_mount = next(
+        volume
+        for volume in candidate["services"][service]["volumes"]
+        if volume["target"] == "/opt/airflow/dbt"
+    )
+    assert dbt_mount.pop("read_only") is False
+    runner = _QueueRunner(
+        [
+            _ok(json.dumps(base)),
+            _ok(json.dumps(candidate)),
+            _ok(_dry_run_output(target)),
+        ]
+    )
+
+    ComposeCommandAdapter(target, runner).validate_candidate(target, staged)
 
 
 @pytest.mark.parametrize(
