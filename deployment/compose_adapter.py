@@ -28,6 +28,17 @@ _DRY_RUN_CONTAINER = re.compile(
 _DRY_RUN_PROGRESS = re.compile(r"^\[\+\]\s+Running\s+\d+/\d+$")
 
 
+def _compose_volume_dict(volume: Mapping[str, object], expected: Mapping[str, object]) -> dict[str, object]:
+    normalized = dict(volume)
+    if "read_only" in expected and type(expected["read_only"]) is not bool:
+        raise ValueError
+    if "read_only" in normalized and type(normalized["read_only"]) is not bool:
+        raise ValueError
+    if expected.get("read_only") is False and "read_only" not in normalized:
+        normalized["read_only"] = False
+    return normalized
+
+
 def _safe_atom(value: object) -> str:
     if type(value) is not str or not value or value.startswith("-") or _UNSAFE.search(value):
         raise ComposeAdapterError("compose_adapter_input_rejected")
@@ -201,7 +212,7 @@ class ComposeCommandAdapter:
                         if isinstance(volume, Mapping)
                         and volume.get("target") == expected["target"]
                     ]
-                    if len(matches) != 1 or dict(matches[0]) != expected:
+                    if len(matches) != 1 or _compose_volume_dict(matches[0], expected) != expected:
                         raise ValueError
                 expected_environment = overlay_body.get("environment")
                 if expected_environment is not None:
