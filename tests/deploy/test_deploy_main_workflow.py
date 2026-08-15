@@ -164,6 +164,7 @@ def test_jobs_use_only_pre_gate_safe_steps_and_exact_cli_entrypoints() -> None:
             "Verify guarded private main identity",
             "vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'",
             VERIFY_COMMAND,
+            "pwsh",
             {"GH_TOKEN": "${{ github.token }}", **common_env},
         ),
         (
@@ -171,6 +172,7 @@ def test_jobs_use_only_pre_gate_safe_steps_and_exact_cli_entrypoints() -> None:
             "Verify protected main identity",
             "vars.WEATHER_GOVERNANCE_MODE == 'protected'",
             VERIFY_COMMAND,
+            "pwsh",
             {
                 "GH_TOKEN": "${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}",
                 **common_env,
@@ -181,6 +183,7 @@ def test_jobs_use_only_pre_gate_safe_steps_and_exact_cli_entrypoints() -> None:
             "Deploy guarded private main identity",
             "vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'",
             DEPLOY_COMMAND,
+            "powershell",
             {"GH_TOKEN": "${{ github.token }}", **common_env},
         ),
         (
@@ -188,16 +191,17 @@ def test_jobs_use_only_pre_gate_safe_steps_and_exact_cli_entrypoints() -> None:
             "Deploy protected main identity",
             "vars.WEATHER_GOVERNANCE_MODE == 'protected'",
             DEPLOY_COMMAND,
+            "powershell",
             {
                 "GH_TOKEN": "${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}",
                 **common_env,
             },
         ),
     )
-    for invoke, name, condition, command, environment in expected_invocations:
+    for invoke, name, condition, command, shell, environment in expected_invocations:
         assert invoke.get("name") == name
         assert _normalized_expression(invoke.get("if")) == condition
         assert invoke.get("run") == command
-        assert invoke.get("shell") == "pwsh"
+        assert invoke.get("shell") == shell
         assert invoke.get("env") == environment
         assert set(invoke) == {"name", "if", "run", "shell", "env"}
