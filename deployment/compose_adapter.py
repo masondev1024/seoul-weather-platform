@@ -31,6 +31,13 @@ _DRY_RUN_V5_CONTAINER = re.compile(
     r"(?P<container>[A-Za-z0-9][A-Za-z0-9_.-]*)\s+"
     r"(?P<status>Recreate|Recreated|Starting|Started|Waiting|Healthy)$"
 )
+_DEPLOY_PROGRESS = re.compile(r"^\[\+\]\s+Running\s+\d+/\d+$")
+_DEPLOY_CONTAINER = re.compile(
+    r"^(?:[✔✓]\s+)?Container\s+"
+    r"(?P<container>[A-Za-z0-9][A-Za-z0-9_.-]*)\s+"
+    r"(?P<status>Recreate|Recreated|Creating|Created|Starting|Started|Running|Waiting|Healthy)"
+    r"(?:\s+\d+(?:\.\d+)?s)?$"
+)
 
 
 def _compose_volume_dict(volume: Mapping[str, object], expected: Mapping[str, object]) -> dict[str, object]:
@@ -80,14 +87,61 @@ class ComposeCommandAdapter:
             prefix.extend(("-f", _safe_path(compose_file)))
         self._base_prefix = tuple(prefix)
 
-    def _checked(self, argv: Sequence[str]) -> str:
+    def _checked(
+        self,
+        argv: Sequence[str],
+        *,
+        allowed_progress_containers: frozenset[str] | None = None,
+    ) -> str:
         try:
             result: CompletedCommand = self._runner.run(argv, self._cwd)
         except Exception:
             raise ComposeAdapterError("compose_adapter_command_failed") from None
-        if result.returncode != 0 or result.stderr:
+        if result.returncode != 0:
+            raise ComposeAdapterError("compose_adapter_command_failed")
+        if result.stderr and (
+            allowed_progress_containers is None
+            or not self._allowed_deploy_progress(result.stderr, allowed_progress_containers)
+        ):
             raise ComposeAdapterError("compose_adapter_command_failed")
         return result.stdout
+
+    @staticmethod
+    def _allowed_deploy_progress(stderr: str, expected_containers: frozenset[str]) -> bool:
+        if type(stderr) is not str or not stderr or not expected_containers:
+            return False
+        seen: set[str] = set()
+        for raw_line in stderr.splitlines():
+            line = _ANSI_ESCAPE.sub("", raw_line).strip()
+            if not line:
+                continue
+            if _DEPLOY_PROGRESS.fullmatch(line):
+                continue
+            match = _DEPLOY_CONTAINER.fullmatch(line)
+            if match is None or match.group("container") not in expected_containers:
+                return False
+            seen.add(match.group("container"))
+        return seen == set(expected_containers)
+
+    def _code_container_names(self, config: Mapping[str, object]) -> frozenset[str]:
+        try:
+            services = config["services"]
+            if not isinstance(services, Mapping):
+                raise ValueError
+            names: set[str] = set()
+            for service in self._services:
+                body = services[service]
+                if not isinstance(body, Mapping):
+                    raise ValueError
+                configured = body.get("container_name")
+                container = configured if type(configured) is str and configured else f"{self._target.project_name}-{service}-1"
+                _safe_atom(container)
+                names.add(container)
+            if len(names) != len(self._services):
+                raise ValueError
+            return frozenset(names)
+        except Exception:
+            raise ComposeAdapterError("compose_adapter_config_rejected") from None
 
     def _dry_run_checked(self, argv: Sequence[str]) -> str:
         try:
@@ -379,6 +433,7 @@ class ComposeCommandAdapter:
             )
         except Exception:
             raise ComposeAdapterError("compose_adapter_candidate_rejected") from None
+        config = self._config((*self._base_prefix, "-f", str(self._stable)))
         self._checked(
             (
                 *self._base_prefix,
@@ -391,5 +446,6 @@ class ComposeCommandAdapter:
                 "--pull",
                 "never",
                 *self._services,
-            )
+            ),
+            allowed_progress_containers=self._code_container_names(config),
         )
