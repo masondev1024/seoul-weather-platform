@@ -57,6 +57,10 @@ seeds:
           mapping_method: varchar
           grid_distance_m: double
           source_admin_code: varchar
+  asac_axes:
+    +schema: "{{ env_var('ASAC_AXES_SCHEMA', 'common') }}"
+    +tags:
+      - ask_seoul_weather_transform_asac_axes
 
 data_tests:
   asac_seoul:
