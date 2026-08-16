@@ -22,6 +22,16 @@ LOCAL_DBT_CONFIGS = frozenset(
         "dbt/domains/traffic_weather/models/weather/transform/gold/_serving_gold.yml",
     }
 )
+#: 이 저장소가 직접 작성한 Airflow 소스. `dags/` 는 기본적으로 고정 스냅샷 전제라
+#: 자동 분류를 막지만, platform-boundaries.md 대로 Weather DAG 코드는 이 저장소가
+#: 소유하므로 새로 쓴 파일이 생긴다. 상류에서 가져온 코드가 조용히 local_authored 로
+#: 흘러들지 않도록 **파일 단위로 명시**해서만 허용한다(LOCAL_DBT_CONFIGS 와 같은 방식).
+LOCAL_AIRFLOW_SOURCES = frozenset(
+    {
+        "dags/domains/weather/weather_serving_exclusion.py",
+        "dags/domains/weather/tests/test_weather_serving_snapshot_refresh_exclusion.py",
+    }
+)
 
 
 def _normalized(path: str) -> str:
@@ -45,7 +55,7 @@ def build_repository_record(target_path: str, checksum: str) -> dict[str, Any]:
             "derivation": "Route, response, error, cursor, and query-context semantics were independently reduced into contract-only JSON.",
             "validator": "tests/contracts/test_weather_risk_contract.py",
         }
-    if target.startswith("dags/"):
+    if target.startswith("dags/") and target not in LOCAL_AIRFLOW_SOURCES:
         raise ValueError(f"Airflow source requires fixed snapshot provenance: {target}")
     if target.startswith("dbt/") and target not in LOCAL_DBT_CONFIGS:
         raise ValueError(f"dbt source requires fixed snapshot provenance: {target}")
