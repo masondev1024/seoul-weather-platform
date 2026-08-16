@@ -31,11 +31,16 @@ models:
           +tags: ["ask_seoul_weather_transform_silver"]
         place_mart:
           +tags: ["ask_seoul_weather_transform_serving_place_mart"]
+        grid_mart:
+          +tags: ["ask_seoul_weather_transform_grid_mart"]
         gold:
           +tags: ["ask_seoul_weather_transform_serving_gold"]
   asac_axes:
     +schema: "{{ env_var('ASAC_AXES_SCHEMA', 'common') }}"
     +tags: ["ask_seoul_weather_transform_asac_axes"]
+    dim_admin_dong:
+      +tags:
+        - ask_seoul_weather_transform_common_admin
 
 seeds:
   asac_seoul:
@@ -57,6 +62,14 @@ seeds:
           mapping_method: varchar
           grid_distance_m: double
           source_admin_code: varchar
+      weather_coverage_grid:
+        +tags:
+          - ask_seoul_weather_transform_coverage_grid
+        +column_types:
+          grid_id: varchar
+          nx: integer
+          ny: integer
+          coverage_scope: varchar
   asac_axes:
     +schema: "{{ env_var('ASAC_AXES_SCHEMA', 'common') }}"
     +tags:
