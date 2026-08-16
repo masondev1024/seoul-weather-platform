@@ -1,5 +1,94 @@
 version: 2
 
 seeds:
+  - name: weather_coverage_grid
+    description: KMA 단기예보 수집 계약과 정확히 같은 서울 bbox 80개 격자의 canonical serving seed다. 행정동 매핑이나 실제 서울 행정경계 판정에는 사용하지 않는다.
+    columns:
+      - name: grid_id
+        description: KMA 격자를 나타내는 안정적인 공개 식별자다.
+        tests:
+          - not_null
+          - unique
+      - name: nx
+        description: KMA 격자 X 좌표다.
+        tests:
+          - not_null
+      - name: ny
+        description: KMA 격자 Y 좌표다.
+        tests:
+          - not_null
+      - name: coverage_scope
+        description: 수집 범위 의미를 나타내는 계약 값이다.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - seoul_bbox
   - name: weather_place_grid_mapping
-    description: K-Skill 및 Weather serving이 공유하는 427개 compatibility place와 KMA grid 매핑이다.
+    description: 기존 Weather 장소·행정동 별칭을 KMA 격자에 연결한 427행 호환 seed이며 canonical 행정동 증거로 사용하지 않는다.
+    columns:
+      - name: place_id
+        description: Weather 도메인이 부여한 장소 식별자이며 seed grain이다.
+        tests:
+          - not_null
+          - unique
+      - name: place_name
+        description: 사용자 표시용 대표 장소명이다.
+        tests:
+          - not_null
+      - name: alias_names
+        description: 세로 막대로 구분한 검색 별칭 목록이다.
+        tests:
+          - not_null
+      - name: gu
+        description: legacy mapping에 기록된 자치구명이며 canonical 값이 아니다.
+        tests:
+          - not_null
+      - name: admin_dong
+        description: legacy mapping에 기록된 행정동명이며 canonical 값이 아니다.
+        tests:
+          - not_null
+      - name: latitude
+        description: 장소의 WGS84 위도이며 격자 매핑 보조 정보다.
+        tests:
+          - not_null
+          - asac_axes.in_seoul_bbox:
+              arguments:
+                kind: lat
+      - name: longitude
+        description: 장소의 WGS84 경도이며 격자 매핑 보조 정보다.
+        tests:
+          - not_null
+          - asac_axes.in_seoul_bbox:
+              arguments:
+                kind: lon
+      - name: nx
+        description: 장소에 대응하는 KMA 격자 X 좌표다.
+        tests:
+          - not_null
+      - name: ny
+        description: 장소에 대응하는 KMA 격자 Y 좌표다.
+        tests:
+          - not_null
+      - name: mapping_method
+        description: legacy 매핑 개정 label이며 유효 시작일 증거가 아니다.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - kma_admin_dong_grid_20260325
+      - name: grid_distance_m
+        description: >
+          장소(행정동 중심좌표)와 배정 격자 셀 중심 사이 거리 m — 매핑 신뢰도 지표(#511,
+          contracts/weather/scripts/backfill_grid_distance.py 로 산출, KMA DFS 역변환+haversine).
+          재검토 신호 기준은 셀 반대각선 3,536m 초과(실측 3건) 또는 순변환 불일치(8개 동)다 —
+          반셀 2.8km 는 균등분포에서도 14.8%가 넘는 값이라 기준이 아니다(#116 리뷰 교정).
+          실측 최대 3,810m.
+        tests:
+          - not_null
+      - name: source_admin_code
+        description: KMA 안내 자료에 기록된 행정코드 후보이며 canonical dim과 exact join해야 한다.
+        tests:
+          - not_null
