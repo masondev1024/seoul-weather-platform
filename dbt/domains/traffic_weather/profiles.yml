@@ -1,6 +1,17 @@
 asac_seoul:
   target: "{{ env_var('DBT_TARGET', 'dev') }}"
   outputs:
+    prod:
+      type: trino
+      method: none
+      user: "{{ env_var('TRINO_USER', 'airflow') }}"
+      host: "{{ env_var('TRINO_HOST', 'trino') }}"
+      port: "{{ env_var('TRINO_PORT', '8080') | int }}"
+      database: "{{ env_var('TRINO_ICEBERG_CATALOG', 'iceberg') }}"
+      schema: "{{ env_var('DBT_CONTROL_SCHEMA', 'ask_seoul_control') }}"
+      http_scheme: "{{ env_var('TRINO_HTTP_SCHEME', 'http') }}"
+      threads: 4
+      timeout_seconds: 300
     dev:
       type: trino
       method: none
