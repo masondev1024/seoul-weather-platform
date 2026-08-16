@@ -67,7 +67,12 @@ def test_weather_dbt_boundary_keeps_only_the_four_public_products() -> None:
         "kma_vilage_fcst",
         "collection_run_manifest",
     ]
-    assert [seed["name"] for seed in seeds] == ["weather_place_grid_mapping"]
+    # weather_coverage_grid 는 80-grid coverage mart 의 입력이다. 공개 제품이 아니며
+    # 위 ask_seoul_weather_d1_public_products assert 가 D1 공개 경계를 계속 지킨다.
+    assert [seed["name"] for seed in seeds] == [
+        "weather_coverage_grid",
+        "weather_place_grid_mapping",
+    ]
     assert [group["name"] for group in groups] == ["weather"]
     assert [model["name"] for model in place_models] == [
         "silver_weather_forecast_by_admin_dong_serving",
