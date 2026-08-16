@@ -617,12 +617,13 @@ def test_compose_deploy_uses_only_stable_overlay_and_safe_exact_services(tmp_pat
     target, artifact, _ = _candidate(tmp_path)
     stable = Path(str(target.generated_overlay_file))
     stable.write_bytes(artifact.content)
-    runner = _QueueRunner([_ok()])
+    _, candidate = _compose_documents(target, artifact)
+    runner = _QueueRunner([_ok(json.dumps(candidate)), _ok()])
     services = tuple(sorted(target.airflow_code_services))
 
     ComposeCommandAdapter(target, runner).deploy_code_services(target, stable, services)
 
-    argv, cwd = runner.calls[0]
+    argv, cwd = runner.calls[1]
     assert argv == (
         *_compose_prefix(target, stable),
         "up",
@@ -636,6 +637,48 @@ def test_compose_deploy_uses_only_stable_overlay_and_safe_exact_services(tmp_pat
     assert cwd == Path(str(target.working_directory))
     assert not {"down", "restart", "build", "--force-recreate", "--remove-orphans"} & set(argv)
     assert not set(target.forbidden_data_services) & set(argv)
+
+
+def _deploy_progress_output(target) -> str:
+    lines = []
+    for service in sorted(target.airflow_code_services):
+        container = f"{target.project_name}-{service}-1"
+        lines.extend(
+            [
+                f"Container {container} Recreate",
+                f"Container {container} Recreated",
+                f"Container {container} Starting",
+                f"Container {container} Started",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def test_compose_deploy_accepts_only_code_container_progress_on_stderr(tmp_path: Path):
+    target, artifact, _ = _candidate(tmp_path)
+    stable = Path(str(target.generated_overlay_file))
+    stable.write_bytes(artifact.content)
+    _, candidate = _compose_documents(target, artifact)
+    runner = _QueueRunner(
+        [
+            _ok(json.dumps(candidate)),
+            CompletedCommand(stdout="", stderr=_deploy_progress_output(target), returncode=0),
+        ]
+    )
+
+    ComposeCommandAdapter(target, runner).deploy_code_services(target, stable, tuple(sorted(target.airflow_code_services)))
+
+
+@pytest.mark.parametrize("stderr", ["warning token=private\n", "Container unknown-service-1 Started\n", "Container example-weather-airflow-apiserver-1 Failed\n"])
+def test_compose_deploy_rejects_unrecognized_stderr(tmp_path: Path, stderr: str):
+    target, artifact, _ = _candidate(tmp_path)
+    stable = Path(str(target.generated_overlay_file))
+    stable.write_bytes(artifact.content)
+    _, candidate = _compose_documents(target, artifact)
+    runner = _QueueRunner([_ok(json.dumps(candidate)), CompletedCommand(stdout="", stderr=stderr, returncode=0)])
+
+    with pytest.raises(ComposeAdapterError, match="^compose_adapter_command_failed$"):
+        ComposeCommandAdapter(target, runner).deploy_code_services(target, stable, tuple(sorted(target.airflow_code_services)))
 
 
 @pytest.mark.parametrize("bad_service", ["airflow-init", "unknown", "example-postgres"])
