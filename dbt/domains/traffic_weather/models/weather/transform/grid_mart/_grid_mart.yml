@@ -1,0 +1,40 @@
+version: 2
+
+models:
+  - name: dim_weather_coverage_grid
+    description: KMA 단기예보 수집 계약과 같은 서울 bbox 80개 격자의 canonical 차원이다. 행정동 차원이나 행정경계 판정에는 사용하지 않는다.
+    columns:
+      - name: grid_id
+        tests: [not_null, unique]
+      - name: nx
+        tests: [not_null]
+      - name: ny
+        tests: [not_null]
+      - name: coverage_scope
+        tests: [not_null]
+  - name: silver_weather_forecast_by_coverage_grid_serving
+    description: KST 기준 어제 이후의 수집 80격자 예보만 유지하는 serving working set이다. 장소 fan-out을 거치지 않는다.
+    columns:
+      - name: grid_id
+        tests: [not_null]
+      - name: nx
+        tests: [not_null]
+      - name: ny
+        tests: [not_null]
+      - name: category
+        tests: [not_null]
+      - name: issued_at
+        tests: [not_null]
+      - name: forecast_at
+        tests: [not_null]
+      - name: collected_at
+        tests: [not_null]
+  - name: gold_weather_forecast_by_grid_serving
+    description: Grid 공개 Gold가 읽는 bounded forecast/category 소스다.
+    columns:
+      - name: grid_id
+        tests: [not_null]
+      - name: forecast_at
+        tests: [not_null]
+      - name: category
+        tests: [not_null]

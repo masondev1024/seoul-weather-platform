@@ -17,6 +17,14 @@ EXPECTED_WEATHER_MODELS = {
     "models/weather/transform/place_mart/dim_weather_place.sql",
     "models/weather/transform/place_mart/gold_weather_forecast_by_place_serving.sql",
     "models/weather/transform/place_mart/silver_weather_forecast_by_admin_dong_serving.sql",
+    # 80-grid coverage mart. weather_vilage_fcst_transform 의 dbt_run_coverage_grid_mart/
+    # dbt_test_coverage_grid_mart 단계가 이 세 모델을 선택하므로, 없으면 그 단계가
+    # empty-selection 으로 실패한다. 공개 제품이 아니라 audit/coverage 용이며
+    # 위 test_weather_dbt_boundary_keeps_only_the_four_public_products 가
+    # 이 모델들이 D1 공개 selector 로 새지 않는 것을 계속 막는다.
+    "models/weather/transform/grid_mart/dim_weather_coverage_grid.sql",
+    "models/weather/transform/grid_mart/silver_weather_forecast_by_coverage_grid_serving.sql",
+    "models/weather/transform/grid_mart/gold_weather_forecast_by_grid_serving.sql",
     "models/weather/transform/silver/silver_kma_vilage_fcst.sql",
 }
 
