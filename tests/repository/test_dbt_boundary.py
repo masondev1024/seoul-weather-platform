@@ -96,6 +96,72 @@ def test_weather_dbt_boundary_keeps_only_the_four_public_products() -> None:
     assert "gold_weather_place_risk_query_availability" not in public_model_names
 
 
+def _selector_model_names(selectors: list[dict], name: str) -> set[str]:
+    """Model names a selector writes, following one level of selector indirection."""
+    by_name = {item["name"]: item for item in selectors}
+    found: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            method, value = node.get("method"), node.get("value")
+            if method == "fqn" and isinstance(value, str):
+                found.add(value)
+            elif method == "path" and isinstance(value, str) and value.startswith("models/"):
+                found.add(Path(value).stem)
+            elif method == "selector" and isinstance(value, str) and value in by_name:
+                walk(by_name[value]["definition"])
+            for child in node.values():
+                walk(child)
+        elif isinstance(node, list):
+            for child in node:
+                walk(child)
+
+    walk(by_name[name]["definition"])
+    return found
+
+
+def test_weather_transform_and_refresh_never_write_the_same_gold_table() -> None:
+    """weather_vilage_fcst_transform 과 weather_serving_snapshot_refresh 는 서로 다른
+    스케줄(asset trigger vs 매시)로 돌기 때문에 실행 구간이 겹친다. 두 DAG 가 같은
+    Gold 테이블을 build 하면 한쪽이 다른 쪽의 테이블을 갈아엎는 중에 D1 export 가
+    읽어 서빙이 찢어진다. 그래서 소유권을 나눴고, 이 테스트가 그 분리를 고정한다.
+    """
+    selectors = _load_yaml("selectors.yml")["selectors"]
+
+    transform_owned = _selector_model_names(
+        selectors, "ask_seoul_weather_transform_serving_gold"
+    )
+    refresh_owned = _selector_model_names(
+        selectors, "ask_seoul_weather_serving_snapshot_refresh"
+    )
+
+    assert transform_owned & refresh_owned == set(), (
+        "두 DAG 가 같은 Gold 테이블을 씁니다. 하나의 소유자만 남기세요: "
+        f"{sorted(transform_owned & refresh_owned)}"
+    )
+
+    # transform 은 공통 입력과 격자 audit 만, refresh 는 공개 장소 상품만 소유한다.
+    assert transform_owned == {
+        "gold_weather_forecast_by_place_serving",
+        "gold_weather_grid_hourly_outlook",
+        "gold_weather_grid_current_outlook",
+        "gold_weather_grid_precipitation_window",
+    }
+    assert refresh_owned == {
+        "gold_weather_place_hourly_outlook",
+        "gold_weather_place_current_outlook",
+        "gold_weather_place_precipitation_window",
+        "gold_weather_place_risk_window",
+        "gold_weather_place_risk_query_availability",
+        "gold_weather_place_forecast_change_daily",
+    }
+
+    # D1 공개 제품 네 개는 전부 refresh 소유여야 한다. transform 쪽으로 넘어가면
+    # 매시 갱신이 끊기고 서빙이 최대 3시간 낡는다.
+    public = _selector_model_names(selectors, "ask_seoul_weather_d1_public_products")
+    assert public <= refresh_owned
+
+
 def test_weather_singular_tests_share_the_weather_group() -> None:
     """Private Weather models may only be referenced by tests in the same group."""
     project = _load_yaml("dbt_project.yml")

@@ -71,29 +71,19 @@ selectors:
         - {method: path, value: models/weather/transform/grid_mart/gold_weather_forecast_by_grid_serving.sql, indirect_selection: cautious}
         - {method: path, value: tests/weather/transform/grid_mart/assert_dim_weather_coverage_grid_canonical_80.sql, indirect_selection: empty}
   - name: ask_seoul_weather_transform_serving_gold
-    description: Weather 공개 네 상품과 retained 80-grid audit Gold의 직접 계약만 선택하며 Citydata 교차 분석 Gold는 포함하지 않는다.
+    description: >-
+      weather_vilage_fcst_transform 이 단독으로 소유하는 Gold만 선택한다. 공개 장소
+      여섯 상품은 매시 도는 weather_serving_snapshot_refresh 가 단독 소유하므로 여기
+      포함하지 않는다 - 두 DAG가 같은 테이블에 동시에 쓰면 D1 서빙이 찢어진다.
+      Citydata 교차 분석 Gold는 어느 쪽에도 포함하지 않는다.
     definition:
       union:
+        # 공개 여섯 상품의 공통 입력. refresh 가 매시 이 테이블을 읽어 상품을 만든다.
         - {method: path, value: models/weather/transform/place_mart/gold_weather_forecast_by_place_serving.sql, indirect_selection: cautious}
-        - {method: path, value: models/weather/transform/gold/gold_weather_place_hourly_outlook.sql, indirect_selection: cautious}
-        - {method: path, value: models/weather/transform/gold/gold_weather_place_current_outlook.sql, indirect_selection: cautious}
-        - {method: path, value: models/weather/transform/gold/gold_weather_place_precipitation_window.sql, indirect_selection: cautious}
-        - {method: path, value: models/weather/transform/gold/gold_weather_place_risk_window.sql, indirect_selection: cautious}
-        - {method: path, value: models/weather/transform/gold/gold_weather_place_risk_query_availability.sql, indirect_selection: cautious}
-        - {method: path, value: models/weather/transform/gold/gold_weather_place_forecast_change_daily.sql, indirect_selection: cautious}
+        # 80-grid audit Gold. 공개 제품이 아니며 refresh 는 건드리지 않는다.
         - {method: path, value: models/weather/transform/gold/gold_weather_grid_hourly_outlook.sql, indirect_selection: cautious}
         - {method: path, value: models/weather/transform/gold/gold_weather_grid_current_outlook.sql, indirect_selection: cautious}
         - {method: path, value: models/weather/transform/gold/gold_weather_grid_precipitation_window.sql, indirect_selection: cautious}
-        - {method: path, value: tests/weather/transform/gold/assert_gold_weather_place_hourly_outlook_single_issue.sql, indirect_selection: empty}
-        - {method: path, value: tests/weather/transform/gold/assert_gold_weather_place_current_outlook_readiness.sql, indirect_selection: empty}
-        - {method: path, value: tests/weather/transform/gold/assert_gold_weather_place_precipitation_window_valid_empty.sql, indirect_selection: empty}
-        - {method: path, value: tests/weather/transform/gold/assert_gold_weather_place_precipitation_window_non_overlapping.sql, indirect_selection: empty}
-        - {method: path, value: tests/weather/transform/gold/assert_gold_weather_place_risk_window_future_only.sql, indirect_selection: empty}
-        - {method: path, value: tests/weather/transform/gold/assert_gold_weather_place_risk_query_availability_grain_unique.sql, indirect_selection: empty}
-        - {method: path, value: tests/weather/transform/gold/assert_gold_weather_place_risk_query_availability_population_reconciles.sql, indirect_selection: empty}
-        - {method: path, value: tests/weather/transform/gold/assert_gold_weather_place_risk_query_availability_reconciles.sql, indirect_selection: empty}
-        - {method: selector, value: ask_seoul_weather_risk_query_availability_unit, indirect_selection: empty}
-        - {method: path, value: tests/weather/transform/gold/assert_gold_weather_place_forecast_change_daily_consistent.sql, indirect_selection: empty}
         - {method: path, value: tests/weather/transform/gold/assert_gold_weather_grid_current_outlook_coverage.sql, indirect_selection: empty}
         - {method: path, value: tests/weather/transform/gold/assert_gold_weather_grid_precipitation_window_valid_empty.sql, indirect_selection: empty}
         - {method: path, value: tests/weather/transform/gold/assert_gold_weather_grid_precipitation_window_non_overlapping.sql, indirect_selection: empty}
