@@ -1,0 +1,219 @@
+version: 2
+
+models:
+  - name: gold_weather_grid_current_outlook
+    description: KMA 단기예보 수집 계약의 서울 bbox 80개 격자마다 현재 KST 시점 이후 가장 가까운 예보를 보존하는 internal audit Gold 모델이다. 행정동이나 실제 행정경계의 날씨로 해석하면 안 된다.
+    access: protected
+    config:
+      contract:
+        enforced: true
+      meta:
+        serving:
+          enabled: false
+          external: false
+          retire_on_publish: true
+          contract_version: v1
+          product_id: weather_grid_current_outlook
+          display:
+            title: 서울 격자별 현재 날씨 전망
+            summary: 서울 bbox를 덮는 KMA 수집 80격자의 가장 가까운 미래 예보를 제공합니다.
+            caveat: 격자는 수집 범위 단위이며 행정동·주소·실측 관측값을 뜻하지 않습니다.
+            use_cases: ["서울 격자 단위 예보 범위 확인"]
+          product_question: 서울 수집 범위 80개 격자의 현재 기준 가장 가까운 기상 예보는 무엇입니까?
+          grain: grid_id마다 현재 KST 시점 이후 가장 이른 forecast_at 한 행입니다.
+          primary_key: [product_row_id]
+          publication_mode: snapshot
+          zero_policy: fail
+          publication_trigger:
+            trigger_type: asset
+            max_interval_minutes: 240
+          event_time: forecast_at
+          freshness_field: forecast_collected_at_max
+          freshness_slo_minutes: 240
+          shape: wide
+          source_evidence:
+            - source_id: kma_vilage_fcst
+              source_url: https://www.data.go.kr/data/15084084/openapi.do
+              license: 공공누리 제1유형(출처표시)
+              license_url: https://www.kogl.or.kr/info/licenseType1.do
+              redistribution: allowed_with_attribution
+              attribution: 기상청
+              rights_checked_at: "2026-08-06"
+          quality_coverage:
+            field: grid_id
+            expected_distinct_count: 80
+            minimum_ratio: 1.0
+            measurement_scope: published_rows
+          usage_patterns:
+            - pattern_id: all_current_grid_outlooks
+              question_ko: 서울 수집 범위의 모든 격자 현재 예보를 보고 싶습니다.
+              axes: 격자 식별자 정렬
+              requires: [select_columns, sort]
+              allow_empty: false
+              verified_rows: 0
+              sql: SELECT grid_id, nx, ny, coverage_scope, forecast_at, temp_c, precip_prob_pct, sky_label, pty_label FROM gold_weather_grid_current_outlook ORDER BY grid_id
+            - pattern_id: precipitating_grids_now
+              question_ko: 현재 예보에서 강수가 있는 격자는 어디입니까?
+              axes: 강수 여부 필터와 강수확률 내림차순
+              requires: [select_columns, filter_set, sort]
+              allow_empty: true
+              verified_rows: 0
+              sql: SELECT grid_id, nx, ny, forecast_at, precip_prob_pct, pty_label, pcp_raw FROM gold_weather_grid_current_outlook WHERE is_precipitating = true ORDER BY precip_prob_pct DESC NULLS LAST, grid_id
+            - pattern_id: high_precip_probability_grids
+              question_ko: 강수확률이 높은 격자는 어디입니까?
+              axes: 고정 60퍼센트 강수확률 하한과 내림차순
+              requires: [select_columns, filter_range, sort]
+              allow_empty: true
+              verified_rows: 0
+              sql: SELECT grid_id, forecast_at, precip_prob_pct, pty_label FROM gold_weather_grid_current_outlook WHERE precip_prob_pct >= 60 ORDER BY precip_prob_pct DESC NULLS LAST, grid_id
+            - pattern_id: warmest_grids_now
+              question_ko: 현재 예보 기준 기온이 높은 격자는 어디입니까?
+              axes: 기온 내림차순 상위 격자
+              requires: [select_columns, sort]
+              allow_empty: false
+              verified_rows: 0
+              sql: SELECT grid_id, nx, ny, forecast_at, temp_c, humidity_pct FROM gold_weather_grid_current_outlook ORDER BY temp_c DESC NULLS LAST, grid_id LIMIT 20
+            - pattern_id: windiest_grids_now
+              question_ko: 현재 예보 기준 풍속이 높은 격자는 어디입니까?
+              axes: 풍속 내림차순 상위 격자
+              requires: [select_columns, sort]
+              allow_empty: false
+              verified_rows: 0
+              sql: SELECT grid_id, nx, ny, forecast_at, wind_ms, wind_dir_deg FROM gold_weather_grid_current_outlook ORDER BY wind_ms DESC NULLS LAST, grid_id LIMIT 20
+            - pattern_id: sky_distribution_now
+              question_ko: 현재 격자 예보의 하늘 상태 분포는 어떻습니까?
+              axes: 하늘 상태별 격자 수 집계
+              requires: [select_columns, aggregate, group_by, sort]
+              allow_empty: false
+              verified_rows: 0
+              sql: SELECT sky_label, count(*) AS grid_count FROM gold_weather_grid_current_outlook GROUP BY sky_label ORDER BY grid_count DESC, sky_label
+            - pattern_id: category_coverage_distribution
+              question_ko: 격자별로 확인된 예보 카테고리 수 분포는 어떻습니까?
+              axes: 카테고리 수별 격자 수 집계
+              requires: [select_columns, aggregate, group_by, sort]
+              allow_empty: false
+              verified_rows: 0
+              sql: SELECT forecast_category_count, count(*) AS grid_count FROM gold_weather_grid_current_outlook GROUP BY forecast_category_count ORDER BY forecast_category_count
+            - pattern_id: collection_scope_freshness
+              question_ko: 수집 범위별 최신 수집 시각과 격자 수는 얼마입니까?
+              axes: 수집 범위별 집계
+              requires: [select_columns, aggregate, group_by]
+              allow_empty: false
+              verified_rows: 0
+              sql: SELECT coverage_scope, count(*) AS grid_count, max(forecast_collected_at_max) AS latest_collected_at FROM gold_weather_grid_current_outlook GROUP BY coverage_scope
+          public_projection:
+            schema_version: "1.0.0"
+            columns: [product_row_id, grid_id, nx, ny, coverage_scope, forecast_at, forecast_category_count, forecast_issued_at_min, forecast_issued_at_max, forecast_collected_at_max, temp_c, humidity_pct, wind_ms, wind_dir_deg, precip_prob_pct, sky_code, sky_label, pty_code, pty_label, is_precipitating, pcp_raw, pcp_mm, sno_raw, sno_cm, forecast_lead_hours]
+    columns:
+      - name: product_row_id
+        description: grid_id와 예보 대상 시각을 직렬화한 공개 행 식별자입니다.
+        data_type: varchar
+        tests: [not_null, unique]
+        config: {meta: {semantic_role: primary_key, nullable: false, null_meaning: 공개 행 식별자는 비어 있을 수 없습니다., unit: not_applicable}}
+      - name: grid_id
+        description: KMA 수집 격자의 안정적인 식별자입니다.
+        data_type: varchar
+        tests: [not_null]
+        config: {meta: {semantic_role: dimension_key, nullable: false, null_meaning: 수집 계약 격자 식별자는 비어 있을 수 없습니다., unit: not_applicable}}
+      - name: nx
+        description: KMA 격자 X 좌표입니다.
+        data_type: integer
+        tests: [not_null]
+        config: {meta: {semantic_role: spatial_coordinate, nullable: false, null_meaning: 수집 계약 좌표는 비어 있을 수 없습니다., unit: grid_index}}
+      - name: ny
+        description: KMA 격자 Y 좌표입니다.
+        data_type: integer
+        tests: [not_null]
+        config: {meta: {semantic_role: spatial_coordinate, nullable: false, null_meaning: 수집 계약 좌표는 비어 있을 수 없습니다., unit: grid_index}}
+      - name: coverage_scope
+        description: 격자 수집 범위의 의미를 나타내는 계약 값입니다.
+        data_type: varchar
+        tests: [not_null]
+        config: {meta: {semantic_role: coverage_scope, nullable: false, null_meaning: 수집 범위 의미는 비어 있을 수 없습니다., unit: not_applicable}}
+      - name: forecast_at
+        description: 예보 대상 KST 시각입니다.
+        data_type: timestamp(6)
+        tests: [not_null]
+        config: {meta: {semantic_role: event_time, nullable: false, null_meaning: 예보 대상 시각은 비어 있을 수 없습니다., unit: timestamp}}
+      - name: forecast_category_count
+        description: 해당 격자와 예보시각에 확인된 KMA 카테고리 수입니다.
+        data_type: bigint
+        tests: [not_null]
+        config: {meta: {semantic_role: completeness_measure, nullable: false, null_meaning: 카테고리 수는 count 결과로 항상 존재합니다., unit: count}}
+      - name: forecast_issued_at_min
+        description: 포함된 예보의 가장 이른 KST 발표 시각입니다.
+        data_type: timestamp(6)
+        tests: [not_null]
+        config: {meta: {semantic_role: issue_time, nullable: false, null_meaning: 선택된 예보에는 발표 시각이 있어야 합니다., unit: timestamp}}
+      - name: forecast_issued_at_max
+        description: 포함된 예보의 가장 늦은 KST 발표 시각입니다.
+        data_type: timestamp(6)
+        tests: [not_null]
+        config: {meta: {semantic_role: issue_time, nullable: false, null_meaning: 선택된 예보에는 발표 시각이 있어야 합니다., unit: timestamp}}
+      - name: forecast_collected_at_max
+        description: 포함된 원천 예보의 가장 늦은 KST 수집 시각입니다.
+        data_type: timestamp(6)
+        tests: [not_null]
+        config: {meta: {semantic_role: freshness_time, nullable: false, null_meaning: 정상 수집된 예보에는 수집 시각이 있어야 합니다., unit: timestamp}}
+      - name: temp_c
+        description: 기온 예보값입니다.
+        data_type: double
+        config: {meta: {semantic_role: forecast_metric, nullable: true, null_meaning: TMP 카테고리가 없으면 null입니다., unit: celsius}}
+      - name: humidity_pct
+        description: 상대습도 예보값입니다.
+        data_type: double
+        config: {meta: {semantic_role: forecast_metric, nullable: true, null_meaning: REH 카테고리가 없으면 null입니다., unit: percent}}
+      - name: wind_ms
+        description: 풍속 예보값입니다.
+        data_type: double
+        config: {meta: {semantic_role: forecast_metric, nullable: true, null_meaning: WSD 카테고리가 없으면 null입니다., unit: meters_per_second}}
+      - name: wind_dir_deg
+        description: 풍향 예보값입니다.
+        data_type: double
+        config: {meta: {semantic_role: forecast_metric, nullable: true, null_meaning: VEC 카테고리가 없으면 null입니다., unit: degrees}}
+      - name: precip_prob_pct
+        description: 강수확률 예보값입니다.
+        data_type: double
+        config: {meta: {semantic_role: forecast_metric, nullable: true, null_meaning: POP 카테고리가 없으면 null입니다., unit: percent}}
+      - name: sky_code
+        description: KMA 하늘 상태 코드입니다.
+        data_type: varchar
+        config: {meta: {semantic_role: categorical_code, nullable: true, null_meaning: SKY 카테고리가 없으면 null입니다., unit: code}}
+      - name: sky_label
+        description: 하늘 상태 코드의 사람이 읽는 라벨입니다.
+        data_type: varchar
+        config: {meta: {semantic_role: categorical_label, nullable: true, null_meaning: SKY 카테고리가 없거나 알 수 없으면 null입니다., unit: not_applicable}}
+      - name: pty_code
+        description: KMA 강수 형태 코드입니다.
+        data_type: varchar
+        config: {meta: {semantic_role: categorical_code, nullable: true, null_meaning: PTY 카테고리가 없으면 null입니다., unit: code}}
+      - name: pty_label
+        description: 강수 형태 코드의 사람이 읽는 라벨입니다.
+        data_type: varchar
+        config: {meta: {semantic_role: categorical_label, nullable: true, null_meaning: PTY 카테고리가 없거나 알 수 없으면 null입니다., unit: not_applicable}}
+      - name: is_precipitating
+        description: PTY 코드가 무강수 0이 아닌지 여부입니다.
+        data_type: boolean
+        tests: [not_null]
+        config: {meta: {semantic_role: state_flag, nullable: false, null_meaning: PTY가 없더라도 강수 여부는 false로 계산됩니다., unit: boolean}}
+      - name: pcp_raw
+        description: 원천 강수량 예보 원문입니다.
+        data_type: varchar
+        config: {meta: {semantic_role: forecast_metric_raw, nullable: true, null_meaning: PCP 카테고리가 없으면 null입니다., unit: source_text}}
+      - name: pcp_mm
+        description: 수치로 해석 가능한 강수량 예보값입니다.
+        data_type: double
+        config: {meta: {semantic_role: forecast_metric, nullable: true, null_meaning: PCP가 수치형이 아니거나 없으면 null입니다., unit: millimeters}}
+      - name: sno_raw
+        description: 원천 적설량 예보 원문입니다.
+        data_type: varchar
+        config: {meta: {semantic_role: forecast_metric_raw, nullable: true, null_meaning: SNO 카테고리가 없으면 null입니다., unit: source_text}}
+      - name: sno_cm
+        description: 수치로 해석 가능한 적설량 예보값입니다.
+        data_type: double
+        config: {meta: {semantic_role: forecast_metric, nullable: true, null_meaning: SNO가 수치형이 아니거나 없으면 null입니다., unit: centimeters}}
+      - name: forecast_lead_hours
+        description: 발표 시각부터 예보 대상 시각까지의 시간 차이입니다.
+        data_type: bigint
+        tests: [not_null]
+        config: {meta: {semantic_role: forecast_horizon, nullable: false, null_meaning: 선택된 예보에는 발표와 대상 시각이 있어야 합니다., unit: hours}}

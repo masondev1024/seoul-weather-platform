@@ -1,0 +1,174 @@
+version: 2
+
+models:
+  - name: gold_weather_grid_precipitation_window
+    description: 서울 bbox 80개 KMA 수집 격자에서 연속 강수 형태가 예보된 미래 시간 구간을 보존하는 internal audit Gold 모델이다. 무강수 기간에는 0행이 정상이며 실제 강수 관측이나 행정동 예보를 뜻하지 않는다.
+    access: protected
+    config:
+      contract:
+        enforced: true
+      meta:
+        serving:
+          enabled: false
+          external: false
+          retire_on_publish: true
+          contract_version: v1
+          product_id: weather_grid_precipitation_window
+          display:
+            title: 서울 격자별 강수 예보 시간대
+            summary: 서울 bbox 수집 80격자에서 비나 눈이 연속으로 예보된 시간 구간을 제공합니다.
+            caveat: 무강수 기간 0행은 정상이며, 강수 예보는 실제 강수 발생을 보장하지 않습니다.
+            use_cases: ["격자 단위 강수 예보 범위 확인"]
+          product_question: 서울 수집 범위의 격자 중 비나 눈이 연속으로 예보된 시간대는 언제입니까?
+          grain: grid_id와 window_start_at 조합마다 한 개의 연속 강수 예보 구간입니다.
+          primary_key: [product_row_id]
+          publication_mode: snapshot
+          zero_policy: allow
+          publication_trigger:
+            trigger_type: asset
+            max_interval_minutes: 240
+          event_time: window_start_at
+          freshness_field: forecast_collected_at_max
+          freshness_slo_minutes: 240
+          empty_result_freshness:
+            relation: gold_weather_grid_hourly_outlook
+            field: forecast_collected_at_max
+          shape: event
+          source_evidence:
+            - source_id: kma_vilage_fcst
+              source_url: https://www.data.go.kr/data/15084084/openapi.do
+              license: 공공누리 제1유형(출처표시)
+              license_url: https://www.kogl.or.kr/info/licenseType1.do
+              redistribution: allowed_with_attribution
+              attribution: 기상청
+              rights_checked_at: "2026-08-06"
+          quality_coverage:
+            not_applicable_reason: 강수 형태가 예보된 격자와 시간대만 게시하는 희소 이벤트 상품이므로 0행이 정상이며 고정된 게시 행 분모가 없습니다.
+          usage_patterns:
+            - pattern_id: all_grid_precipitation_windows
+              question_ko: 서울 수집 범위 격자의 모든 강수 예보 구간을 보고 싶습니다.
+              axes: 강수 구간 시작 시각과 격자 식별자 정렬
+              requires: [select_columns, sort]
+              allow_empty: true
+              verified_rows: 0
+              sql: SELECT grid_id, nx, ny, window_start_at, window_end_at, precipitation_hour_count FROM gold_weather_grid_precipitation_window ORDER BY window_start_at, grid_id
+            - pattern_id: earliest_grid_precipitation_windows
+              question_ko: 가장 이른 강수 예보 구간은 어느 격자에 있습니까?
+              axes: 강수 구간 시작 시각 오름차순
+              requires: [select_columns, sort]
+              allow_empty: true
+              verified_rows: 0
+              sql: SELECT grid_id, window_start_at, window_end_at, precip_prob_max_pct, pcp_max_mm FROM gold_weather_grid_precipitation_window ORDER BY window_start_at, grid_id LIMIT 20
+            - pattern_id: longest_grid_precipitation_windows
+              question_ko: 가장 긴 강수 예보 구간은 어느 격자에 있습니까?
+              axes: 강수 예보 시간 수 내림차순
+              requires: [select_columns, sort]
+              allow_empty: true
+              verified_rows: 0
+              sql: SELECT grid_id, window_start_at, window_end_at, precipitation_hour_count FROM gold_weather_grid_precipitation_window ORDER BY precipitation_hour_count DESC, window_start_at, grid_id LIMIT 20
+            - pattern_id: highest_grid_precip_probability
+              question_ko: 강수확률 최대값이 높은 강수 구간은 어디입니까?
+              axes: 강수확률 최대값 내림차순
+              requires: [select_columns, sort]
+              allow_empty: true
+              verified_rows: 0
+              sql: SELECT grid_id, window_start_at, window_end_at, precip_prob_max_pct FROM gold_weather_grid_precipitation_window ORDER BY precip_prob_max_pct DESC NULLS LAST, grid_id LIMIT 20
+            - pattern_id: snowfall_candidate_windows
+              question_ko: 적설량 예보가 있는 강수 구간은 어디입니까?
+              axes: 적설량 존재 필터와 적설량 내림차순
+              requires: [select_columns, filter_null, sort]
+              allow_empty: true
+              verified_rows: 0
+              sql: SELECT grid_id, window_start_at, window_end_at, sno_max_cm FROM gold_weather_grid_precipitation_window WHERE sno_max_cm IS NOT NULL ORDER BY sno_max_cm DESC, grid_id
+            - pattern_id: high_precip_amount_windows
+              question_ko: 강수량 예보 최대값이 큰 강수 구간은 어디입니까?
+              axes: 강수량 최대값 내림차순
+              requires: [select_columns, sort]
+              allow_empty: true
+              verified_rows: 0
+              sql: SELECT grid_id, window_start_at, window_end_at, pcp_max_mm FROM gold_weather_grid_precipitation_window ORDER BY pcp_max_mm DESC NULLS LAST, grid_id LIMIT 20
+            - pattern_id: precipitation_windows_by_scope
+              question_ko: 수집 범위별 강수 예보 구간 수는 얼마입니까?
+              axes: 수집 범위별 강수 구간 집계
+              requires: [select_columns, aggregate, group_by]
+              allow_empty: true
+              verified_rows: 0
+              sql: SELECT coverage_scope, count(*) AS window_count FROM gold_weather_grid_precipitation_window GROUP BY coverage_scope
+            - pattern_id: precipitation_window_freshness
+              question_ko: 강수 예보 구간의 최신 수집 시각은 언제입니까?
+              axes: 전체 강수 구간 최신 수집 시각 집계
+              requires: [select_columns, aggregate]
+              allow_empty: true
+              verified_rows: 0
+              sql: SELECT max(forecast_collected_at_max) AS latest_collected_at FROM gold_weather_grid_precipitation_window
+          public_projection:
+            schema_version: "1.0.0"
+            columns: [product_row_id, grid_id, nx, ny, coverage_scope, window_start_at, window_end_at, precipitation_hour_count, precip_prob_max_pct, pcp_max_mm, sno_max_cm, forecast_issued_at_min, forecast_issued_at_max, forecast_collected_at_max]
+    columns:
+      - name: product_row_id
+        description: grid_id와 강수 구간 시작 시각을 직렬화한 공개 행 식별자입니다.
+        data_type: varchar
+        tests: [not_null, unique]
+        config: {meta: {semantic_role: primary_key, nullable: false, null_meaning: 공개 행 식별자는 비어 있을 수 없습니다., unit: not_applicable}}
+      - name: grid_id
+        description: KMA 수집 격자의 안정적인 식별자입니다.
+        data_type: varchar
+        tests: [not_null]
+        config: {meta: {semantic_role: dimension_key, nullable: false, null_meaning: 강수 예보 구간에는 격자 식별자가 있어야 합니다., unit: not_applicable}}
+      - name: nx
+        description: KMA 격자 X 좌표입니다.
+        data_type: integer
+        tests: [not_null]
+        config: {meta: {semantic_role: spatial_coordinate, nullable: false, null_meaning: 강수 예보 구간에는 격자 좌표가 있어야 합니다., unit: grid_index}}
+      - name: ny
+        description: KMA 격자 Y 좌표입니다.
+        data_type: integer
+        tests: [not_null]
+        config: {meta: {semantic_role: spatial_coordinate, nullable: false, null_meaning: 강수 예보 구간에는 격자 좌표가 있어야 합니다., unit: grid_index}}
+      - name: coverage_scope
+        description: 격자 수집 범위의 의미를 나타내는 계약 값입니다.
+        data_type: varchar
+        tests: [not_null]
+        config: {meta: {semantic_role: coverage_scope, nullable: false, null_meaning: 수집 범위 의미는 비어 있을 수 없습니다., unit: not_applicable}}
+      - name: window_start_at
+        description: 연속 강수 형태 예보 구간의 시작 KST 시각입니다.
+        data_type: timestamp(6)
+        tests: [not_null]
+        config: {meta: {semantic_role: event_time, nullable: false, null_meaning: 강수 구간은 시작 시각 없이 존재할 수 없습니다., unit: timestamp}}
+      - name: window_end_at
+        description: 연속 강수 형태 예보 구간의 종료 KST 시각입니다.
+        data_type: timestamp(6)
+        tests: [not_null]
+        config: {meta: {semantic_role: event_end_time, nullable: false, null_meaning: 강수 구간은 종료 시각 없이 존재할 수 없습니다., unit: timestamp}}
+      - name: precipitation_hour_count
+        description: 구간에 포함된 강수 형태 예보 시간 수입니다.
+        data_type: bigint
+        tests: [not_null]
+        config: {meta: {semantic_role: event_duration_count, nullable: false, null_meaning: 강수 구간 행에는 시간 수가 있어야 합니다., unit: hours}}
+      - name: precip_prob_max_pct
+        description: 구간 내 최대 강수확률 예보값입니다.
+        data_type: double
+        config: {meta: {semantic_role: forecast_metric, nullable: true, null_meaning: POP 카테고리가 없으면 null입니다., unit: percent}}
+      - name: pcp_max_mm
+        description: 구간 내 최대 수치형 강수량 예보값입니다.
+        data_type: double
+        config: {meta: {semantic_role: forecast_metric, nullable: true, null_meaning: PCP가 수치형이 아니거나 없으면 null입니다., unit: millimeters}}
+      - name: sno_max_cm
+        description: 구간 내 최대 수치형 적설량 예보값입니다.
+        data_type: double
+        config: {meta: {semantic_role: forecast_metric, nullable: true, null_meaning: SNO가 수치형이 아니거나 없으면 null입니다., unit: centimeters}}
+      - name: forecast_issued_at_min
+        description: 구간에 포함된 예보의 가장 이른 KST 발표 시각입니다.
+        data_type: timestamp(6)
+        tests: [not_null]
+        config: {meta: {semantic_role: issue_time, nullable: false, null_meaning: 강수 예보 구간에는 발표 시각이 있어야 합니다., unit: timestamp}}
+      - name: forecast_issued_at_max
+        description: 구간에 포함된 예보의 가장 늦은 KST 발표 시각입니다.
+        data_type: timestamp(6)
+        tests: [not_null]
+        config: {meta: {semantic_role: issue_time, nullable: false, null_meaning: 강수 예보 구간에는 발표 시각이 있어야 합니다., unit: timestamp}}
+      - name: forecast_collected_at_max
+        description: 구간에 포함된 원천 예보의 가장 늦은 KST 수집 시각입니다.
+        data_type: timestamp(6)
+        tests: [not_null]
+        config: {meta: {semantic_role: freshness_time, nullable: false, null_meaning: 정상 수집된 강수 예보에는 수집 시각이 있어야 합니다., unit: timestamp}}

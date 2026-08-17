@@ -14,6 +14,13 @@ EXPECTED_WEATHER_MODELS = {
     "models/weather/transform/gold/gold_weather_place_precipitation_window.sql",
     "models/weather/transform/gold/gold_weather_place_risk_query_availability.sql",
     "models/weather/transform/gold/gold_weather_place_risk_window.sql",
+    # 80-grid audit Gold 세 개. ask_seoul_weather_transform_serving_gold selector 가
+    # 이미 세 경로를 선언하고 있었는데 fork 추출 때 파일만 빠져 dangling 상태였다.
+    # 공개 제품이 아니라 grid coverage audit 용이며, 아래 D1 공개 제품 경계 테스트가
+    # 이 모델들이 공개 selector 로 새지 않는 것을 계속 막는다.
+    "models/weather/transform/gold/gold_weather_grid_hourly_outlook.sql",
+    "models/weather/transform/gold/gold_weather_grid_current_outlook.sql",
+    "models/weather/transform/gold/gold_weather_grid_precipitation_window.sql",
     "models/weather/transform/place_mart/dim_weather_place.sql",
     "models/weather/transform/place_mart/gold_weather_forecast_by_place_serving.sql",
     "models/weather/transform/place_mart/silver_weather_forecast_by_admin_dong_serving.sql",
