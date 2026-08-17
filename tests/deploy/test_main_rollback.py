@@ -56,12 +56,18 @@ def _pre_install_events(
             _event("ledger.begin", record=_started_record(target)),
         ]
     )
-    expected.extend(_event("airflow.pause_dag", dag_id=dag_id) for dag_id in dags)
-    expected.append(_event("airflow.capture_pause_state", dag_ids=dags))
+    # drain 이 pause 보다 먼저다 — pause 를 먼저 걸면 이미 도는 run 의 남은 태스크가
+    # 스케줄되지 않아 drain 이 영원히 0 을 못 본다(main_orchestrator._deploy_locked 주석).
     expected.extend(
         [
             _event("clock.monotonic"),
             _event("airflow.writer_run_counts", dag_ids=writers),
+        ]
+    )
+    expected.extend(_event("airflow.pause_dag", dag_id=dag_id) for dag_id in dags)
+    expected.append(_event("airflow.capture_pause_state", dag_ids=dags))
+    expected.extend(
+        [
             _event(
                 "git.detached_checkout",
                 repository="owner/seoul-weather-platform",
