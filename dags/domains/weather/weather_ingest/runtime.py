@@ -29,7 +29,17 @@ from weather_ingest.run_manifest import WeatherRunManifest
 
 
 KMA_RETRY_STATUSES = (429, 500, 502, 503, 504)
-KMA_429_BACKOFF_SECONDS = (3600.0, 5400.0, 7200.0)
+# 429 재시도 대기. weather_vilage_fcst_bronze 의 dagrun_timeout 이 60분이라
+# 이 값들의 합이 60분을 넘으면 backoff 가 끝나기 전에 run 이 죽어서 "재시도"가
+# 실제로는 존재하지 않는다. 예전 값 (3600, 5400, 7200) 은 합이 4.5시간이라
+# 첫 대기조차 완주할 수 없었다 - 429 를 맞으면 그냥 죽는 것과 같았다.
+# 수집 자체가 5분 안팎이므로 합 9분이면 최악의 경우에도 timeout 안에 들어온다.
+KMA_429_BACKOFF_SECONDS = (60.0, 180.0, 300.0)
+# 요청 사이 간격. 승인된 운영 계정에서 4초는 과보호였다 (2026-08-16 측정:
+# 동시 4·8 요청 모두 429 0건, API 평균 응답 1.274초, land 518초 중 316초가 sleep).
+# 재배포 없이 되돌릴 수 있도록 환경변수로 덮어쓸 수 있게 둔다.
+KMA_REQUEST_DELAY_SECONDS_ENV = "ASK_SEOUL_KMA_REQUEST_DELAY_SECONDS"
+DEFAULT_KMA_REQUEST_DELAY_SECONDS = 1.0
 _MISSING_OBJECT_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
 _COLLECTION_SLOT_ACTIVATION_ENV = "ASK_SEOUL_COLLECTION_SLOT_ACTIVATION_AT"
 _WEATHER_HISTORICAL_BOUNDARY_ENV = (
@@ -56,12 +66,34 @@ class S3Client(Protocol):
     ): ...
 
 
+def kma_request_delay_seconds() -> float:
+    """Return the inter-request delay, honouring the ops override.
+
+    잘못된 값은 조용히 기본값으로 되돌리지 않고 실패시킨다. 오타 하나로 딜레이가
+    말없이 바뀌면 429 를 맞고 나서야 알게 된다.
+    """
+    raw = os.environ.get(KMA_REQUEST_DELAY_SECONDS_ENV)
+    if raw is None or not raw.strip():
+        return DEFAULT_KMA_REQUEST_DELAY_SECONDS
+    try:
+        delay = float(raw)
+    except ValueError as error:
+        raise ValueError(
+            f"{KMA_REQUEST_DELAY_SECONDS_ENV} must be a number, got {raw!r}"
+        ) from error
+    if delay < 0:
+        raise ValueError(
+            f"{KMA_REQUEST_DELAY_SECONDS_ENV} must not be negative, got {raw!r}"
+        )
+    return delay
+
+
 class KmaHttpAdapter:
     def __init__(
         self,
         fetch: FetchUrl,
         *,
-        delay_seconds: float = 4.0,
+        delay_seconds: float = DEFAULT_KMA_REQUEST_DELAY_SECONDS,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._fetch = fetch
@@ -178,7 +210,7 @@ def build_weather_landing() -> KmaLanding:
         bucket=r2_env("R2_BUCKET_NAME"),
     )
     return KmaLanding(
-        source=KmaHttpAdapter(fetch_url),
+        source=KmaHttpAdapter(fetch_url, delay_seconds=kma_request_delay_seconds()),
         raw_store=raw_store,
         raw_prefix=raw_prefix(),
         checkpoint_prefix=checkpoint_prefix(),
