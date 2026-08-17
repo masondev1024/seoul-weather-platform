@@ -10,6 +10,7 @@ from typing import Any
 EXPECTED_DAG_IDS = frozenset(
     {
         "common_admin_dong_bronze",
+        "weather_reference_data_refresh",
         "weather_serving_export",
         "weather_serving_freshness_watchdog",
         "weather_serving_snapshot_refresh",

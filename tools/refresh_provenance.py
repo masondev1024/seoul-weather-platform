@@ -30,6 +30,10 @@ LOCAL_AIRFLOW_SOURCES = frozenset(
     {
         "dags/domains/weather/weather_serving_exclusion.py",
         "dags/domains/weather/tests/test_weather_serving_snapshot_refresh_exclusion.py",
+        # 이 저장소에서 새로 작성한 정적 참조 refresh DAG. transform 에서 분리한
+        # 정적 seed/차원 phase 를 하루 1회 실행한다(상류에는 없던 신규 DAG).
+        "dags/domains/weather/weather_reference_data_refresh.py",
+        "dags/domains/weather/tests/test_weather_reference_data_refresh_dag.py",
     }
 )
 
