@@ -37,8 +37,6 @@ def test_hourly_snapshot_refresh_runs_only_public_weather_serving_selector():
     assert dag.kwargs["max_active_runs"] == 1
     assert set(dag.task_ids) == {
         "validate_dev_runtime",
-        # 공개 Gold 를 함께 쓰는 transform 과의 상호배제 가드.
-        "guard_conflicting_weather_transform",
         "resolve_weather_serving_as_of_hour",
         *REFRESH_DBT_TASK_IDS,
         "mark_weather_serving_snapshot_ready",
@@ -128,7 +126,7 @@ def test_hourly_snapshot_refresh_freezes_one_kst_hour_for_run_and_test():
     anchor = dag.task_dict[module.SERVING_AS_OF_HOUR_TASK_ID]
 
     assert anchor.python_callable is module.resolve_weather_serving_as_of_hour
-    assert anchor.upstream_task_ids == {"guard_conflicting_weather_transform"}
+    assert anchor.upstream_task_ids == {"validate_dev_runtime"}
     assert anchor.downstream_task_ids == {"dbt_run_serving_snapshot_refresh"}
     assert module.resolve_weather_serving_as_of_hour(
         now=datetime(2026, 8, 11, 10, 59, 59, tzinfo=ZoneInfo("Asia/Seoul"))
