@@ -1,0 +1,12 @@
+version: 2
+
+models:
+  - name: gold_weather_grid_hourly_outlook
+    description: Hourly wide forecast Gold model for each of the 80 KMA collector-contract Seoul bbox grids; it does not represent an administrative-dong or place boundary.
+    columns:
+      - name: product_row_id
+        description: Deterministic row identifier serialized from grid and forecast timestamp.
+        tests: [not_null, unique]
+      - name: forecast_collected_at_max
+        description: Latest KST collection timestamp among source forecasts for this grid and forecast hour.
+        tests: [not_null]
