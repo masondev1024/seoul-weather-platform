@@ -34,6 +34,13 @@ LOCAL_AIRFLOW_SOURCES = frozenset(
         # 정적 seed/차원 phase 를 하루 1회 실행한다(상류에는 없던 신규 DAG).
         "dags/domains/weather/weather_reference_data_refresh.py",
         "dags/domains/weather/tests/test_weather_reference_data_refresh_dag.py",
+        # 이 fork 전용 Iceberg 유지보수 DAG. 상류 dev-단일-스키마 모듈을 그대로
+        # 옮기지 않고 우리 2-스키마(weather/weather_traffic_bronze) 소유 테이블에
+        # 맞춰 새로 작성했다.
+        "dags/domains/weather/weather_iceberg_maintenance.py",
+        "dags/domains/weather/weather_ingest/iceberg_maintenance.py",
+        "dags/domains/weather/tests/test_weather_iceberg_maintenance.py",
+        "dags/domains/weather/tests/test_weather_iceberg_maintenance_dag.py",
     }
 )
 
