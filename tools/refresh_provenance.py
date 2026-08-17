@@ -26,12 +26,7 @@ LOCAL_DBT_CONFIGS = frozenset(
 #: 자동 분류를 막지만, platform-boundaries.md 대로 Weather DAG 코드는 이 저장소가
 #: 소유하므로 새로 쓴 파일이 생긴다. 상류에서 가져온 코드가 조용히 local_authored 로
 #: 흘러들지 않도록 **파일 단위로 명시**해서만 허용한다(LOCAL_DBT_CONFIGS 와 같은 방식).
-LOCAL_AIRFLOW_SOURCES = frozenset(
-    {
-        "dags/domains/weather/weather_serving_exclusion.py",
-        "dags/domains/weather/tests/test_weather_serving_snapshot_refresh_exclusion.py",
-    }
-)
+LOCAL_AIRFLOW_SOURCES: frozenset[str] = frozenset()
 
 
 def _normalized(path: str) -> str:
