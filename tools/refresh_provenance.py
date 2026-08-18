@@ -26,7 +26,15 @@ LOCAL_DBT_CONFIGS = frozenset(
 #: 자동 분류를 막지만, platform-boundaries.md 대로 Weather DAG 코드는 이 저장소가
 #: 소유하므로 새로 쓴 파일이 생긴다. 상류에서 가져온 코드가 조용히 local_authored 로
 #: 흘러들지 않도록 **파일 단위로 명시**해서만 허용한다(LOCAL_DBT_CONFIGS 와 같은 방식).
-LOCAL_AIRFLOW_SOURCES: frozenset[str] = frozenset()
+#: 이 저장소에서 새로 작성한 정적 참조 refresh DAG. transform 에서 분리한 정적
+#: seed/차원 phase 를 하루 1회 실행한다(상류에는 없던 신규 DAG). 병합된 dev(#48)가
+#: exclusion 파일을 제거했으므로 그 항목은 넣지 않는다.
+LOCAL_AIRFLOW_SOURCES = frozenset(
+    {
+        "dags/domains/weather/weather_reference_data_refresh.py",
+        "dags/domains/weather/tests/test_weather_reference_data_refresh_dag.py",
+    }
+)
 
 
 def _normalized(path: str) -> str:

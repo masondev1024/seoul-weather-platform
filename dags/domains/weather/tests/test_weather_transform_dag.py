@@ -109,14 +109,22 @@ def test_weather_transform_runs_spatial_seed_and_mart_phases():
         }
 
     for task_id in (
-        "dbt_run_common_admin_dong_dimension",
-        "dbt_test_common_admin_dong_dimension",
-        "dbt_seed_coverage_grid",
-        "dbt_test_coverage_grid_seed",
+        "dbt_run_silver",
+        "dbt_test_silver",
         "dbt_run_coverage_grid_mart",
         "dbt_test_coverage_grid_mart",
     ):
         assert dag.task_dict[task_id].kwargs["on_failure_callback"] is module.record_weather_problem
+
+    # 정적 참조 phase 는 weather_reference_data_refresh 로 빠졌으므로 transform 에는
+    # 더 이상 존재하지 않는다.
+    for reference_task_id in (
+        "dbt_seed_asac_axes",
+        "dbt_run_common_admin_dong_dimension",
+        "dbt_seed_place_mapping",
+        "dbt_seed_coverage_grid",
+    ):
+        assert reference_task_id not in dag.task_ids
 
     source = Path(module.__file__).read_text(encoding="utf-8")
     assert "silver_kma_vilage_fcst" not in source
@@ -270,15 +278,9 @@ def test_weather_serving_hour_state_rejects_missing_or_future_anchor():
 def test_weather_transform_passes_w2_canonical_revision_to_model_commands():
     module = load_transform_module()
     dag = module.dag
+    # 정적 참조 phase 는 weather_reference_data_refresh 로 빠졌다.
     model_parsing_task_ids = (
         "dbt_source_freshness",
-        "dbt_seed_asac_axes",
-        "dbt_run_common_admin_dong_dimension",
-        "dbt_test_common_admin_dong_dimension",
-        "dbt_seed_place_mapping",
-        "dbt_test_place_mapping_seed",
-        "dbt_seed_coverage_grid",
-        "dbt_test_coverage_grid_seed",
         "dbt_run_silver",
         "dbt_test_silver",
         "dbt_run_gold",
