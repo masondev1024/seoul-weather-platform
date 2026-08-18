@@ -233,6 +233,61 @@ def test_airflow_uses_stable_overlay_and_exact_sorted_inventory_argv(tmp_path: P
     ]
 
 
+def test_airflow_capture_fills_absent_allowlisted_dag_with_paused_true(tmp_path: Path):
+    # DAG 를 추가하는 배포에서 새 DAG 는 아직 running Airflow 에 없다. capture 는
+    # 없는 DAG 를 안전측 paused=True 로 채워 스냅샷을 완성해야 한다(복원 시 새 DAG 는
+    # 계속 paused 로 남는다).
+    target, artifact, _ = _candidate(tmp_path)
+    Path(str(target.generated_overlay_file)).write_bytes(artifact.content)
+    dags = tuple(sorted(target.dag_allowlist))
+    absent, present = dags[-1], dags[:-1]
+    rows = [{"dag_id": dag_id, "is_paused": False} for dag_id in present]
+    runner = _QueueRunner([_ok(_airflow_322_output(rows))])
+
+    snapshot = AirflowCommandAdapter(target, runner).capture_pause_state(dags)
+
+    assert set(snapshot) == set(dags)
+    assert snapshot[absent] is True
+    assert all(snapshot[dag_id] is False for dag_id in present)
+
+
+def test_airflow_capture_rejects_a_totally_empty_dagbag(tmp_path: Path):
+    # allowlist DAG 가 단 하나도 없으면 dagbag 이 통째로 깨진 것으로 보고 거부한다.
+    target, artifact, _ = _candidate(tmp_path)
+    Path(str(target.generated_overlay_file)).write_bytes(artifact.content)
+    dags = tuple(sorted(target.dag_allowlist))
+    runner = _QueueRunner([_ok(_airflow_322_output([]))])
+
+    with pytest.raises(AirflowAdapterError):
+        AirflowCommandAdapter(target, runner).capture_pause_state(dags)
+
+
+def test_airflow_writer_counts_skip_absent_writers(tmp_path: Path):
+    # 아직 배포 안 된 새 writer 는 run 이 있을 수 없으므로 drain 대상에서 건너뛴다.
+    target, artifact, _ = _candidate(tmp_path)
+    Path(str(target.generated_overlay_file)).write_bytes(artifact.content)
+    writers = tuple(sorted(target.writer_dag_allowlist))
+    absent, present = writers[-1], writers[:-1]
+    responses: list[CompletedCommand] = [
+        _ok(_airflow_322_output([{"dag_id": dag_id, "is_paused": True} for dag_id in present]))
+    ]
+    for dag_id in present:
+        responses.extend(
+            [
+                _ok(_airflow_322_output([{"dag_id": dag_id, "run_id": f"r-{dag_id}", "state": "running"}])),
+                _ok("[]"),
+            ]
+        )
+    runner = _QueueRunner(responses)
+
+    counts = AirflowCommandAdapter(target, runner).writer_run_counts(writers)
+
+    assert counts == WriterRunCounts(running=len(present), queued=0)
+    assert not any(
+        absent in argv for argv, _ in runner.calls if "list-runs" in argv
+    )
+
+
 def test_airflow_accepts_322_preamble_string_bools_and_consistent_duplicate_rows(
     tmp_path: Path,
 ):
@@ -280,7 +335,16 @@ def test_airflow_counts_only_exact_writer_allowlist_and_validates_rows(tmp_path:
     target, artifact, _ = _candidate(tmp_path)
     Path(str(target.generated_overlay_file)).write_bytes(artifact.content)
     writers = tuple(sorted(target.writer_dag_allowlist))
-    responses: list[CompletedCommand] = []
+    # writer_run_counts 는 먼저 `dags list` 로 현재 존재하는 writer 를 확인한다
+    # (아직 배포 안 된 새 writer 는 run 이 없으므로 건너뛴다). 여기서는 모든 writer 가
+    # 존재한다고 응답한다.
+    responses: list[CompletedCommand] = [
+        _ok(
+            _airflow_322_output(
+                [{"dag_id": dag_id, "is_paused": True} for dag_id in writers]
+            )
+        )
+    ]
     for dag_id in writers:
         responses.extend(
             [
@@ -303,7 +367,7 @@ def test_airflow_counts_only_exact_writer_allowlist_and_validates_rows(tmp_path:
     counts = AirflowCommandAdapter(target, runner).writer_run_counts(writers)
 
     assert counts == WriterRunCounts(running=len(writers), queued=0)
-    expected = []
+    expected = [(*_airflow_prefix(target), "dags", "list", "-o", "json")]
     for dag_id in writers:
         expected.extend(
             [

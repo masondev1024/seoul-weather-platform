@@ -100,15 +100,40 @@ class AirflowCommandAdapter:
                     raise AirflowAdapterError("airflow_adapter_invalid_output")
                 continue
             paused[dag_id] = is_paused
-        if tuple(sorted(paused)) != self._dags:
+        # allowlist 에 있지만 아직 배포되지 않은 새 DAG 는 running Airflow 의 dagbag 에
+        # 없을 수 있다(DAG 를 추가하는 배포). 없는 DAG 는 되돌릴 이전 상태가 없으므로
+        # 안전측인 paused=True 로 채워 스냅샷을 완성한다 — 복원은 이 스냅샷을 따르므로
+        # 새 DAG 는 배포 후에도 계속 paused 로 남고(운영자가 의도적으로 unpause),
+        # 없는 DAG 에 대한 pause/unpause 는 Airflow 가 idempotent noop 으로 처리한다
+        # (실측: "No unpaused DAGs were found"). 단 allowlist DAG 가 단 하나도 존재하지
+        # 않으면 dagbag 이 통째로 깨진 것으로 보고 거부한다(기존 strict 검사의 최소 안전선).
+        if not paused:
             raise AirflowAdapterError("airflow_adapter_invalid_output")
-        return {dag_id: paused[dag_id] for dag_id in self._dags}
+        return {dag_id: paused.get(dag_id, True) for dag_id in self._dags}
+
+    def _present_allowlisted_dag_ids(self) -> frozenset[str]:
+        """running Airflow dagbag 에 실제로 존재하는 allowlist DAG 집합."""
+        rows = _json_rows(
+            self._checked((*self._prefix, "dags", "list", "-o", "json"))
+        )
+        present: set[str] = set()
+        for row in rows:
+            dag_id = row.get("dag_id")
+            if type(dag_id) is str and dag_id in self._target.dag_allowlist:
+                present.add(dag_id)
+        return frozenset(present)
 
     def writer_run_counts(self, dag_ids: tuple[str, ...]) -> WriterRunCounts:
         if type(dag_ids) is not tuple or dag_ids != self._writers:
             raise AirflowAdapterError("airflow_adapter_input_rejected")
+        # 아직 배포되지 않은 새 writer DAG 는 dagbag 에 없어 `dags list-runs` 가
+        # "does not exist" 를 뱉는다(실측). 없는 DAG 는 run 이 있을 수 없으므로
+        # drain 대상에서 건너뛴다.
+        present = self._present_allowlisted_dag_ids()
         totals = {"running": 0, "queued": 0}
         for dag_id in self._writers:
+            if dag_id not in present:
+                continue
             for state in ("running", "queued"):
                 rows = _json_rows(
                     self._checked(
