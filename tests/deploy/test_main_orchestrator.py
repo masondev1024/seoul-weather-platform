@@ -249,12 +249,18 @@ def _success_events(
             _event("ledger.begin", record=started),
         ]
     )
-    expected.extend(_event("airflow.pause_dag", dag_id=dag_id) for dag_id in dags)
-    expected.append(_event("airflow.capture_pause_state", dag_ids=dags))
+    # drain 이 pause 보다 먼저다 — pause 를 먼저 걸면 이미 도는 run 이 멈춰서
+    # drain 이 영원히 0 을 못 본다.
     expected.extend(
         [
             _event("clock.monotonic"),
             _event("airflow.writer_run_counts", dag_ids=writers),
+        ]
+    )
+    expected.extend(_event("airflow.pause_dag", dag_id=dag_id) for dag_id in dags)
+    expected.append(_event("airflow.capture_pause_state", dag_ids=dags))
+    expected.extend(
+        [
             _event(
                 "git.detached_checkout",
                 repository="owner/seoul-weather-platform",
@@ -458,6 +464,12 @@ def test_pause_snapshot_is_exact_and_precedes_first_mutation():
         _event("airflow.capture_pause_state", dag_ids=dags),
         _event("clock.utc_now"),
         _event("ledger.begin", record=started),
+        # drain 이 pause 보다 먼저 돈다.
+        _event("clock.monotonic"),
+        _event(
+            "airflow.writer_run_counts",
+            dag_ids=tuple(sorted(target.writer_dag_allowlist)),
+        ),
         _event("airflow.pause_dag", dag_id=dags[0]),
     ]
     expected.extend(
@@ -506,6 +518,12 @@ def test_pause_readback_mismatch_cannot_record_success_or_deploy_code():
         _event("airflow.capture_pause_state", dag_ids=dags),
         _event("clock.utc_now"),
         _event("ledger.begin", record=started),
+        # drain 이 pause 보다 먼저 돈다.
+        _event("clock.monotonic"),
+        _event(
+            "airflow.writer_run_counts",
+            dag_ids=tuple(sorted(target.writer_dag_allowlist)),
+        ),
     ]
     expected.extend(_event("airflow.pause_dag", dag_id=dag_id) for dag_id in dags)
     expected.append(_event("airflow.capture_pause_state", dag_ids=dags))
@@ -597,8 +615,6 @@ def test_drain_deadline_after_bounded_sleep_does_not_poll_again():
         _event("clock.utc_now"),
         _event("ledger.begin", record=started),
     ]
-    expected.extend(_event("airflow.pause_dag", dag_id=dag_id) for dag_id in dags)
-    expected.append(_event("airflow.capture_pause_state", dag_ids=dags))
     expected.extend(
         [
             _event("clock.monotonic"),
@@ -606,6 +622,11 @@ def test_drain_deadline_after_bounded_sleep_does_not_poll_again():
                 "airflow.writer_run_counts",
                 dag_ids=tuple(sorted(target.writer_dag_allowlist)),
             ),
+        ]
+    )
+    # drain 이 먼저 돌다 timeout 났으므로 pause 는 아예 일어나지 않는다.
+    expected.extend(
+        [
             _event("clock.monotonic"),
             _event("clock.sleep", seconds=10.0),
             _event("clock.monotonic"),
@@ -656,8 +677,6 @@ def test_drain_timeout_restores_snapshot_without_overlay_mutation():
         _event("clock.utc_now"),
         _event("ledger.begin", record=started),
     ]
-    expected.extend(_event("airflow.pause_dag", dag_id=dag_id) for dag_id in dags)
-    expected.append(_event("airflow.capture_pause_state", dag_ids=dags))
     expected.extend(
         [
             _event("clock.monotonic"),
@@ -665,6 +684,11 @@ def test_drain_timeout_restores_snapshot_without_overlay_mutation():
                 "airflow.writer_run_counts",
                 dag_ids=tuple(sorted(target.writer_dag_allowlist)),
             ),
+        ]
+    )
+    # drain 이 먼저 돌다 timeout 났으므로 pause 는 아예 일어나지 않는다.
+    expected.extend(
+        [
             _event("clock.monotonic"),
         ]
     )
@@ -715,8 +739,6 @@ def test_malformed_writer_counts_restore_snapshot_and_fail_closed():
         _event("clock.utc_now"),
         _event("ledger.begin", record=started),
     ]
-    expected.extend(_event("airflow.pause_dag", dag_id=dag_id) for dag_id in dags)
-    expected.append(_event("airflow.capture_pause_state", dag_ids=dags))
     expected.extend(
         [
             _event("clock.monotonic"),
@@ -726,6 +748,7 @@ def test_malformed_writer_counts_restore_snapshot_and_fail_closed():
             ),
         ]
     )
+    # drain 이 먼저 돌다 실패했으므로 pause 는 아예 일어나지 않는다.
     expected.extend(_event("airflow.unpause_dag", dag_id=dag_id) for dag_id in dags)
     expected.append(_event("airflow.capture_pause_state", dag_ids=dags))
     expected.extend(
@@ -766,8 +789,6 @@ def test_checkout_failure_restores_snapshot_without_install_or_deploy():
         _event("clock.utc_now"),
         _event("ledger.begin", record=started),
     ]
-    expected.extend(_event("airflow.pause_dag", dag_id=dag_id) for dag_id in dags)
-    expected.append(_event("airflow.capture_pause_state", dag_ids=dags))
     expected.extend(
         [
             _event("clock.monotonic"),
@@ -775,6 +796,12 @@ def test_checkout_failure_restores_snapshot_without_install_or_deploy():
                 "airflow.writer_run_counts",
                 dag_ids=tuple(sorted(target.writer_dag_allowlist)),
             ),
+        ]
+    )
+    expected.extend(_event("airflow.pause_dag", dag_id=dag_id) for dag_id in dags)
+    expected.append(_event("airflow.capture_pause_state", dag_ids=dags))
+    expected.extend(
+        [
             _event(
                 "git.detached_checkout",
                 repository="owner/seoul-weather-platform",
@@ -834,8 +861,6 @@ def test_candidate_validation_failure_discards_stage_and_preserves_stable_overla
         _event("clock.utc_now"),
         _event("ledger.begin", record=started),
     ]
-    expected.extend(_event("airflow.pause_dag", dag_id=dag_id) for dag_id in dags)
-    expected.append(_event("airflow.capture_pause_state", dag_ids=dags))
     expected.extend(
         [
             _event("clock.monotonic"),
@@ -843,6 +868,12 @@ def test_candidate_validation_failure_discards_stage_and_preserves_stable_overla
                 "airflow.writer_run_counts",
                 dag_ids=tuple(sorted(target.writer_dag_allowlist)),
             ),
+        ]
+    )
+    expected.extend(_event("airflow.pause_dag", dag_id=dag_id) for dag_id in dags)
+    expected.append(_event("airflow.capture_pause_state", dag_ids=dags))
+    expected.extend(
+        [
             _event(
                 "git.detached_checkout",
                 repository="owner/seoul-weather-platform",
@@ -936,3 +967,30 @@ def test_release_and_baseline_semantic_mismatch_rejected_before_pause(candidate_
     assert events == _lookup_events(target, previous) + [
         _event("ledger.acquire_lock.exit", deployment_id=dep_id)
     ]
+
+
+def test_drain_completes_before_pausing_so_in_flight_runs_can_finish():
+    """Pausing first deadlocks: Airflow stops scheduling the remaining tasks of a
+    run that is already going, so it can never reach zero and drain always times
+    out. Observed 2026-08-16: a deploy paused mid-run, the bronze run stalled for
+    23 minutes between land and load, and the deploy died on drain-timeout.
+
+    Draining first lets the in-flight run finish; the pause that follows is what
+    keeps new runs from starting.
+    """
+    target = _target()
+    previous, _ = _previous_success(target)
+    dags = {dag_id: True for dag_id in target.dag_allowlist}
+    orchestrator, events, _ = _build(
+        target=target, previous=previous, paused=dags
+    )
+
+    orchestrator.deploy(_identity(), target)
+
+    names = [event.operation for event in events]
+    first_drain = names.index("airflow.writer_run_counts")
+    first_pause = names.index("airflow.pause_dag")
+    assert first_drain < first_pause, (
+        "drain must observe an unpaused pipeline; pausing first freezes the "
+        "in-flight run and drain can never reach zero"
+    )

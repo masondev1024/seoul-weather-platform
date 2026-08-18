@@ -22,7 +22,7 @@
       "pattern": "^(?!.*(?:^|[\\\\/])\\.(?:[\\\\/]|$))(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))(?![A-Za-z]:[\\\\/](?:[\\\\/]|\\.(?:[\\\\/]|$))*$)(?!/(?:/|\\.(?:/|$))*$)(?:[A-Za-z]:[\\\\/]|/(?!/)).+\\.ya?ml$"
     },
     "weather_dag_id": {
-      "enum": ["common_admin_dong_bronze", "weather_serving_export", "weather_serving_freshness_watchdog", "weather_serving_snapshot_refresh", "weather_vilage_fcst_bronze", "weather_vilage_fcst_bronze_backfill", "weather_vilage_fcst_collection_slot_reconciliation", "weather_vilage_fcst_recollect", "weather_vilage_fcst_transform", "weather_w2_canonical_transform"]
+      "enum": ["common_admin_dong_bronze", "weather_iceberg_maintenance", "weather_reference_data_refresh", "weather_serving_export", "weather_serving_freshness_watchdog", "weather_serving_snapshot_refresh", "weather_vilage_fcst_bronze", "weather_vilage_fcst_bronze_backfill", "weather_vilage_fcst_collection_slot_reconciliation", "weather_vilage_fcst_recollect", "weather_vilage_fcst_transform", "weather_w2_canonical_transform"]
     },
     "compose_service_name": {
       "type": "string",
@@ -65,7 +65,7 @@
       "additionalProperties": false,
       "required": ["dag_allowlist", "writer_dag_allowlist", "never_trigger"],
       "properties": {
-        "dag_allowlist": {"type": "array", "minItems": 10, "maxItems": 10, "uniqueItems": true, "items": {"$ref": "#/$defs/weather_dag_id"}},
+        "dag_allowlist": {"type": "array", "minItems": 12, "maxItems": 12, "uniqueItems": true, "items": {"$ref": "#/$defs/weather_dag_id"}},
         "writer_dag_allowlist": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/weather_dag_id"}},
         "never_trigger": {"const": true}
       }

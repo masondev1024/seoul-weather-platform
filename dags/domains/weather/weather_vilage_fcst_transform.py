@@ -107,41 +107,10 @@ DBT_PHASE_SPECS = (
         "source freshness",
         "ask_seoul_weather_transform_source",
     ),
-    DbtPhaseSpec(
-        "dbt_seed_asac_axes",
-        "seed",
-        "ask_seoul_weather_transform_asac_axes",
-    ),
-    DbtPhaseSpec(
-        "dbt_run_common_admin_dong_dimension",
-        "run",
-        "ask_seoul_weather_transform_common_admin",
-    ),
-    DbtPhaseSpec(
-        "dbt_test_common_admin_dong_dimension",
-        "test",
-        "ask_seoul_weather_transform_common_admin",
-    ),
-    DbtPhaseSpec(
-        "dbt_seed_place_mapping",
-        "seed",
-        "ask_seoul_weather_transform_place_mapping",
-    ),
-    DbtPhaseSpec(
-        "dbt_test_place_mapping_seed",
-        "test",
-        "ask_seoul_weather_transform_place_mapping",
-    ),
-    DbtPhaseSpec(
-        "dbt_seed_coverage_grid",
-        "seed",
-        "ask_seoul_weather_transform_coverage_grid",
-    ),
-    DbtPhaseSpec(
-        "dbt_test_coverage_grid_seed",
-        "test",
-        "ask_seoul_weather_transform_coverage_grid",
-    ),
+    # 정적 참조 phase(asac_axes seed / admin-dong dimension / place·coverage seed)는
+    # weather_reference_data_refresh DAG 로 분리했다. 자주 바뀌지 않는데도 bronze
+    # 사이클마다 다시 만들면서 사이클당 ~13분을 낭비했다. 이 DAG 는 그 결과 테이블을
+    # ref 로 읽기만 하며, 없으면 dbt 가 자연스럽게 실패해 fail-closed 된다.
     DbtPhaseSpec(
         "dbt_run_silver",
         "run",

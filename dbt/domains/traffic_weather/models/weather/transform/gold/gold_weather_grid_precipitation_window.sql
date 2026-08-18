@@ -1,0 +1,66 @@
+-- Serving Gold: consecutive future precipitation forecast windows per grid.
+-- No rows is a valid result when every covered grid forecasts no precipitation.
+{{ config(materialized='table') }}
+
+with kst_now as (
+    select {{ weather_serving_as_of_hour() }} as current_hour_at
+),
+
+precipitation_hours as (
+    select
+        hourly.*
+    from {{ ref('gold_weather_grid_hourly_outlook') }} as hourly
+    cross join kst_now
+    where hourly.forecast_at >= kst_now.current_hour_at
+      and hourly.is_precipitating
+),
+
+with_previous as (
+    select
+        *,
+        lag(forecast_at) over (
+            partition by grid_id
+            order by forecast_at
+        ) as previous_forecast_at
+    from precipitation_hours
+),
+
+window_marked as (
+    select
+        *,
+        case
+            when previous_forecast_at is null
+              or date_diff('hour', previous_forecast_at, forecast_at) > 1 then 1
+            else 0
+        end as new_window_flag
+    from with_previous
+),
+
+windowed as (
+    select
+        *,
+        sum(new_window_flag) over (
+            partition by grid_id
+            order by forecast_at
+            rows between unbounded preceding and current row
+        ) as window_number
+    from window_marked
+)
+
+select
+    concat(grid_id, '|', to_iso8601(cast(min(forecast_at) as timestamp(6)))) as product_row_id,
+    grid_id,
+    max(nx) as nx,
+    max(ny) as ny,
+    max(coverage_scope) as coverage_scope,
+    min(forecast_at) as window_start_at,
+    max(forecast_at) as window_end_at,
+    count(*) as precipitation_hour_count,
+    max(precip_prob_pct) as precip_prob_max_pct,
+    max(pcp_mm) as pcp_max_mm,
+    max(sno_cm) as sno_max_cm,
+    min(forecast_issued_at_min) as forecast_issued_at_min,
+    max(forecast_issued_at_max) as forecast_issued_at_max,
+    max(forecast_collected_at_max) as forecast_collected_at_max
+from windowed
+group by grid_id, window_number

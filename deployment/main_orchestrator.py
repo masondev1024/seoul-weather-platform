@@ -162,8 +162,14 @@ class MainDeploymentOrchestrator:
         staged: Path | None = None
         install_started = False
         try:
-            self._pause_all(target, dags)
+            # 순서가 중요하다. pause 를 먼저 걸면 Airflow 가 **이미 도는 run 의 남은
+            # 태스크까지** 스케줄하지 않아 그 run 이 그 자리에서 멈추고, drain 은
+            # running=0 을 영원히 못 봐서 반드시 timeout 난다(2026-08-16 실측:
+            # bronze 가 land 와 load 사이에서 23분 멈춘 채 배포가 drain-timeout).
+            # 그래서 아직 안 멈춘 파이프라인을 먼저 비우고(drain), 그 다음 새 run 을
+            # 막는다(pause).
             self._drain(target)
+            self._pause_all(target, dags)
             expected_checkout = target.runtime_root / "releases" / identity.workflow_sha
             try:
                 checkout = self.git.detached_checkout(

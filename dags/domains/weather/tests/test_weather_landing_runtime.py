@@ -11,7 +11,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from common.raw_write import write_immutable_raw_object  # noqa: E402
 import weather_ingest.runtime as runtime  # noqa: E402
-from weather_ingest.runtime import KmaHttpAdapter, R2RawObjectStore  # noqa: E402
+from weather_ingest.runtime import (  # noqa: E402
+    DEFAULT_KMA_REQUEST_DELAY_SECONDS,
+    KMA_429_BACKOFF_SECONDS,
+    KMA_REQUEST_DELAY_SECONDS_ENV,
+    KmaHttpAdapter,
+    R2RawObjectStore,
+    kma_request_delay_seconds,
+)
 
 
 class FakeS3Client:
@@ -80,8 +87,40 @@ def test_kma_adapter_delegates_auth_and_retry_policy_to_domain_http_runtime():
         "max_attempts": 4,
         "retry_statuses": (429, 500, 502, 503, 504),
         "retry_base_delay_seconds": 30,
-        "retry_429_backoff_seconds": (3600.0, 5400.0, 7200.0),
+        "retry_429_backoff_seconds": (60.0, 180.0, 300.0),
     }
+
+
+def test_kma_429_backoff_fits_inside_the_bronze_dagrun_timeout():
+    """backoff 합이 dagrun_timeout(60분)을 넘으면 재시도가 실행될 수 없다."""
+    assert sum(KMA_429_BACKOFF_SECONDS) < 60 * 60
+
+
+def test_kma_request_delay_defaults_without_the_env_override(monkeypatch):
+    monkeypatch.delenv(KMA_REQUEST_DELAY_SECONDS_ENV, raising=False)
+
+    assert kma_request_delay_seconds() == DEFAULT_KMA_REQUEST_DELAY_SECONDS
+
+
+def test_kma_request_delay_reads_the_env_override(monkeypatch):
+    monkeypatch.setenv(KMA_REQUEST_DELAY_SECONDS_ENV, "0.25")
+
+    assert kma_request_delay_seconds() == 0.25
+
+
+def test_kma_request_delay_treats_blank_override_as_absent(monkeypatch):
+    monkeypatch.setenv(KMA_REQUEST_DELAY_SECONDS_ENV, "   ")
+
+    assert kma_request_delay_seconds() == DEFAULT_KMA_REQUEST_DELAY_SECONDS
+
+
+@pytest.mark.parametrize("value", ["fast", "-1"])
+def test_kma_request_delay_rejects_invalid_override(monkeypatch, value):
+    """오타 하나가 조용히 기본값으로 되돌아가면 429 를 맞고 나서야 알게 된다."""
+    monkeypatch.setenv(KMA_REQUEST_DELAY_SECONDS_ENV, value)
+
+    with pytest.raises(ValueError, match=KMA_REQUEST_DELAY_SECONDS_ENV):
+        kma_request_delay_seconds()
 
 
 def test_kma_adapter_preserves_delay_between_successful_api_requests():
@@ -218,6 +257,9 @@ def test_runtime_factory_lazily_composes_domain_landing(monkeypatch):
     sentinel_s3 = object()
     captured: dict[str, object] = {}
 
+    # 운영이 재배포 없이 딜레이를 조정할 수 있어야 하므로, 빌더가 환경변수를
+    # 실제로 읽어 adapter 에 넣는지까지 확인한다.
+    monkeypatch.setenv(KMA_REQUEST_DELAY_SECONDS_ENV, "0.5")
     monkeypatch.setattr(runtime, "fetch_url", sentinel_fetch)
     monkeypatch.setattr(runtime, "_build_s3_client", lambda: sentinel_s3)
     monkeypatch.setattr(
@@ -236,6 +278,7 @@ def test_runtime_factory_lazily_composes_domain_landing(monkeypatch):
     source = captured["landing"]["source"]
     assert isinstance(source, KmaHttpAdapter)
     assert source._fetch is sentinel_fetch
+    assert source._delay_seconds == 0.5
     raw_store = captured["landing"]["raw_store"]
     assert isinstance(raw_store, R2RawObjectStore)
     assert raw_store._client is sentinel_s3

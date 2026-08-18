@@ -171,14 +171,10 @@ def load_transform_module(
     return module
 
 
-EXPECTED_DBT_PHASES = (
+# 정적 참조 phase. weather_reference_data_refresh DAG 가 하루 1회 실행한다.
+# dbt_deps 는 두 DAG 모두 필요하므로(패키지 설치) 양쪽에 공통으로 들어간다.
+EXPECTED_REFERENCE_DBT_PHASES = (
     ("dbt_deps", "deps", None, False),
-    (
-        "dbt_source_freshness",
-        "source freshness",
-        "ask_seoul_weather_transform_source",
-        True,
-    ),
     (
         "dbt_seed_asac_axes",
         "seed",
@@ -219,6 +215,17 @@ EXPECTED_DBT_PHASES = (
         "dbt_test_coverage_grid_seed",
         "test",
         "ask_seoul_weather_transform_coverage_grid",
+        True,
+    ),
+)
+
+# transform 이 bronze 사이클마다 실행하는 phase. 정적 참조는 위 DAG 로 빠졌다.
+EXPECTED_DBT_PHASES = (
+    ("dbt_deps", "deps", None, False),
+    (
+        "dbt_source_freshness",
+        "source freshness",
+        "ask_seoul_weather_transform_source",
         True,
     ),
     (

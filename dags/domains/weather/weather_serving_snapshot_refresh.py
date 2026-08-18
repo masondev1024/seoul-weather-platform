@@ -50,7 +50,6 @@ from weather_dbt_runtime import (  # noqa: E402
     weather_serving_as_of_hour_state,
 )
 from weather_lineage import enable_lineage_if_configured  # noqa: E402
-from weather_serving_exclusion import guard_serving_snapshot_refresh  # noqa: E402
 
 
 KST = ZoneInfo("Asia/Seoul")
@@ -241,24 +240,7 @@ with DAG(
         on_failure_callback=record_weather_problem,
     ).as_teardown(on_failure_fail_dagrun=False)
 
-    # 공개 Gold 를 함께 쓰는 transform 이 도는 중이면 여기서 skip 한다. pool 은
-    # 태스크 단위로만 직렬화해서 transform 의 run 과 test 사이에 끼어드는 것을
-    # 막지 못한다 — 자세한 근거는 weather_serving_exclusion 모듈 docstring.
-    guard_conflicting_transform = PythonOperator(
-        task_id="guard_conflicting_weather_transform",
-        python_callable=guard_serving_snapshot_refresh,
-        on_failure_callback=record_weather_problem,
-    )
-
-    (
-        validate_runtime
-        >> guard_conflicting_transform
-        >> resolve_serving_as_of_hour
-        >> run_snapshot
-        >> test_snapshot
-        >> mark_ready
-        >> publish_metrics
-    )
+    validate_runtime >> resolve_serving_as_of_hour >> run_snapshot >> test_snapshot >> mark_ready >> publish_metrics
 
 
 enable_lineage_if_configured(dag)
