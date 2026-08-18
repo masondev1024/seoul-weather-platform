@@ -40,6 +40,13 @@ LOCAL_AIRFLOW_SOURCES = frozenset(
         "dags/domains/weather/weather_ingest/iceberg_maintenance.py",
         "dags/domains/weather/tests/test_weather_iceberg_maintenance.py",
         "dags/domains/weather/tests/test_weather_iceberg_maintenance_dag.py",
+        # 소비자 없는 ops 관측 기록기를 잠그는 이 fork 전용 스위치와 그 경계 테스트.
+        # 상류에는 없다 — 상류에는 ops/ 를 읽는 소비자(D1 적재 DAG)가 살아 있기 때문이다.
+        # conftest 는 dags root 를 sys.path 에 넣는다(그전에는 수집 순서에 의존해
+        # 우연히 import 가 성립했다).
+        "dags/common/ops/telemetry_switch.py",
+        "dags/common/tests/conftest.py",
+        "dags/common/tests/test_ops_telemetry_switch.py",
     }
 )
 
