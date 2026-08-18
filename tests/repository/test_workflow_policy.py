@@ -534,7 +534,7 @@ def test_repository_ci_runs_the_exact_secretless_verification_commands() -> None
         "airflow-tests": [
             "python -m pip install -r runtime/requirements-airflow.lock.txt",
             "python -m compileall dags tools release",
-            "python -m pytest dags/common/serving/tests dags/domains/weather/tests tests/repository/test_airflow_boundary.py -q",
+            "python -m pytest dags/common/tests dags/common/serving/tests dags/domains/weather/tests tests/repository/test_airflow_boundary.py -q",
         ],
         "dagbag-policy": [
             DEV_DEPENDENCY_INSTALL_COMMAND,
