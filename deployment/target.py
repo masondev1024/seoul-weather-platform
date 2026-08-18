@@ -24,6 +24,10 @@ _COMPOSE_SERVICE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 class DeployTarget:
     raw: Mapping[str, object]
     canonical_target_bytes: bytes
+    #: 로드 시점에 고정한, allowlist 를 제외한 canonical bytes. target_fingerprint 가
+    #: 이걸 해시하므로 로드 후 raw 변조에 영향받지 않고(불변), DAG 집합이 바뀌어도
+    #: 값이 그대로다.
+    canonical_rollback_bytes: bytes
     schema_version: str
     target_id: str
     credential_source_kind: str
@@ -359,6 +363,7 @@ def load_deploy_target(path: Path, repo_root: Path) -> DeployTarget:
     return DeployTarget(
         raw=root,
         canonical_target_bytes=canonical_bytes(root),
+        canonical_rollback_bytes=canonical_bytes(rollback_relevant_document(root)),
         schema_version=schema_version,
         target_id=_string(root.get("target_id"), "target_id"),
         credential_source_kind=credential_source_kind,
@@ -401,9 +406,46 @@ def load_deploy_target(path: Path, repo_root: Path) -> DeployTarget:
     )
 
 
+#: fingerprint 에서 제외하는 airflow 키. dag_allowlist/writer_dag_allowlist 는
+#: "어떤 DAG 를 pause/drain 하느냐"를 정할 뿐 compose/rollback 오버레이를 바꾸지
+#: 않는다. 이 둘을 fingerprint 에 넣으면 DAG 를 추가/삭제할 때마다 fingerprint 가
+#: 바뀌어 기존 baseline 이 orphan 되고 배포가 rollback-unavailable 로 죽는다.
+#: 제외하면 baseline 은 DAG 집합 변경에도 유효하게 남아, 재시드 없이 배포된다.
+_FINGERPRINT_EXCLUDED_AIRFLOW_KEYS = frozenset(
+    {"dag_allowlist", "writer_dag_allowlist"}
+)
+
+
+def rollback_relevant_document(raw: Mapping[str, object]) -> dict[str, object]:
+    """Return the target document reduced to its rollback/compose-relevant keys.
+
+    DAG 선택(allowlist)은 배포가 무엇을 pause/drain 하는지를 정하는 운영 선택일
+    뿐, 롤백으로 되돌릴 compose 오버레이의 정체성이 아니다. 그래서 fingerprint
+    계산에서 제외한다.
+    """
+    reduced: dict[str, object] = {}
+    for key, value in raw.items():
+        if key == "airflow" and isinstance(value, Mapping):
+            reduced[key] = {
+                inner_key: inner_value
+                for inner_key, inner_value in value.items()
+                if inner_key not in _FINGERPRINT_EXCLUDED_AIRFLOW_KEYS
+            }
+        else:
+            reduced[key] = value
+    return reduced
+
+
 def target_fingerprint(target: DeployTarget) -> str:
-    """Return the publishable digest of the full local target document."""
-    return sha256_hex(target.canonical_target_bytes)
+    """Digest of the rollback-relevant deploy configuration (allowlist-agnostic).
+
+    DAG allowlist 는 fingerprint 에서 제외한다 — 근거는
+    :data:`_FINGERPRINT_EXCLUDED_AIRFLOW_KEYS`. 덕분에 DAG 집합만 바뀌는 배포는
+    fingerprint 가 그대로라 기존 baseline 을 계속 쓸 수 있고 cutover 재시드가
+    필요 없다. 로드 시점에 고정한 bytes 를 해시하므로 로드 후 raw 변조에 영향받지
+    않는다(불변).
+    """
+    return sha256_hex(target.canonical_rollback_bytes)
 
 
 def _reject_credential_values(value: object, prohibited: frozenset[str]) -> None:
