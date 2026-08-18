@@ -380,7 +380,9 @@ def test_invalid_identity_or_target_uses_fixed_error_before_adapter_calls(invali
     if invalid_input == "identity":
         identity = replace(identity, repository=object())
     else:
-        target = replace(target, canonical_target_bytes=object())
+        # target_fingerprint 는 이제 canonical_rollback_bytes 를 해시하므로,
+        # 이 필드를 비-bytes 로 손상시켜 fingerprint 계산 실패를 유발한다.
+        target = replace(target, canonical_rollback_bytes=object())
     orchestrator, events, _ = _build(target=_target())
 
     with pytest.raises(MainDeploymentError, match="^main-deploy-failed$"):

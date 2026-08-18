@@ -770,6 +770,32 @@ def test_schema_accepts_non_empty_writer_subset_of_weather_dags():
     assert _schema_validator().is_valid(payload)
 
 
+def test_schema_accepts_a_new_weather_dag_without_editing_the_schema():
+    """DAG 를 추가할 때 schema 를 손대지 않아도 되도록, 권위 있는 DAG 집합은
+    코드의 EXPECTED_DAG_IDS 하나로 일원화했다. schema 는 구조적 sanity 만 본다.
+    실제 "그 DAG 여야 함"강제는 load_deploy_target 의 exact-match 가 담당한다
+    (test_deploy_target_requires_exact_weather_dag_allowlist).
+    """
+    payload = _valid_target()
+    payload["airflow"]["dag_allowlist"] = sorted(
+        set(payload["airflow"]["dag_allowlist"]) | {"weather_future_new_dag"}
+    )
+    payload["airflow"]["writer_dag_allowlist"] = ["weather_future_new_dag"]
+
+    assert _schema_validator().is_valid(payload)
+
+
+@pytest.mark.parametrize(
+    "bad_dag_id",
+    ["not-a-weather-dag", "traffic_incident_bronze", "/opt/airflow/x", "Weather_Upper", ""],
+)
+def test_schema_still_rejects_structurally_invalid_dag_ids(bad_dag_id):
+    payload = _valid_target()
+    payload["airflow"]["dag_allowlist"] = [bad_dag_id]
+
+    assert not _schema_validator().is_valid(payload)
+
+
 def test_schema_accepts_posix_absolute_paths():
     payload = _valid_target()
     _set_filesystem_paths(payload, "/var/lib/example-weather/runtime")
