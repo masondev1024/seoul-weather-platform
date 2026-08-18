@@ -256,13 +256,19 @@ def _build_deploy_components(
             mode="stable",
             overlay_file=target.generated_overlay_file,
         )
-        airflow_runner = CommandRunner(timeout_seconds=60)
+        # 이 prod Airflow 는 weather 만이 아니라 플랫폼 전 도메인을 서빙한다.
+        # `airflow dags list` 가 79개 DAG · 7,949행(누적 dag version 포함)을 돌려주고
+        # 유휴 상태에서도 23~27초가 걸린다(2026-08-18 실측). 재시작 직후에는
+        # dag-processor 재파싱과 DB 부하가 겹쳐 60초를 넘겨 command_timeout 이 나고,
+        # 그게 health 실패 → 롤백으로 이어졌다(Deploy #32104111594). 조회는 read-only
+        # 라 넉넉히 잡아도 위험하지 않으므로 300초로 올린다.
+        airflow_runner = CommandRunner(timeout_seconds=300)
         airflow = AirflowCommandAdapter(target, airflow_runner)
         compose_runner = CommandRunner(timeout_seconds=900)
         compose = ComposeCommandAdapter(target, compose_runner)
         git_runner = CommandRunner(timeout_seconds=300)
         git = GitCommandAdapter(target, _repo_root(), git_runner)
-        health_runner = CommandRunner(timeout_seconds=60)
+        health_runner = CommandRunner(timeout_seconds=300)
         health = HealthCommandAdapter(target, health_runner)
         clock = SystemClock()
         ledger = DeploymentLedger(

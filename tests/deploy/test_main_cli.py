@@ -713,7 +713,10 @@ def test_deploy_main_success_wires_stable_probe_adapters_and_orchestrator_in_ord
         "orchestrator-deploy",
     ]
     runner_timeouts = [value for name, value in calls.values if name == "runner"]
-    assert runner_timeouts == [60, 60, 900, 300, 60]
+    # [probe, airflow, compose, git, health] — airflow/health 는 이 prod 의
+    # `dags list` 가 전 도메인 7,949행을 훑느라 유휴에도 23~27초 걸리고, 재시작
+    # 직후엔 60초를 넘겨 health 실패→롤백을 유발했기에 300초로 올렸다(2026-08-18 실측).
+    assert runner_timeouts == [60, 300, 900, 300, 300]
     probe_args, probe_kwargs = next(value for name, value in calls.values if name == "probe")
     assert probe_args[0] == target
     assert probe_args[1].timeout_seconds == 60
