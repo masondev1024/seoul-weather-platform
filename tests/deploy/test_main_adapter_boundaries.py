@@ -288,6 +288,34 @@ def test_airflow_writer_counts_skip_absent_writers(tmp_path: Path):
     )
 
 
+def test_airflow_writer_counts_reuse_one_dag_list_across_drain_polls(tmp_path: Path):
+    # drain 은 writer_run_counts 를 폴링마다(기본 15초) 부른다. 이 prod 의
+    # `dags list` 는 전 도메인 7,949행을 훑느라 유휴에도 23~27초 걸리므로
+    # (2026-08-18 실측) 폴링마다 다시 부르면 drain 이 조회에만 수십 분을 쓴다.
+    # 코드 교체는 drain 이 끝난 뒤에나 일어나므로 1회 조회로 충분하다.
+    target, artifact, _ = _candidate(tmp_path)
+    Path(str(target.generated_overlay_file)).write_bytes(artifact.content)
+    writers = tuple(sorted(target.writer_dag_allowlist))
+    responses: list[CompletedCommand] = [
+        _ok(_airflow_322_output([{"dag_id": dag_id, "is_paused": True} for dag_id in writers]))
+    ]
+    # 폴링 2회분 list-runs 응답만 준비한다. dags list 를 다시 부르면 큐가 어긋난다.
+    for _poll in range(2):
+        for _dag_id in writers:
+            responses.extend([_ok("[]"), _ok("[]")])
+    runner = _QueueRunner(responses)
+    adapter = AirflowCommandAdapter(target, runner)
+
+    first = adapter.writer_run_counts(writers)
+    second = adapter.writer_run_counts(writers)
+
+    assert first == second == WriterRunCounts(running=0, queued=0)
+    dag_list_calls = [
+        argv for argv, _ in runner.calls if tuple(argv[-3:]) == ("list", "-o", "json")
+    ]
+    assert len(dag_list_calls) == 1
+
+
 def test_airflow_accepts_322_preamble_string_bools_and_consistent_duplicate_rows(
     tmp_path: Path,
 ):

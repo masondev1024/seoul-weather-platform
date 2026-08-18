@@ -68,6 +68,7 @@ class AirflowCommandAdapter:
         self._cwd = Path(_safe_path(target.working_directory))
         self._dags = tuple(sorted(target.dag_allowlist))
         self._writers = tuple(sorted(target.writer_dag_allowlist))
+        self._present_cache: frozenset[str] | None = None
 
     def _checked(self, argv: Sequence[str]) -> str:
         try:
@@ -112,16 +113,25 @@ class AirflowCommandAdapter:
         return {dag_id: paused.get(dag_id, True) for dag_id in self._dags}
 
     def _present_allowlisted_dag_ids(self) -> frozenset[str]:
-        """running Airflow dagbag 에 실제로 존재하는 allowlist DAG 집합."""
-        rows = _json_rows(
-            self._checked((*self._prefix, "dags", "list", "-o", "json"))
-        )
-        present: set[str] = set()
-        for row in rows:
-            dag_id = row.get("dag_id")
-            if type(dag_id) is str and dag_id in self._target.dag_allowlist:
-                present.add(dag_id)
-        return frozenset(present)
+        """running Airflow dagbag 에 실제로 존재하는 allowlist DAG 집합.
+
+        결과는 어댑터 인스턴스에 1회만 계산해 캐시한다. drain 은 이 값을 폴링마다
+        (기본 15초 간격) 다시 물어보는데, 이 prod 의 `dags list` 는 전 도메인
+        7,949행을 훑느라 23~27초가 걸려(2026-08-18 실측) 캐시가 없으면 drain 루프가
+        조회에만 매 회 30초 가까이 쓴다. 배포 중에는 코드 교체가 drain 이 끝난 뒤에야
+        일어나므로 drain 도중 DAG 집합은 변하지 않는다 — 1회 조회로 충분하다.
+        """
+        if self._present_cache is None:
+            rows = _json_rows(
+                self._checked((*self._prefix, "dags", "list", "-o", "json"))
+            )
+            present: set[str] = set()
+            for row in rows:
+                dag_id = row.get("dag_id")
+                if type(dag_id) is str and dag_id in self._target.dag_allowlist:
+                    present.add(dag_id)
+            self._present_cache = frozenset(present)
+        return self._present_cache
 
     def writer_run_counts(self, dag_ids: tuple[str, ...]) -> WriterRunCounts:
         if type(dag_ids) is not tuple or dag_ids != self._writers:
