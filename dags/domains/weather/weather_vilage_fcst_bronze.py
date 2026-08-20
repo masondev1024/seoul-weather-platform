@@ -94,6 +94,8 @@ from weather_ingest.runtime import (  # noqa: E402
     build_weather_collection_slot_receipt_ports,
     build_weather_landing,
     build_weather_manifest,
+    discard_weather_raw_payload,
+    read_weather_raw_payload,
     weather_raw_manifest_is_verified,
 )
 from weather_lineage import enable_lineage_if_configured  # noqa: E402
@@ -376,6 +378,10 @@ def load_kma_bronze(**context) -> dict:
             ensure_table=create_kma_bronze_table,
             download=download_raw_object,
             append_batches=append_kma_bronze_row_batches_pyiceberg,
+            read_payload=lambda raw_object: read_weather_raw_payload(
+                raw_object, download=download_raw_object
+            ),
+            discard_payload=discard_weather_raw_payload,
         ),
     )
 

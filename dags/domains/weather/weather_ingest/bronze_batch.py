@@ -29,6 +29,8 @@ class BronzeLoadPorts:
     ensure_table: Callable[[Any, str, str], str]
     download: Callable[[str, str], bytes]
     append_batches: Callable[..., int]
+    read_payload: Callable[[dict], bytes] | None = None
+    discard_payload: Callable[[dict], None] | None = None
 
 
 def load_kma_bronze_batch(
@@ -98,7 +100,11 @@ def load_kma_bronze_batch(
             raise WeatherSourceSchemaError(
                 f"KMA raw object is not HTTP-successful: http_status={http_status}"
             )
-        raw_bytes = ports.download(raw_object["raw_object_key"], "KMA raw payload")
+        raw_bytes = (
+            ports.read_payload(raw_object)
+            if ports.read_payload is not None
+            else ports.download(raw_object["raw_object_key"], "KMA raw payload")
+        )
         verify_raw_payload_hash(
             raw_bytes,
             expected_hash=str(raw_object["raw_hash"]),
@@ -213,6 +219,15 @@ def load_kma_bronze_batch(
     expected_rows = sum(
         int(summary["total_count"]) for summary in grid_summaries.values()
     )
+    if inserted == expected_rows and ports.discard_payload is not None:
+        for raw_object in raw_objects:
+            try:
+                ports.discard_payload(raw_object)
+            except OSError as exc:
+                print(
+                    "Weather raw spool cleanup deferred: "
+                    f"error_type={type(exc).__name__}"
+                )
     is_publishable = (
         bool(raw_result.get("is_publishable", True))
         and not allow_partial_pages

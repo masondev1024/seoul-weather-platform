@@ -47,6 +47,10 @@ LOCAL_AIRFLOW_SOURCES = frozenset(
         "dags/common/ops/telemetry_switch.py",
         "dags/common/tests/conftest.py",
         "dags/common/tests/test_ops_telemetry_switch.py",
+        # 개인 노트북의 동일 Weather run 안에서 landing payload를 Bronze로 넘겨
+        # 불필요한 R2 본문 재다운로드를 제거하는 repository-owned spool과 예산 테스트.
+        "dags/domains/weather/weather_ingest/raw_spool.py",
+        "dags/domains/weather/tests/test_weather_raw_transfer_budget.py",
     }
 )
 

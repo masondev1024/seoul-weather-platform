@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import uuid
 import time
 import os
@@ -13,6 +15,7 @@ from common.collection_slots import ExpectedSlot, is_slot_active, parse_activati
 from common.raw_manifest import validate_raw_manifest
 from weather_ingest.common.runtime import (
     checkpoint_prefix,
+    download_raw_object,
     fetch_url,
     raw_prefix,
     r2_env,
@@ -25,6 +28,7 @@ from weather_ingest.collection_slots import (
 )
 from weather_ingest.kma import SOURCE_ID, build_kma_url
 from weather_ingest.landing import KmaGrid, KmaLanding
+from weather_ingest.raw_spool import RawPayloadSpool, configured_raw_payload_spool
 from weather_ingest.run_manifest import WeatherRunManifest
 
 
@@ -63,6 +67,8 @@ class S3Client(Protocol):
         Body: bytes,
         ContentType: str,
         IfNoneMatch: str | None = None,
+        Metadata: dict[str, str] | None = None,
+        ContentMD5: str | None = None,
     ): ...
 
 
@@ -151,6 +157,12 @@ class R2RawObjectStore:
         response = self._client.get_object(Bucket=self._bucket, Key=key)
         return response["Body"].read()
 
+    def read_sha256(self, key: str) -> str | None:
+        response = self._client.head_object(Bucket=self._bucket, Key=key) or {}
+        metadata = response.get("Metadata") or {}
+        value = metadata.get("sha256")
+        return str(value) if value is not None else None
+
     def write_bytes(self, key: str, payload: bytes, content_type: str) -> None:
         self._client.put_object(
             Bucket=self._bucket,
@@ -175,6 +187,10 @@ class R2RawObjectStore:
                     Body=payload,
                     ContentType=content_type,
                     IfNoneMatch="*",
+                    Metadata={"sha256": hashlib.sha256(payload).hexdigest()},
+                    ContentMD5=base64.b64encode(
+                        hashlib.md5(payload, usedforsecurity=False).digest()
+                    ).decode("ascii"),
                 )
                 return True
             except ClientError as exc:
@@ -192,15 +208,30 @@ class R2RawObjectStore:
         raise RuntimeError("R2 conditional write conflicted repeatedly")
 
 
-def _build_s3_client():
+def _r2_client_config():
+    from botocore.config import Config
+
+    return Config(
+        request_checksum_calculation="when_required",
+        response_checksum_validation="when_required",
+    )
+
+
+def _build_s3_client(
+    *,
+    endpoint_url: str | None = None,
+    access_key_id: str | None = None,
+    secret_access_key: str | None = None,
+):
     import boto3
 
     return boto3.client(
         "s3",
-        endpoint_url=r2_env("R2_ENDPOINT"),
-        aws_access_key_id=r2_env("R2_ACCESS_KEY_ID"),
-        aws_secret_access_key=r2_env("R2_SECRET_ACCESS_KEY"),
+        endpoint_url=endpoint_url or r2_env("R2_ENDPOINT"),
+        aws_access_key_id=access_key_id or r2_env("R2_ACCESS_KEY_ID"),
+        aws_secret_access_key=secret_access_key or r2_env("R2_SECRET_ACCESS_KEY"),
         region_name="auto",
+        config=_r2_client_config(),
     )
 
 
@@ -209,14 +240,74 @@ def build_weather_landing() -> KmaLanding:
         _build_s3_client(),
         bucket=r2_env("R2_BUCKET_NAME"),
     )
+    raw_spool = configured_raw_payload_spool()
+    try:
+        removed = raw_spool.prune_expired()
+        if removed:
+            print(f"Pruned {removed} expired Weather raw spool files")
+    except OSError as exc:
+        print(
+            "Weather raw spool prune deferred: "
+            f"error_type={type(exc).__name__}"
+        )
     return KmaLanding(
         source=KmaHttpAdapter(fetch_url, delay_seconds=kma_request_delay_seconds()),
         raw_store=raw_store,
+        raw_spool=raw_spool,
         raw_prefix=raw_prefix(),
         checkpoint_prefix=checkpoint_prefix(),
         clock=lambda: datetime.now(timezone.utc),
         request_id=lambda: str(uuid.uuid4()),
     )
+
+
+def _raw_payload_identity(raw_object: Mapping[str, object]) -> tuple[str, str]:
+    raw_object_key = str(raw_object.get("raw_object_key") or "")
+    expected_hash = str(
+        raw_object.get("raw_hash") or raw_object.get("payload_hash") or ""
+    )
+    if not raw_object_key or not expected_hash:
+        raise ValueError("raw payload identity requires raw_object_key and raw_hash")
+    return raw_object_key, expected_hash
+
+
+def read_weather_raw_payload(
+    raw_object: Mapping[str, object],
+    *,
+    spool: RawPayloadSpool | None = None,
+    download: Callable[[str, str], bytes] = download_raw_object,
+) -> bytes:
+    raw_object_key, expected_hash = _raw_payload_identity(raw_object)
+    local_spool = spool or configured_raw_payload_spool()
+    try:
+        payload = local_spool.read_verified(raw_object_key, expected_hash)
+    except OSError as exc:
+        print(
+            "Weather raw spool read unavailable; falling back to R2: "
+            f"error_type={type(exc).__name__}"
+        )
+        payload = None
+    if payload is not None:
+        print(f"Read KMA raw payload from local spool: {raw_object_key}")
+        return payload
+    return download(raw_object_key, "KMA raw payload")
+
+
+def discard_weather_raw_payload(
+    raw_object: Mapping[str, object],
+    *,
+    spool: RawPayloadSpool | None = None,
+) -> None:
+    raw_object_key, expected_hash = _raw_payload_identity(raw_object)
+    try:
+        (spool or configured_raw_payload_spool()).discard(
+            raw_object_key, expected_hash
+        )
+    except OSError as exc:
+        print(
+            "Weather raw spool cleanup deferred: "
+            f"error_type={type(exc).__name__}"
+        )
 
 
 def build_weather_manifest() -> WeatherRunManifest:
