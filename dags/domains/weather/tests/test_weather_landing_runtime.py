@@ -23,7 +23,9 @@ from weather_ingest.runtime import (  # noqa: E402
 
 class FakeS3Client:
     def __init__(self) -> None:
-        self.objects: dict[tuple[str, str], tuple[bytes, str]] = {}
+        self.objects: dict[
+            tuple[str, str], tuple[bytes, str, dict[str, str]]
+        ] = {}
         self.put_conditions: list[str | None] = []
 
     def put_object(
@@ -34,6 +36,8 @@ class FakeS3Client:
         Body: bytes,
         ContentType: str,
         IfNoneMatch: str | None = None,
+        Metadata: dict[str, str] | None = None,
+        ContentMD5: str | None = None,
     ) -> None:
         self.put_conditions.append(IfNoneMatch)
         if IfNoneMatch == "*" and (Bucket, Key) in self.objects:
@@ -46,17 +50,18 @@ class FakeS3Client:
                 },
                 "PutObject",
             )
-        self.objects[(Bucket, Key)] = (Body, ContentType)
+        self.objects[(Bucket, Key)] = (Body, ContentType, dict(Metadata or {}))
 
     def get_object(self, *, Bucket: str, Key: str):
-        payload, _ = self.objects[(Bucket, Key)]
+        payload, _, _ = self.objects[(Bucket, Key)]
         return {"Body": SimpleNamespace(read=lambda: payload)}
 
-    def head_object(self, *, Bucket: str, Key: str) -> None:
+    def head_object(self, *, Bucket: str, Key: str):
         if (Bucket, Key) not in self.objects:
             error = RuntimeError("missing")
             error.response = {"Error": {"Code": "404"}}
             raise error
+        return {"Metadata": dict(self.objects[(Bucket, Key)][2])}
 
 
 def test_kma_adapter_delegates_auth_and_retry_policy_to_domain_http_runtime():
@@ -218,6 +223,7 @@ def test_r2_store_retries_conditional_conflict_then_reuses_matching_raw_object()
                 self.objects[(kwargs["Bucket"], kwargs["Key"])] = (
                     kwargs["Body"],
                     kwargs["ContentType"],
+                    dict(kwargs.get("Metadata") or {}),
                 )
                 raise ClientError(
                     {
