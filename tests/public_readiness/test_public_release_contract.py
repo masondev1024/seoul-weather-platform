@@ -131,14 +131,10 @@ def test_provenance_manifest_targets_exist_and_include_public_release_plan() -> 
     assert all((REPO_ROOT / target).is_file() for target in targets)
 
 
-def test_public_release_contract_keeps_only_legacy_workflow_blockers() -> None:
+def test_public_release_contract_has_no_workflow_blockers() -> None:
     errors = _validate_public_release_contract()
 
-    assert errors == [
-        "workflow.self_hosted_runner:.github/workflows/ci.yml:dagbag-runtime",
-        "workflow.self_hosted_runner:.github/workflows/deploy-main.yml:deploy-main",
-        "workflow.deploy_main_enabled:.github/workflows/deploy-main.yml:deploy-main",
-    ]
+    assert errors == []
 
 
 def test_example_environment_remains_secretless_and_placeholder_only() -> None:

@@ -11,7 +11,6 @@ REQUIRED_RESULTS = frozenset(
         "dbt-weather",
         "airflow-tests",
         "dagbag-policy",
-        "dagbag-runtime",
         "promotion-source",
         "governance-mode",
     }
@@ -34,26 +33,22 @@ def decide_required_ci(
     governance_mode: str,
     results: Mapping[str, str],
 ) -> GateDecision:
-    if governance_mode not in {"protected", "guarded_private"}:
+    if governance_mode != "public":
         return _blocked("unsupported_governance_mode")
     if event_name not in {"pull_request", "push"}:
         return _blocked("unsupported_event")
     if event_name == "pull_request":
         if not git_ref.startswith("refs/pull/") or not git_ref.endswith("/merge"):
             return _blocked("unsupported_ref")
-        expected_runtime = "skipped"
     else:
         if git_ref not in {"refs/heads/dev", "refs/heads/main"}:
             return _blocked("unsupported_ref")
-        expected_runtime = "success" if governance_mode == "protected" else "skipped"
 
-    for name in REQUIRED_RESULTS - {"dagbag-runtime"}:
+    for name in sorted(set(results) - REQUIRED_RESULTS):
+        return _blocked(f"unexpected_result:{name}")
+    for name in REQUIRED_RESULTS:
         if results.get(name) != "success":
             return _blocked(f"required_result_not_success:{name}")
-    if results.get("dagbag-runtime") != expected_runtime:
-        return _blocked("dagbag_runtime_mismatch")
-    if governance_mode == "guarded_private":
-        return GateDecision(allowed=True, reason="degraded_guarded_private")
     return GateDecision(allowed=True, reason="allowed")
 
 

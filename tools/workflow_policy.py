@@ -116,6 +116,7 @@ _REQUIRED_CHECK_NAMES = ("CI / required", "Promotion Source / required")
 _CI_WORKFLOW_PATH = ".github/workflows/ci.yml"
 _DEPLOY_MAIN_WORKFLOW_PATH = ".github/workflows/deploy-main.yml"
 _DEPLOY_MAIN_WORKFLOW_NAME = "Deploy Main"
+_FALSE_CONDITIONS = frozenset({"false", "${{ false }}"})
 _ENV_VALUE_OPTIONS = frozenset({"--chdir", "--unset", "-C", "-u"})
 _ENV_FLAG_OPTIONS = frozenset({"--ignore-environment", "--null", "-0", "-i"})
 _PYTHON_VALUE_OPTIONS = frozenset({"--check-hash-based-pycs", "-W", "-X"})
@@ -1208,6 +1209,11 @@ def _self_hosted_findings(
     for job in jobs.values():
         if not isinstance(job, Mapping) or not _is_self_hosted(job.get("runs-on")):
             continue
+        yield _finding(
+            path,
+            "self_hosted_runner",
+            "self-hosted and unproven runner labels are forbidden in public workflows",
+        )
         trusted_clauses = _trusted_self_hosted_guard_clauses(
             workflow.get("name"), events, job.get("if")
         )
@@ -1261,6 +1267,97 @@ def _has_required_ci_always(workflow: Mapping[str, object]) -> bool:
         if re.fullmatch(r"always\s*\(\s*\)", expression):
             return True
     return False
+
+
+def _is_workflow_dispatch_only(events: Mapping[str, object]) -> bool:
+    return set(events) == {"workflow_dispatch"}
+
+
+def _permissions_are_read_only(value: object) -> bool:
+    if value in (None, "read-all"):
+        return True
+    if value == "write-all":
+        return False
+    if isinstance(value, Mapping):
+        return all(permission in {"read", "none"} for permission in value.values())
+    return False
+
+
+def _job_condition_is_false(job: Mapping[str, object]) -> bool:
+    condition = job.get("if")
+    if isinstance(condition, str):
+        return condition.strip() in _FALSE_CONDITIONS
+    if isinstance(condition, bool):
+        return condition is False
+    return False
+
+
+def _value_contains_forbidden_deploy_text(value: object) -> bool:
+    if isinstance(value, str):
+        lowered = value.lower()
+        return (
+            "deploy-main" in lowered
+            or "deployment.main_cli" in lowered
+            or "secrets." in lowered
+            or "weather_deployment_enabled" in lowered
+        )
+    if isinstance(value, Mapping):
+        return any(
+            _value_contains_forbidden_deploy_text(key)
+            or _value_contains_forbidden_deploy_text(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return any(_value_contains_forbidden_deploy_text(item) for item in value)
+    return False
+
+
+def _steps_are_inert_echo_only(job: Mapping[str, object]) -> bool:
+    steps = job.get("steps")
+    if not isinstance(steps, Sequence) or isinstance(steps, (str, bytes, bytearray)):
+        return False
+    if not steps:
+        return False
+    for step in steps:
+        if not isinstance(step, Mapping) or "uses" in step:
+            return False
+        run = step.get("run")
+        if not isinstance(run, str) or not run.strip().startswith("echo"):
+            return False
+    return True
+
+
+def _disabled_deploy_main_contract_matches(
+    workflow: Mapping[str, object],
+    events: Mapping[str, object],
+) -> bool:
+    if set(workflow) != {"name", "on", "permissions", "jobs"}:
+        return False
+    if workflow.get("name") != _DEPLOY_MAIN_WORKFLOW_NAME:
+        return False
+    if not _is_workflow_dispatch_only(events):
+        return False
+    if not _permissions_are_read_only(workflow.get("permissions")):
+        return False
+    jobs = workflow.get("jobs")
+    if not isinstance(jobs, Mapping) or not jobs:
+        return False
+    for job in jobs.values():
+        if not isinstance(job, Mapping):
+            return False
+        if job.get("runs-on") != "ubuntu-latest":
+            return False
+        if not _job_condition_is_false(job):
+            return False
+        if not _permissions_are_read_only(job.get("permissions")):
+            return False
+        if any(key in job for key in ("env", "environment", "secrets", "needs")):
+            return False
+        if _value_contains_forbidden_deploy_text(job):
+            return False
+        if not _steps_are_inert_echo_only(job):
+            return False
+    return True
 
 
 def _deploy_main_guard_is_exact(
@@ -1384,44 +1481,36 @@ def _deploy_main_contract_matches(
 ) -> bool:
     if relative_path != _DEPLOY_MAIN_WORKFLOW_PATH:
         return False
-    if set(workflow) != {"name", "on", "permissions", "concurrency", "jobs"}:
-        return False
-    if workflow.get("name") != _DEPLOY_MAIN_WORKFLOW_NAME:
-        return False
-    if events != {
-        "workflow_run": {
-            "workflows": ["CI"],
-            "types": ["completed"],
-            "branches": ["main"],
-        }
-    }:
-        return False
-    if workflow.get("permissions") != {
-        "actions": "read",
-        "checks": "read",
-        "contents": "read",
-        "pull-requests": "read",
-    }:
-        return False
-    if workflow.get("concurrency") != {
-        "group": "weather-main-deploy",
-        "cancel-in-progress": "false",
-    }:
-        return False
+    return _disabled_deploy_main_contract_matches(workflow, events)
+
+
+def _ci_public_contract_matches(workflow: Mapping[str, object]) -> bool:
+    if workflow.get("name") != "CI":
+        return True
     jobs = workflow.get("jobs")
-    if not isinstance(jobs, Mapping) or set(jobs) != {"verify-main", "deploy-main"}:
+    if not isinstance(jobs, Mapping):
         return False
-    return _deploy_main_job_matches(
-        jobs.get("verify-main"),
-        workflow_name=workflow.get("name"),
-        events=events,
-        hosted=True,
-    ) and _deploy_main_job_matches(
-        jobs.get("deploy-main"),
-        workflow_name=workflow.get("name"),
-        events=events,
-        hosted=False,
-    )
+    if "dagbag-runtime" in jobs:
+        return False
+    required_needs = {
+        "repository-contract",
+        "dbt-weather",
+        "airflow-tests",
+        "dagbag-policy",
+        "promotion-source",
+        "governance-mode",
+    }
+    required = jobs.get("required")
+    if not isinstance(required, Mapping) or set(required.get("needs", [])) != required_needs:
+        return False
+    serialized = repr(workflow)
+    if "WEATHER_DEPLOYMENT_ENABLED" in serialized or "dagbag-runtime" in serialized:
+        return False
+    governance = jobs.get("governance-mode")
+    if not isinstance(governance, Mapping):
+        return False
+    governance_text = repr(governance)
+    return '"public"' in governance_text and "protected" not in governance_text and "guarded_private" not in governance_text
 
 
 def _ci_promotion_source_contract_matches(
@@ -1533,6 +1622,14 @@ def _workflow_findings(repo_root: Path, path: Path) -> list[WorkflowFinding]:
                 relative_path,
                 "required_ci_always",
                 "CI workflow must define CI / required with if: always()",
+            )
+        )
+    if not _ci_public_contract_matches(workflow):
+        findings.append(
+            _finding(
+                relative_path,
+                "ci_public_contract",
+                "CI workflow must remain public-mode hosted-only with exact required results",
             )
         )
     if not _ci_promotion_source_contract_matches(relative_path, workflow):
