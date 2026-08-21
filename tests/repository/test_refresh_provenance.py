@@ -10,6 +10,13 @@ from tools.refresh_provenance import (
 )
 
 
+AUTHORIZED_LICENSE_STATUS = "public_republication_authorized"
+PUBLIC_AUTHORIZATION_REASON_PREFIX = (
+    "Public republication authorized by approved team-code republication "
+    "decision dated 2026-08-21; source lineage and validators retained."
+)
+
+
 def test_contract_fixture_is_recorded_as_derived_evidence() -> None:
     record = build_repository_record(
         "contracts/weather-risk/fixtures/data-valid-empty.json",
@@ -18,7 +25,7 @@ def test_contract_fixture_is_recorded_as_derived_evidence() -> None:
 
     assert record["record_type"] == "derived"
     assert record["validator"] == "tests/contracts/test_weather_risk_contract.py"
-    assert record["license_status"] == "internal_private_snapshot_only"
+    assert record["license_status"] == AUTHORIZED_LICENSE_STATUS
 
 
 def test_repository_file_is_recorded_as_locally_authored() -> None:
@@ -29,8 +36,11 @@ def test_repository_file_is_recorded_as_locally_authored() -> None:
         "target_path": "README.md",
         "target_sha256": "b" * 64,
         "scope": "repository_owned",
-        "reason": "Repository-owned implementation, test, or documentation.",
-        "license_status": "repository_owned_private",
+        "reason": (
+            f"{PUBLIC_AUTHORIZATION_REASON_PREFIX} Prior provenance reason: "
+            "Repository-owned implementation, test, or documentation."
+        ),
+        "license_status": AUTHORIZED_LICENSE_STATUS,
         "owner": "masondev1024/seoul-weather-platform",
     }
 
@@ -56,10 +66,38 @@ def test_refresh_preserves_snapshot_and_reviewed_derived_overrides() -> None:
         {"record_type": "local_authored", "target_path": "README.md"},
     ]
 
-    assert preserved_source_records(records) == records[:3]
+    assert preserved_source_records(records) == [
+        {
+            "record_type": "snapshot_copy",
+            "target_path": "dags/a.py",
+            "license_status": AUTHORIZED_LICENSE_STATUS,
+            "reason": (
+                f"{PUBLIC_AUTHORIZATION_REASON_PREFIX} Prior provenance reason: "
+                "No prior provenance reason recorded."
+            ),
+        },
+        {
+            "record_type": "derived",
+            "target_path": "dags/test_a.py",
+            "license_status": AUTHORIZED_LICENSE_STATUS,
+            "reason": (
+                f"{PUBLIC_AUTHORIZATION_REASON_PREFIX} Prior provenance reason: "
+                "No prior provenance reason recorded."
+            ),
+        },
+        {
+            "record_type": "generated",
+            "target_path": "release/map.json",
+            "license_status": AUTHORIZED_LICENSE_STATUS,
+            "reason": (
+                f"{PUBLIC_AUTHORIZATION_REASON_PREFIX} Prior provenance reason: "
+                "No prior provenance reason recorded."
+            ),
+        },
+    ]
 
 
-def test_handoff_overlay_is_derived_without_claiming_public_rights() -> None:
+def test_handoff_overlay_is_derived_with_authorized_public_republication() -> None:
     record = build_handoff_overlay_record(
         "dags/common/ops/run_sink.py",
         target_checksum="d" * 64,
@@ -68,7 +106,7 @@ def test_handoff_overlay_is_derived_without_claiming_public_rights() -> None:
 
     assert record["record_type"] == "derived"
     assert record["target_sha256"] == "d" * 64
-    assert record["license_status"] == "internal_private_snapshot_only"
+    assert record["license_status"] == AUTHORIZED_LICENSE_STATUS
     assert record["derived_from"] == {
         "source_repo": "ASAC-DE-bigkk/ASAC-DAG",
         "source_commit": "73ff5665ffd5526c59de8be2969cf65dffaf468b",
@@ -102,7 +140,7 @@ def test_mac_cutover_adaptation_preserves_the_fixed_upstream_source() -> None:
         "source_content_sha256": "d" * 64,
         "scope": "airflow_weather_dependency",
         "reason": "Weather runtime dependency",
-        "license_status": "internal_private_snapshot_only",
+        "license_status": AUTHORIZED_LICENSE_STATUS,
     }
 
     record = build_mac_cutover_adaptation_record(
@@ -113,7 +151,7 @@ def test_mac_cutover_adaptation_preserves_the_fixed_upstream_source() -> None:
 
     assert record["record_type"] == "derived"
     assert record["target_sha256"] == "e" * 64
-    assert record["license_status"] == "internal_private_snapshot_only"
+    assert record["license_status"] == AUTHORIZED_LICENSE_STATUS
     assert record["derived_from"] == {
         "record_type": "snapshot_copy",
         "target_path": "dags/domains/weather/weather_dbt_runtime.py",
@@ -150,7 +188,7 @@ def test_place_mart_memory_adaptation_preserves_upstream_and_explains_the_bound(
         "source_commit": "b" * 40,
         "source_path": target.removeprefix("dbt/"),
         "source_content_sha256": "c" * 64,
-        "license_status": "internal_private_snapshot_only",
+        "license_status": AUTHORIZED_LICENSE_STATUS,
     }
 
     record = build_mac_cutover_adaptation_record(

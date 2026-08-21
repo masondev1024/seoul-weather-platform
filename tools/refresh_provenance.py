@@ -10,6 +10,11 @@ from tools.verify_provenance import MANIFEST_SELF_PATH, sha256_file
 
 
 OWNER = "masondev1024/seoul-weather-platform"
+AUTHORIZED_LICENSE_STATUS = "public_republication_authorized"
+PUBLIC_REPUBLICATION_REASON = (
+    "Public republication authorized by approved team-code republication "
+    "decision dated 2026-08-21; source lineage and validators retained."
+)
 HANDOFF_INVENTORY_PATH = "provenance/weather-mac-handoff.sha256"
 AIRFLOW_HANDOFF_SOURCE_REPO = "ASAC-DE-bigkk/ASAC-DAG"
 AIRFLOW_HANDOFF_SOURCE_COMMIT = "73ff5665ffd5526c59de8be2969cf65dffaf468b"
@@ -151,10 +156,22 @@ def _normalized(path: str) -> str:
     return Path(path).as_posix()
 
 
+def _with_public_authorization(record: dict[str, Any]) -> dict[str, Any]:
+    updated = dict(record)
+    updated["license_status"] = AUTHORIZED_LICENSE_STATUS
+    prior_reason = str(record.get("reason") or "No prior provenance reason recorded.")
+    if prior_reason.startswith(PUBLIC_REPUBLICATION_REASON):
+        updated["reason"] = prior_reason
+        return updated
+    updated["reason"] = f"{PUBLIC_REPUBLICATION_REASON} Prior provenance reason: {prior_reason}"
+    return updated
+
+
 def build_repository_record(target_path: str, checksum: str) -> dict[str, Any]:
     target = _normalized(target_path)
     if target.startswith("contracts/weather-risk/"):
-        return {
+        return _with_public_authorization(
+            {
             "record_type": "derived",
             "target_path": target,
             "target_sha256": checksum,
@@ -167,12 +184,14 @@ def build_repository_record(target_path: str, checksum: str) -> dict[str, Any]:
             ],
             "derivation": "Route, response, error, cursor, and query-context semantics were independently reduced into contract-only JSON.",
             "validator": "tests/contracts/test_weather_risk_contract.py",
-        }
+            }
+        )
     if target.startswith("dags/") and target not in LOCAL_AIRFLOW_SOURCES:
         raise ValueError(f"Airflow source requires fixed snapshot provenance: {target}")
     if target.startswith("dbt/") and target not in LOCAL_DBT_SOURCES:
         raise ValueError(f"dbt source requires fixed snapshot provenance: {target}")
-    return {
+    return _with_public_authorization(
+        {
         "record_type": "local_authored",
         "target_path": target,
         "target_sha256": checksum,
@@ -180,7 +199,8 @@ def build_repository_record(target_path: str, checksum: str) -> dict[str, Any]:
         "reason": "Repository-owned implementation, test, or documentation.",
         "license_status": "repository_owned_private",
         "owner": OWNER,
-    }
+        }
+    )
 
 
 def build_handoff_overlay_record(
@@ -209,7 +229,8 @@ def build_handoff_overlay_record(
         }
     else:
         derived_from = handoff_source
-    return {
+    return _with_public_authorization(
+        {
         "record_type": "derived",
         "target_path": target,
         "target_sha256": target_checksum,
@@ -219,7 +240,8 @@ def build_handoff_overlay_record(
         "derived_from": derived_from,
         "derivation": "Overlaid from the non-secret handoff inventory, then retained or adapted under executable repository validators.",
         "validator": validator,
-    }
+        }
+    )
 
 
 def build_mac_cutover_adaptation_record(
@@ -292,7 +314,8 @@ def build_mac_cutover_adaptation_record(
         if source_record.get("derivation"):
             previous["derivation"] = source_record["derivation"]
 
-    return {
+    return _with_public_authorization(
+        {
         "record_type": "derived",
         "target_path": target,
         "target_sha256": target_checksum,
@@ -304,7 +327,8 @@ def build_mac_cutover_adaptation_record(
         "derived_from": previous,
         "derivation": derivation,
         "validator": validator,
-    }
+        }
+    )
 
 
 def _handoff_inventory_checksums(path: Path) -> dict[str, str]:
@@ -336,7 +360,7 @@ def _read_records(path: Path) -> list[dict[str, Any]]:
 
 def preserved_source_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
-        record
+        _with_public_authorization(record)
         for record in records
         if record.get("record_type") in {"snapshot_copy", "derived", "generated"}
     ]
