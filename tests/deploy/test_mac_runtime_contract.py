@@ -16,6 +16,8 @@ AIRFLOW_MAC_SERVICES = (
     "airflow-dag-processor",
     "airflow-triggerer",
 )
+EXPECTED_KMA_DAG_SCHEDULE = "20 2,5,8,11,14,17,20,23 * * *"
+EXPECTED_SERVING_SNAPSHOT_DAG_SCHEDULE = "0 * * * *"
 
 
 class _ComposeLoader(yaml.SafeLoader):
@@ -63,8 +65,9 @@ def _write_valid_contract(repo_root: Path) -> None:
         + "    environment:\n"
         '      AIRFLOW__OPENLINEAGE__DISABLED: "true"\n'
         '      ASK_SEOUL_DBT_OPENLINEAGE_ENABLED: "false"\n'
-        '      ASK_SEOUL_KMA_DAG_SCHEDULE: ""\n'
-        '      ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE: ""\n'
+        f'      ASK_SEOUL_KMA_DAG_SCHEDULE: "{EXPECTED_KMA_DAG_SCHEDULE}"\n'
+        "      ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE: "
+        f'"{EXPECTED_SERVING_SNAPSHOT_DAG_SCHEDULE}"\n'
         '      KMA_NUM_OF_ROWS: "2000"'
         for service in AIRFLOW_MAC_SERVICES
     )
@@ -161,24 +164,24 @@ def test_repository_keeps_a_strict_query_budget_for_the_80_grid_mart() -> None:
     assert environment["TRINO_MEMORY_HEAP_HEADROOM_PER_NODE"] == "1500MB"
 
 
-def test_repository_disables_the_recurring_kma_schedule_on_mac() -> None:
-    """Mac cutover must require an explicit operator trigger for every KMA run."""
+def test_repository_restores_the_org_equivalent_kma_schedule_on_mac() -> None:
+    """Mac runtime must collect only at the organization-equivalent KST slots."""
     compose = _load_mac_compose(REPO_ROOT / "docker-compose.mac.yml")
 
     for service_name in AIRFLOW_MAC_SERVICES:
         assert compose["services"][service_name]["environment"][
             "ASK_SEOUL_KMA_DAG_SCHEDULE"
-        ] == ""
+        ] == EXPECTED_KMA_DAG_SCHEDULE
 
 
-def test_repository_disables_the_recurring_serving_snapshot_schedule_on_mac() -> None:
-    """Mac cutover must not create hourly serving refresh runs implicitly."""
+def test_repository_restores_the_hourly_serving_snapshot_schedule_on_mac() -> None:
+    """Mac runtime must keep the public serving snapshot fresh every hour."""
     compose = _load_mac_compose(REPO_ROOT / "docker-compose.mac.yml")
 
     for service_name in AIRFLOW_MAC_SERVICES:
         assert compose["services"][service_name]["environment"][
             "ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE"
-        ] == ""
+        ] == EXPECTED_SERVING_SNAPSHOT_DAG_SCHEDULE
 
 
 def test_repository_uses_one_kma_page_per_seoul_grid_on_mac() -> None:
@@ -241,13 +244,13 @@ def test_validator_rejects_reenabled_operational_lineage(tmp_path: Path) -> None
     assert result.stderr == "mac_runtime_contract_invalid\n"
 
 
-def test_validator_rejects_a_recurring_kma_schedule(tmp_path: Path) -> None:
+def test_validator_rejects_a_blank_kma_schedule(tmp_path: Path) -> None:
     _write_valid_contract(tmp_path)
     compose_path = tmp_path / "docker-compose.mac.yml"
     compose_path.write_text(
         compose_path.read_text(encoding="utf-8").replace(
+            f'      ASK_SEOUL_KMA_DAG_SCHEDULE: "{EXPECTED_KMA_DAG_SCHEDULE}"',
             '      ASK_SEOUL_KMA_DAG_SCHEDULE: ""',
-            '      ASK_SEOUL_KMA_DAG_SCHEDULE: "20 2,5,8,11,14,17,20,23 * * *"',
         ),
         encoding="utf-8",
     )
@@ -259,15 +262,55 @@ def test_validator_rejects_a_recurring_kma_schedule(tmp_path: Path) -> None:
     assert result.stderr == "mac_runtime_contract_invalid\n"
 
 
-def test_validator_rejects_a_recurring_serving_snapshot_schedule(
+def test_validator_rejects_a_blank_serving_snapshot_schedule(
     tmp_path: Path,
 ) -> None:
     _write_valid_contract(tmp_path)
     compose_path = tmp_path / "docker-compose.mac.yml"
     compose_path.write_text(
         compose_path.read_text(encoding="utf-8").replace(
+            "      ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE: "
+            f'"{EXPECTED_SERVING_SNAPSHOT_DAG_SCHEDULE}"',
             '      ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE: ""',
-            '      ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE: "0 * * * *"',
+        ),
+        encoding="utf-8",
+    )
+
+    result = _run_validator(tmp_path)
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == "mac_runtime_contract_invalid\n"
+
+
+def test_validator_rejects_a_drifted_kma_schedule(tmp_path: Path) -> None:
+    _write_valid_contract(tmp_path)
+    compose_path = tmp_path / "docker-compose.mac.yml"
+    compose_path.write_text(
+        compose_path.read_text(encoding="utf-8").replace(
+            f'      ASK_SEOUL_KMA_DAG_SCHEDULE: "{EXPECTED_KMA_DAG_SCHEDULE}"',
+            '      ASK_SEOUL_KMA_DAG_SCHEDULE: "0 2,5,8,11,14,17,20,23 * * *"',
+        ),
+        encoding="utf-8",
+    )
+
+    result = _run_validator(tmp_path)
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == "mac_runtime_contract_invalid\n"
+
+
+def test_validator_rejects_a_drifted_serving_snapshot_schedule(
+    tmp_path: Path,
+) -> None:
+    _write_valid_contract(tmp_path)
+    compose_path = tmp_path / "docker-compose.mac.yml"
+    compose_path.write_text(
+        compose_path.read_text(encoding="utf-8").replace(
+            "      ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE: "
+            f'"{EXPECTED_SERVING_SNAPSHOT_DAG_SCHEDULE}"',
+            '      ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE: "5 * * * *"',
         ),
         encoding="utf-8",
     )

@@ -28,6 +28,10 @@ EXPECTED_TRINO_ENVIRONMENT = {
     "TRINO_QUERY_MAX_MEMORY": "800MB",
     "TRINO_QUERY_MAX_TOTAL_MEMORY": "1200MB",
 }
+EXPECTED_AIRFLOW_ENVIRONMENT = {
+    "ASK_SEOUL_KMA_DAG_SCHEDULE": "20 2,5,8,11,14,17,20,23 * * *",
+    "ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE": "0 * * * *",
+}
 _MEMORY_PATTERN = re.compile(r"^(\d+)(MB|GB|M|G)$", re.IGNORECASE)
 
 
@@ -52,6 +56,8 @@ class MacRuntimeContractProof:
     hard_query_concurrency: int
     max_queued_queries: int
     operational_lineage_disabled: bool
+    kma_dag_schedule: str
+    serving_snapshot_dag_schedule: str
 
 
 def _mapping(value: object) -> Mapping[str, Any]:
@@ -135,15 +141,9 @@ def validate_mac_runtime_contract(repo_root: Path) -> MacRuntimeContractProof:
                 environment.get("ASK_SEOUL_DBT_OPENLINEAGE_ENABLED", "")
             ).lower() != "false":
                 raise MacRuntimeContractError("mac_runtime_contract_invalid")
-            if environment.get("ASK_SEOUL_KMA_DAG_SCHEDULE") != "":
-                raise MacRuntimeContractError("mac_runtime_contract_invalid")
-            if (
-                environment.get(
-                    "ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE"
-                )
-                != ""
-            ):
-                raise MacRuntimeContractError("mac_runtime_contract_invalid")
+            for name, expected in EXPECTED_AIRFLOW_ENVIRONMENT.items():
+                if environment.get(name) != expected:
+                    raise MacRuntimeContractError("mac_runtime_contract_invalid")
             if str(environment.get("KMA_NUM_OF_ROWS", "")) != "2000":
                 raise MacRuntimeContractError("mac_runtime_contract_invalid")
         if build_owners != {"airflow-init"}:
@@ -225,6 +225,10 @@ def validate_mac_runtime_contract(repo_root: Path) -> MacRuntimeContractProof:
         hard_query_concurrency=hard_concurrency,
         max_queued_queries=max_queued,
         operational_lineage_disabled=True,
+        kma_dag_schedule=EXPECTED_AIRFLOW_ENVIRONMENT["ASK_SEOUL_KMA_DAG_SCHEDULE"],
+        serving_snapshot_dag_schedule=EXPECTED_AIRFLOW_ENVIRONMENT[
+            "ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE"
+        ],
     )
 
 
