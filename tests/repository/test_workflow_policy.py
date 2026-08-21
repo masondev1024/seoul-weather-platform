@@ -17,8 +17,10 @@ DEPLOY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy-main.yml"
 CODEOWNERS = REPO_ROOT / ".github" / "CODEOWNERS"
 PINNED_SHA = "11d5960a326750d5838078e36cf38b85af677262"
 SETUP_PYTHON_SHA = "a26af69be951a213d495a4c3e4e4022e16d87065"
+SETUP_NODE_SHA = "49933ea5288caeca8642d1e84afbd3f7d6820020"
 CHECKOUT_USE = f"actions/checkout@{PINNED_SHA}"
 SETUP_PYTHON_USE = f"actions/setup-python@{SETUP_PYTHON_SHA}"
+SETUP_NODE_USE = f"actions/setup-node@{SETUP_NODE_SHA}"
 DEV_DEPENDENCY_INSTALL_COMMAND = (
     "python -m pip install jsonschema==4.26.0 PyYAML==6.0.2 pytest==9.0.3"
 )
@@ -75,6 +77,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo dagbag-policy
+  k-skill-proxy:
+    name: k-skill-proxy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: {CHECKOUT_USE}
+        with:
+          persist-credentials: false
+      - uses: {SETUP_NODE_USE}
+        with:
+          node-version: 24.13.0
+      - run: npm test
+        working-directory: k-skill-proxy
   promotion-source:
     name: Promotion Source / required
     runs-on: ubuntu-latest
@@ -102,6 +116,7 @@ jobs:
       - dbt-weather
       - airflow-tests
       - dagbag-policy
+      - k-skill-proxy
       - promotion-source
       - governance-mode
     if: always()
@@ -116,6 +131,7 @@ jobs:
             --result "dbt-weather=${{DBT_WEATHER}}" \
             --result "airflow-tests=${{AIRFLOW_TESTS}}" \
             --result "dagbag-policy=${{DAGBAG_POLICY}}" \
+            --result "k-skill-proxy=${{K_SKILL_PROXY}}" \
             --result "promotion-source=${{PROMOTION_SOURCE}}" \
             --result "governance-mode=${{GOVERNANCE_MODE_RESULT}}"
         env:
@@ -126,6 +142,7 @@ jobs:
           DBT_WEATHER: ${{{{ needs.dbt-weather.result }}}}
           AIRFLOW_TESTS: ${{{{ needs.airflow-tests.result }}}}
           DAGBAG_POLICY: ${{{{ needs.dagbag-policy.result }}}}
+          K_SKILL_PROXY: ${{{{ needs.k-skill-proxy.result }}}}
           PROMOTION_SOURCE: ${{{{ needs.promotion-source.result }}}}
           GOVERNANCE_MODE_RESULT: ${{{{ needs.governance-mode.result }}}}
 """
@@ -222,6 +239,7 @@ def test_repository_ci_trigger_permissions_and_hosted_jobs_match_public_contract
         "dbt-weather",
         "airflow-tests",
         "dagbag-policy",
+        "k-skill-proxy",
         "promotion-source",
         "governance-mode",
         "required",
@@ -253,6 +271,7 @@ def test_repository_ci_governance_and_required_gate_are_public_only() -> None:
         "dbt-weather",
         "airflow-tests",
         "dagbag-policy",
+        "k-skill-proxy",
         "promotion-source",
         "governance-mode",
     }

@@ -19,17 +19,15 @@ Repo-local publication gates PASS:
   artifacts, 121 GitHub Actions logs scanned clean, and a passed reachable-object
   scan.
 
-GitHub external visibility cutover remains PENDING until fresh operational
-readbacks are collected:
+GitHub external visibility cutover is COMPLETE. Readbacks collected on
+2026-08-22 confirmed:
 
-- fresh public-readiness preflight;
-- repository variables disabled/public;
-- exact offline runner removal;
-- PR CI and merge;
-- public visibility readback;
-- post-public branch protection readback;
-- fresh delta/full scan immediately before visibility.
+- repository visibility is `PUBLIC`;
+- repository variables are deployment `disabled` and governance `public`;
+- 0 registered repository runners;
+- `CI / required` and pull-request review protect `main`;
+- 0 GitHub Releases and 0 downloadable Release assets.
 
 This document records status only; it does not copy source content, expose
-secrets, claim public visibility has been applied, or claim branch protection has
-already been applied after public visibility.
+secrets, or authorize any future visibility, release, workflow, runner, or
+runtime mutation.

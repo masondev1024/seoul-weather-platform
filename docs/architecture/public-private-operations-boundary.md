@@ -20,7 +20,9 @@ flowchart LR
     Airflow --> Trino["Trino: 5 GiB / one query"]
     Airflow --> R2["Personal R2 and Iceberg"]
     Airflow --> D1["Personal D1 publication"]
-    D1 --> Worker["Existing personal Worker"]
+    D1 --> Worker["Personal Weather origin"]
+    Worker --> Proxy["Public code: scoped K-skill proxy"]
+    Proxy --> Skill["Upstream seoul-weather-risk helper"]
 ```
 
 ## Plane ownership
@@ -31,8 +33,9 @@ flowchart LR
 | Private Mac operations | Populated `weather-platform.prod.env`, Docker Desktop state, Airflow metadata/logs, local approval and rollback evidence | Repository commits, release assets, Actions artifacts, fork-accessible runner state |
 | Personal Cloudflare data | R2 raw/Iceberg data, Data Catalog metadata, D1 serving tables, existing Worker | CI credentials, fork credentials, repository visibility control |
 
-The existing Worker deployment is an external serving boundary. This repository
-validates its read-only API contract but does not deploy or mutate the Worker.
+The Weather origin remains an external serving implementation boundary. This
+repository owns and deploys only the narrow K-skill proxy in `k-skill-proxy/`;
+its upstream service token is stored as a Worker secret.
 
 ## Trust boundaries and controls
 
@@ -65,20 +68,15 @@ Repo-local publication gates now pass for the reviewed tree:
   artifacts, 121 GitHub Actions logs scanned clean, and a reachable-object scan
   that passed at its audit point.
 
-The user authorized the full visibility cutover on 2026-08-21. The external
-GitHub cutover remains pending until a fresh public-readiness preflight,
-repository variables disabled/public readback, exact offline runner removal, PR
-CI and merge, public visibility readback, post-public branch protection readback,
-and a fresh delta/full scan immediately before visibility.
+The user authorized and completed the visibility cutover on 2026-08-21. The
+repository is public, the required `CI / required` branch protection is active,
+and no personal self-hosted runner is registered.
 
 A readiness PASS is evidence, not authorization. No repository script or workflow
 is allowed to change visibility.
 
 ## Current disposition
 
-The architecture disposition is current: repo-local publication gates are
-`PASS`, while GitHub external visibility cutover is `PENDING`.
-Public visibility has not yet been applied.
-Branch protection has not yet been applied after public visibility.
-Runtime operations remain private and require separate local approval before any
-Docker, Airflow, Trino, R2, D1, or Worker-affecting mutation.
+The architecture disposition is current: public code and hosted CI are active;
+runtime operations remain private. Docker, Airflow, Trino, R2, D1, origin, and
+proxy mutations require an explicit operational approval and target readback.

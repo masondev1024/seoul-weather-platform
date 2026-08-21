@@ -1497,6 +1497,7 @@ def _ci_public_contract_matches(workflow: Mapping[str, object]) -> bool:
         "dbt-weather",
         "airflow-tests",
         "dagbag-policy",
+        "k-skill-proxy",
         "promotion-source",
         "governance-mode",
     }

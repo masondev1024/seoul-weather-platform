@@ -18,7 +18,7 @@ def _docs() -> dict[str, str]:
     }
 
 
-def test_publication_docs_separate_repo_pass_from_external_cutover_pending() -> None:
+def test_publication_docs_record_completed_external_cutover() -> None:
     docs = _docs()
     combined = "\n".join(docs.values())
 
@@ -38,19 +38,17 @@ def test_publication_docs_separate_repo_pass_from_external_cutover_pending() -> 
     assert "Repo-local publication gates" in readiness
     assert "PASS" in readiness
     assert "GitHub external visibility cutover" in readiness
-    assert "PENDING" in readiness
+    assert "COMPLETE" in readiness
     assert "User authorization" in readiness
     assert "full visibility cutover authorized on 2026-08-21" in readiness
 
-    for pending_item in (
-        "fresh public-readiness preflight",
-        "repository variables disabled/public",
-        "exact offline runner removal",
-        "PR CI and merge",
-        "public visibility readback",
-        "post-public branch protection readback",
+    for completed_item in (
+        "Repository visibility is `PUBLIC`",
+        "deployment `disabled` and governance `public`",
+        "No repository runner is registered",
+        "`CI / required` and pull-request review",
     ):
-        assert pending_item in readiness
+        assert completed_item in readiness
 
     for completed_audit in (
         "0 GitHub Releases",
@@ -59,10 +57,10 @@ def test_publication_docs_separate_repo_pass_from_external_cutover_pending() -> 
         "reachable-object scan passed",
     ):
         assert completed_audit in combined
-    assert "fresh delta/full scan immediately before visibility" in combined
+    assert "future release" in readiness
 
     architecture = docs["docs/architecture/public-private-operations-boundary.md"]
     assert "disabled manual no-op deploy workflow is hosted-only and inert" in architecture
     assert "hosted-only CI has no self-hosted route" in architecture
-    assert "Public visibility has not yet been applied" in architecture
-    assert "Branch protection has not yet been applied after public visibility" in architecture
+    assert "repository is public" in architecture
+    assert "`CI / required` branch protection is active" in architecture
