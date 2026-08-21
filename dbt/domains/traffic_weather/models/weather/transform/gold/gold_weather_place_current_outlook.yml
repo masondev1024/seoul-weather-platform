@@ -23,6 +23,7 @@ models:
             currentness:
               field: forecast_at
               minimum: current_kst_hour
+              refresh_grace_minutes: 30
             operation:
               id: weather.get_current_outlook
               approval_status: approved

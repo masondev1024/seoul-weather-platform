@@ -101,6 +101,11 @@ MAC_CUTOVER_ADAPTATION_VALIDATORS = {
         "dbt/domains/traffic_weather/tests/weather/"
         "test_weather_serving_working_set_contract.py -q"
     ),
+    "dbt/domains/traffic_weather/models/weather/transform/gold/"
+    "gold_weather_place_current_outlook.yml": (
+        "python -m pytest "
+        "tests/contracts/test_current_outlook_availability_contract.py -q"
+    ),
 }
 MAC_MANUAL_SCHEDULE_ADAPTATIONS = frozenset(
     {
@@ -114,6 +119,12 @@ MAC_MEMORY_ADAPTATIONS = frozenset(
         "silver_weather_forecast_by_admin_dong_serving.sql",
         "dbt/domains/traffic_weather/tests/weather/"
         "test_weather_serving_working_set_contract.py",
+    }
+)
+MAC_AVAILABILITY_ADAPTATIONS = frozenset(
+    {
+        "dbt/domains/traffic_weather/models/weather/transform/gold/"
+        "gold_weather_place_current_outlook.yml",
     }
 )
 LOCAL_DBT_SOURCES = frozenset(
@@ -276,6 +287,13 @@ def build_mac_cutover_adaptation_record(
         derivation = (
             "Replace the target-hashing MERGE with atomic table rename and bound "
             "the issue horizon and ranks to the verified serving requirement."
+        )
+    elif target in MAC_AVAILABILITY_ADAPTATIONS:
+        scope = "weather_serving_availability"
+        reason = "Personal Weather serving adaptation for hour-boundary availability."
+        derivation = (
+            "Allow only the previous forecast hour during a bounded 30-minute "
+            "refresh grace window while preserving fail-closed older-data behavior."
         )
     else:
         scope = "weather_mac_egress_optimization"

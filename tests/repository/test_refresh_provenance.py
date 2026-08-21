@@ -171,8 +171,36 @@ def test_mac_cutover_adaptation_preserves_the_fixed_upstream_source() -> None:
 
 
 def test_mac_cutover_adaptation_allowlist_is_explicit_and_secret_free() -> None:
-    assert len(MAC_CUTOVER_ADAPTATION_VALIDATORS) == 9
+    assert len(MAC_CUTOVER_ADAPTATION_VALIDATORS) == 10
     assert "weather-platform.prod.env" not in MAC_CUTOVER_ADAPTATION_VALIDATORS
+
+
+def test_current_outlook_grace_is_a_reviewed_availability_adaptation() -> None:
+    target = (
+        "dbt/domains/traffic_weather/models/weather/transform/gold/"
+        "gold_weather_place_current_outlook.yml"
+    )
+    source_record = {
+        "record_type": "snapshot_copy",
+        "target_path": target,
+        "target_sha256": "a" * 64,
+        "source_repo": "ASAC-DE-bigkk/ASAC-DBT",
+        "source_commit": "b" * 40,
+        "source_path": target.removeprefix("dbt/"),
+        "source_content_sha256": "c" * 64,
+        "license_status": AUTHORIZED_LICENSE_STATUS,
+    }
+
+    record = build_mac_cutover_adaptation_record(
+        target,
+        target_checksum="d" * 64,
+        source_record=source_record,
+    )
+
+    assert record["scope"] == "weather_serving_availability"
+    assert "hour-boundary" in record["reason"]
+    assert "30-minute" in record["derivation"]
+    assert record["validator"] == MAC_CUTOVER_ADAPTATION_VALIDATORS[target]
 
 
 def test_place_mart_memory_adaptation_preserves_upstream_and_explains_the_bound() -> None:

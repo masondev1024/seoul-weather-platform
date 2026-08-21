@@ -106,6 +106,22 @@ jobs:
       - name: Test secretless DagBag policy
         run: python -m pytest tests/repository/test_dagbag_harness.py tests/repository/test_scaffold_contract.py -q
 
+  k-skill-proxy:
+    name: k-skill-proxy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.13.0
+      - name: Test personal K-skill proxy
+        run: npm test
+        working-directory: k-skill-proxy
+
   promotion-source:
     name: Promotion Source / required
     runs-on: ubuntu-latest
@@ -157,6 +173,7 @@ jobs:
       - dbt-weather
       - airflow-tests
       - dagbag-policy
+      - k-skill-proxy
       - promotion-source
       - governance-mode
     if: always()
@@ -179,6 +196,7 @@ jobs:
           DBT_WEATHER: ${{ needs.dbt-weather.result }}
           AIRFLOW_TESTS: ${{ needs.airflow-tests.result }}
           DAGBAG_POLICY: ${{ needs.dagbag-policy.result }}
+          K_SKILL_PROXY: ${{ needs.k-skill-proxy.result }}
           PROMOTION_SOURCE: ${{ needs.promotion-source.result }}
           GOVERNANCE_MODE_RESULT: ${{ needs.governance-mode.result }}
         run: |
@@ -190,5 +208,6 @@ jobs:
             --result "dbt-weather=${DBT_WEATHER}" \
             --result "airflow-tests=${AIRFLOW_TESTS}" \
             --result "dagbag-policy=${DAGBAG_POLICY}" \
+            --result "k-skill-proxy=${K_SKILL_PROXY}" \
             --result "promotion-source=${PROMOTION_SOURCE}" \
             --result "governance-mode=${GOVERNANCE_MODE_RESULT}"

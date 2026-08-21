@@ -12,6 +12,7 @@ PUBLIC_RESULTS = {
     "dbt-weather": "success",
     "airflow-tests": "success",
     "dagbag-policy": "success",
+    "k-skill-proxy": "success",
     "promotion-source": "success",
     "governance-mode": "success",
 }

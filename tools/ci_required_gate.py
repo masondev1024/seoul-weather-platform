@@ -11,6 +11,7 @@ REQUIRED_RESULTS = frozenset(
         "dbt-weather",
         "airflow-tests",
         "dagbag-policy",
+        "k-skill-proxy",
         "promotion-source",
         "governance-mode",
     }
