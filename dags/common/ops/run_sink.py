@@ -3,6 +3,10 @@
 관측을 관측대상(Trino)과 분리한다: Trino 가 OOM 으로 죽어도 실행 기록이 남는다(맹점 해소).
 데이터 품질 대시보드가 ``runs/`` 를 집계해 도메인별 잔디를 그린다.
 
+.. note:: 이 Weather fork 에는 그 소비자가 없다(D1 적재 DAG 미이관·대시보드 폐기).
+   그래서 R2 PUT 은 ``common.ops.telemetry_switch`` 로 기본 off 다 — 코드와 콜백 자리는
+   되살릴 수 있게 그대로 둔다.
+
 - ``record_run_metadata`` (Iceberg via Trino) 를 대체 — 콜백 자리는 그대로, 타겟만 R2 파일.
 - ``errors/`` (실패 상세·Discord 알림) 와 ``_reports`` (bronze 수집 감사) 는 **별개로 유지**.
 
@@ -16,6 +20,8 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+
+from common.ops.telemetry_switch import OPS_TELEMETRY_ENV, ops_telemetry_enabled
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +46,13 @@ def _iso(value: object) -> str | None:
 
 
 def _put_r2(object_key: str, payload: bytes, *, target: str = "dev") -> None:
+    # 이 fork 에는 ops/ 를 읽는 소비자가 없다(D1 적재 DAG 미이관·대시보드 폐기). 소비자
+    # 없는 기록을 R2 에 영구 적재하지 않도록 **PUT 만** 건너뛴다 — 콜백 자리·레코드 조립은
+    # 그대로라 스위치 하나로 되살아난다. 자세한 경계는 common.ops.telemetry_switch 참고.
+    if not ops_telemetry_enabled():
+        LOGGER.info("[ops] telemetry off (%s 미설정) — 기록 생략: %s",
+                    OPS_TELEMETRY_ENV, object_key)
+        return
     # dev: 기존 경로 그대로(errors sink 위임 — 바이트 단위 불변, #556 STOP-FIRST).
     # prod: r2_env_for 로 target-aware R2 클라이언트를 직접 build(더 이상 dev 우선 R2ErrorSink
     # 에 위임하지 않음 — 그러면 prod 관측도 seoul-dev 로 새 나간다).

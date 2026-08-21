@@ -1,0 +1,309 @@
+name: elt-infra
+
+x-airflow-common: &airflow-common
+  image: elt-infra-airflow:local
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  env_file:
+    - .env
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
+    AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_SECRET_KEY}
+    AIRFLOW__API_AUTH__JWT_ISSUER: airflow
+    AIRFLOW__API__BASE_URL: http://localhost:30585
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    DBT_PROFILES_DIR: /opt/airflow/dbt/elt_smoke
+    DBT_PROJECT_DIR: /opt/airflow/dbt/elt_smoke
+    TRINO_HOST: trino
+    TRINO_PORT: "8080"
+    TRINO_USER: airflow
+    # OpenLineage → Marquez. Cosmos/dbt run 태스크가 물리 relation 기반 lineage 이벤트를
+    # marquez-api 로 방출한다. 일시 장애 시 방출은 fail-open(경고만, 태스크 실패 아님).
+    AIRFLOW__OPENLINEAGE__TRANSPORT: '{"type": "http", "url": "http://marquez-api:5000", "endpoint": "api/v1/lineage"}'
+    AIRFLOW__OPENLINEAGE__NAMESPACE: "commerce-elt"
+  user: "${AIRFLOW_UID}:0"
+  volumes:
+    - ./dags:/opt/airflow/dags:ro
+    # 콜백·플러그인 모듈 경로(#23). Deadline/정책 콜백은 프로세스 기동 시점에
+    # /opt/airflow/plugins 가 존재해야 import 가능(python path_importer_cache).
+    - ./dags/plugins:/opt/airflow/plugins:ro
+    - ./dbt:/opt/airflow/dbt
+    - airflow_logs:/opt/airflow/logs
+  networks:
+    - elt_net
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - elt_net
+
+  # (serving-postgres 폐기 2026-07-14 — 서빙 레이어 개편: gold 는 Iceberg 카탈로그(dbt),
+  #  서빙은 D1(SQLite) 선별 export 예정. 정책: dags/domains/commerce/docs/PROJECT.md §4)
+
+  # ── OpenLineage 백엔드(Marquez) — `lineage` 프로파일 전용 ──────────────────────
+  # 기동: docker compose --profile lineage up -d (core 스택엔 영향 없음).
+  # UI: http://127.0.0.1:3000 · API: http://127.0.0.1:5000. 배경: dags/domains/commerce/docs/cosmos.md §6.
+  marquez-db:
+    profiles: ["lineage"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${MARQUEZ_POSTGRES_USER:-marquez}
+      POSTGRES_PASSWORD: ${MARQUEZ_POSTGRES_PASSWORD:-marquez}   # dev 기본값 — prod 는 .env 로 교체
+      POSTGRES_DB: ${MARQUEZ_POSTGRES_DB:-marquez}
+    volumes:
+      - marquez_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MARQUEZ_POSTGRES_USER:-marquez} -d ${MARQUEZ_POSTGRES_DB:-marquez}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - elt_net
+
+  marquez-api:
+    profiles: ["lineage"]
+    # OpenLineage 수집 API + lineage 저장. 기동 시 flyway 마이그레이션 자동 수행.
+    image: marquezproject/marquez:0.50.0
+    restart: unless-stopped
+    environment:
+      MARQUEZ_PORT: "5000"
+      MARQUEZ_ADMIN_PORT: "5001"
+      SEARCH_ENABLED: "false"
+      POSTGRES_HOST: marquez-db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${MARQUEZ_POSTGRES_DB:-marquez}
+      POSTGRES_USER: ${MARQUEZ_POSTGRES_USER:-marquez}
+      POSTGRES_PASSWORD: ${MARQUEZ_POSTGRES_PASSWORD:-marquez}
+    ports:
+      # API/admin — 인증 없음 → 127.0.0.1 전용 바인드(관례 동일).
+      - "127.0.0.1:5000:5000"
+      - "127.0.0.1:5001:5001"
+    depends_on:
+      marquez-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:5001/healthcheck >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - elt_net
+
+  marquez-web:
+    profiles: ["lineage"]
+    # lineage 시각화 UI → 브라우저 http://127.0.0.1:3000
+    image: marquezproject/marquez-web:0.50.0
+    restart: unless-stopped
+    environment:
+      MARQUEZ_HOST: marquez-api
+      MARQUEZ_PORT: "5000"
+      WEB_PORT: "3000"        # 없으면 setupProxy.js 가 undefined 포트로 리슨 → 3000 접속 불가
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      marquez-api:
+        condition: service_healthy
+    networks:
+      - elt_net
+
+  trino:
+    image: trinodb/trino:482
+    restart: unless-stopped
+    mem_limit: ${TRINO_MEMORY_LIMIT:-9g}
+    env_file:
+      - .env
+    environment:
+      # (serving 카탈로그 폐기 2026-07-14 — gold=Iceberg. PROJECT.md §4)
+      # 노드별 병렬도(고사양 자동 최적화 노브) — 기본 2(공유 VM 저사양 안전). 고사양 노드는
+      # host .env 에 TRINO_TASK_CONCURRENCY=16 등으로 상향. config.properties 가 ${ENV:} 로 참조.
+      TRINO_TASK_CONCURRENCY: ${TRINO_TASK_CONCURRENCY:-2}
+      # 9 GiB container 기본값 × MaxRAMPercentage=55 ≈ 4.95 GiB heap.
+      # query user memory 2 GiB + 비추적 heap headroom 2 GiB < max heap 을 유지한다.
+      # 메모리 기본값은 실측으로 정했다(ASK-Seoul#94, 맥미니 M4/16GB).
+      #   힙 4.97GiB(= 컨테이너 9GiB x MaxRAMPercentage 55)
+      #   비쿼리 실사용 3.66GiB > 기존 headroom 2GB  → 풀이 선언값의 44% 만 실재
+      #   보관 쿼리 401건 peak 최대 551MiB          → per-node 2GB 는 과다 배정
+      # headroom 2500MB 로 현실에 맞추고(풀 = 4.97GiB - 2.5GB ~= 2.47GB),
+      # per-node 800MB 로 낮춰 동시성 3 이 풀 안에 들어오게 한다(3 x 800MB = 2.4GB).
+      TRINO_QUERY_MAX_MEMORY_PER_NODE: ${TRINO_QUERY_MAX_MEMORY_PER_NODE:-800MB}
+      TRINO_MEMORY_HEAP_HEADROOM_PER_NODE: ${TRINO_MEMORY_HEAP_HEADROOM_PER_NODE:-2500MB}
+      TRINO_QUERY_MAX_MEMORY: ${TRINO_QUERY_MAX_MEMORY:-800MB}
+      TRINO_QUERY_MAX_TOTAL_MEMORY: ${TRINO_QUERY_MAX_TOTAL_MEMORY:-1600MB}
+    volumes:
+      # Iceberg 카탈로그는 **템플릿 1개**를 env 가 정한 이름으로 마운트해 만든다.
+      # Trino 는 파일명 = 카탈로그명이므로, 이름을 env 에서 받으면 타깃 전환이 곧 카탈로그
+      # 전환이 된다: prod → iceberg / dev → iceberg_dev (TRINO_ICEBERG_CATALOG).
+      # 자격은 canonical R2_* 한 세트(ENV2)라 파일 내용은 타깃과 무관 — 그래서 파일이 하나다.
+      # (구조: 과거엔 iceberg/iceberg_dev 두 파일이 각각 R2_*/R2_DEV_* 를 읽었고, ENV2 가
+      #  R2_DEV_* 를 없애자 dev 파일만 참조 불가가 되어 Trino 가 기동 실패했다. 파일이 둘이라
+      #  한쪽이 drift 한 것이 원인이므로 하나로 합친다.)
+      - ./trino/iceberg.properties:/etc/trino/catalog/${TRINO_ICEBERG_CATALOG:-iceberg}.properties:ro
+      # 저메모리 환경 안정성(commerce gold detail json 추출 OOM 회피) — 힙 상한 + spill(파일시스템=스왑).
+      # 미마운트면 기본(MaxRAMPercentage=80·spill off)로 복귀해 대형 detail 적재 시 OS OOM-kill 위험.
+      # 상세: dags/domains/commerce/change-log.md #59.
+      - ./trino/jvm.config:/etc/trino/jvm.config:ro
+      - ./trino/config.properties:/etc/trino/config.properties:ro
+      - ./trino/resource-groups.properties:/etc/trino/resource-groups.properties:ro
+      - ./trino/resource-groups.json:/etc/trino/resource-groups.json:ro
+      # fs 캐시(ASK-Seoul#107) 영속화. 마운트 지점이 /data/trino(전체 데이터 디렉토리)인 이유:
+      # 이미지에 trino 소유로 존재하는 경로라 최초 마운트 시 copy-up 으로 소유권이 유지된다.
+      # 이미지에 없는 경로(/data/trino/cache 직접 등)에 마운트하면 root 소유가 되어 Trino 가
+      # 캐시를 못 쓴다. 캐시 실체는 /data/trino/cache (iceberg.properties fs.cache.directories).
+      - trino_cache:/data/trino
+    ports:
+      # Trino HTTP(8080) → 호스트 30586. DBeaver/DataGrip 접속용.
+      # Trino 기본 인증 없음 → 127.0.0.1 전용 바인드(LAN 미노출).
+      - "127.0.0.1:30586:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "trino --execute 'SELECT 1' >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - elt_net
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins /opt/airflow/config
+        chown -R "$${AIRFLOW_UID}:0" /opt/airflow/logs /opt/airflow/plugins /opt/airflow/config
+        /entrypoint airflow db migrate
+        /entrypoint airflow users create \
+          --username "$${AIRFLOW_ADMIN_USERNAME}" \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email "$${AIRFLOW_ADMIN_EMAIL}" \
+          --password "$${AIRFLOW_ADMIN_PASSWORD}" || true
+        python /opt/airflow/dags/common/pools.py > /tmp/ask-seoul-airflow-pools.json || exit 1
+        test -s /tmp/ask-seoul-airflow-pools.json || exit 1
+        /entrypoint airflow pools import /tmp/ask-seoul-airflow-pools.json || exit 1
+        # culture_slo.load_dag_runs 가 메타DB를 읽는 Connection(#81-1). 스택 재구축 시 메타DB
+        # 볼륨과 함께 사라지므로 init 에서 등록한다 — 접속문자열은 기존 env 재사용(값 미노출).
+        # 볼륨이 유지된 재기동에선 이미 존재해 add 가 실패하므로 존재 확인 후에만 등록하고,
+        # 등록 실패는 다른 도메인 기동을 막지 않되 경고를 남긴다(traffic_weather manifest 선례).
+        if ! /entrypoint airflow connections get airflow_metadb >/dev/null 2>&1; then
+          /entrypoint airflow connections add airflow_metadb \
+            --conn-uri "$${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN/postgresql+psycopg2/postgres}" \
+            || echo "WARNING: airflow_metadb connection registration failed; culture_slo.load_dag_runs will skip and bronze_culture_dag_runs will go stale (#81)." >&2
+        fi
+        # citydata Cosmos(LoadMode.DBT_MANIFEST) 부트스트랩 — 스케줄러가 DAG 파싱 시점에
+        # target/manifest.json 을 읽으므로, fresh 배포에서 없으면 파싱이 죽는다. /opt/airflow/dbt 는
+        # 마운트라 이미지에 구울 수 없어 여기서 생성한다. 전역 DBT_PROJECT_DIR(elt_smoke)는
+        # --project-dir/--profiles-dir 로 override. 실패해도 init 은 계속한다(|| true).
+        CITYDATA_DBT=/opt/airflow/dbt/domains/citydata
+        "$${DBT_BIN}" deps  --project-dir "$${CITYDATA_DBT}" --profiles-dir "$${CITYDATA_DBT}" --no-use-colors || true
+        "$${DBT_BIN}" parse --project-dir "$${CITYDATA_DBT}" --profiles-dir "$${CITYDATA_DBT}" --target "$${DBT_TARGET:-dev}" --no-use-colors || true
+        chown -R "$${AIRFLOW_UID}:0" "$${CITYDATA_DBT}/target" "$${CITYDATA_DBT}/dbt_packages" 2>/dev/null || true
+        # Weather/Traffic serving publisher도 shared target/manifest.json을 읽는다. transform task의
+        # attempt-local target은 건드리지 않는다. /opt/airflow/dbt는 마운트라 이미지에 구울 수 없어
+        # fresh 배포 시 여기서 생성한다. dbt 실패는 다른 도메인 기동을 막지 않되, manifest 부재는 남긴다.
+        TW_DBT=/opt/airflow/dbt/domains/traffic_weather
+        "$${DBT_BIN}" deps  --project-dir "$${TW_DBT}" --profiles-dir "$${TW_DBT}" --no-use-colors || true
+        "$${DBT_BIN}" parse --project-dir "$${TW_DBT}" --profiles-dir "$${TW_DBT}" --target "$${DBT_TARGET:-dev}" --no-use-colors || true
+        if test -s "$${TW_DBT}/target/manifest.json"; then
+          echo "traffic_weather dbt manifest ready"
+        else
+          echo "WARNING: traffic_weather target/manifest.json is missing; Weather/Traffic serving DAGs may fail until dbt parse succeeds." >&2
+        fi
+        # root init이 만든 dbt logs도 런타임 uid가 run별 preflight 경로를 생성할 수 있어야 한다.
+        chown -R "$${AIRFLOW_UID}:0" "$${TW_DBT}/target" "$${TW_DBT}/logs" "$${TW_DBT}/dbt_packages" 2>/dev/null || true
+    user: "0:0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  airflow-apiserver:
+    <<: *airflow-common
+    restart: unless-stopped
+    command: api-server
+    ports:
+      - "30585:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    restart: unless-stopped
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-apiserver:
+        condition: service_healthy
+      trino:
+        condition: service_healthy
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    restart: unless-stopped
+    command: dag-processor
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-apiserver:
+        condition: service_healthy
+
+  airflow-triggerer:
+    <<: *airflow-common
+    restart: unless-stopped
+    command: triggerer
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-apiserver:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  airflow_logs:
+  marquez_db_data:      # lineage 프로파일(Marquez) 전용
+  trino_cache:          # Trino fs 캐시 + 데이터 디렉토리 (ASK-Seoul#107)
+
+networks:
+  elt_net:
+    name: elt_net

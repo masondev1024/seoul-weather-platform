@@ -1,0 +1,83 @@
+name: elt-infra-prod
+
+x-prod-airflow: &prod-airflow
+  image: "${ASK_SEOUL_AIRFLOW_IMAGE:?ASK_SEOUL_AIRFLOW_IMAGE must be an immutable digest}"
+  build: !reset null
+  env_file: !override
+    - "${ASK_SEOUL_PROD_ENV_FILE:-.env.prod}"
+  environment:
+    AIRFLOW__OPENLINEAGE__TRANSPORT: '{"type": "http", "url": "http://marquez-api:5000", "endpoint": "api/v1/lineage"}'
+    AIRFLOW__OPENLINEAGE__NAMESPACE: "ask-seoul-prod-airflow"
+    AIRFLOW__OPENLINEAGE__SELECTIVE_ENABLE: "true"
+    AIRFLOW__OPENLINEAGE__DISABLE_SOURCE_CODE: "true"
+    AIRFLOW__OPENLINEAGE__INCLUDE_FULL_TASK_INFO: "false"
+    AIRFLOW__OPENLINEAGE__DEBUG_MODE: "false"
+    ASK_SEOUL_DBT_OPENLINEAGE_ENABLED: "true"
+    ASK_SEOUL_DBT_OPENLINEAGE_URL: "http://marquez-api:5000"
+    ASK_SEOUL_DBT_OPENLINEAGE_ENDPOINT: "api/v1/lineage"
+    ASK_SEOUL_DBT_OPENLINEAGE_NAMESPACE_PREFIX: "ask-seoul-prod-dbt"
+
+services:
+  postgres:
+    env_file: !override
+      - "${ASK_SEOUL_PROD_ENV_FILE:-.env.prod}"
+
+  marquez-db:
+    environment:
+      POSTGRES_USER: "${MARQUEZ_POSTGRES_USER:?MARQUEZ_POSTGRES_USER is required in prod}"
+      POSTGRES_PASSWORD: "${MARQUEZ_POSTGRES_PASSWORD:?MARQUEZ_POSTGRES_PASSWORD is required in prod}"
+      POSTGRES_DB: "${MARQUEZ_POSTGRES_DB:?MARQUEZ_POSTGRES_DB is required in prod}"
+
+  marquez-api:
+    environment:
+      MARQUEZ_CONFIG: /usr/src/app/marquez.prod.yml
+      MARQUEZ_PORT: "5000"
+      MARQUEZ_ADMIN_PORT: "5001"
+      POSTGRES_HOST: marquez-db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: "${MARQUEZ_POSTGRES_USER:?MARQUEZ_POSTGRES_USER is required in prod}"
+      POSTGRES_PASSWORD: "${MARQUEZ_POSTGRES_PASSWORD:?MARQUEZ_POSTGRES_PASSWORD is required in prod}"
+      POSTGRES_DB: "${MARQUEZ_POSTGRES_DB:?MARQUEZ_POSTGRES_DB is required in prod}"
+    volumes:
+      - ./marquez.prod.yml:/usr/src/app/marquez.prod.yml:ro
+
+  trino:
+    env_file: !override
+      - "${ASK_SEOUL_PROD_ENV_FILE:-.env.prod}"
+    depends_on:
+      trino-cache-init:
+        condition: service_completed_successfully
+    volumes: !override
+      - ./trino/catalog-prod:/etc/trino/catalog:ro
+      - ./trino/jvm.config:/etc/trino/jvm.config:ro
+      - ./trino/config.properties:/etc/trino/config.properties:ro
+      - ./trino/resource-groups.properties:/etc/trino/resource-groups.properties:ro
+      - ./trino/resource-groups.json:/etc/trino/resource-groups.json:ro
+      - trino_cache:/data/trino
+
+  trino-cache-init:
+    image: trinodb/trino:482
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mkdir -p /data/trino/cache && chown trino:trino /data/trino/cache"]
+    volumes:
+      - trino_cache:/data/trino
+
+  airflow-init:
+    <<: *prod-airflow
+  airflow-apiserver:
+    <<: *prod-airflow
+  airflow-scheduler:
+    <<: *prod-airflow
+  airflow-dag-processor:
+    <<: *prod-airflow
+  airflow-triggerer:
+    <<: *prod-airflow
+
+networks:
+  elt_net:
+    name: elt-infra-prod-net
+
+volumes:
+  trino_cache:

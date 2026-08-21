@@ -7,31 +7,6 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "deploy-main.yml"
-CHECKOUT_USE = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
-SETUP_PYTHON_USE = (
-    "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065"
-)
-VERIFY_COMMAND = (
-    "python -m deployment.main_cli verify-main "
-    '--event-path "$env:GITHUB_EVENT_PATH" '
-    '--workflow-ref "$env:GITHUB_WORKFLOW_REF" '
-    '--workflow-sha "$env:GITHUB_WORKFLOW_SHA"'
-)
-DEPLOY_COMMAND = VERIFY_COMMAND.replace("verify-main", "deploy-main", 1)
-EXACT_GUARD = (
-    "( vars.WEATHER_GOVERNANCE_MODE == 'protected' || "
-    "vars.WEATHER_GOVERNANCE_MODE == 'guarded_private' ) && "
-    "vars.WEATHER_DEPLOYMENT_ENABLED == 'enabled' && "
-    "github.event_name == 'workflow_run' && "
-    "github.event.action == 'completed' && "
-    "github.event.workflow_run.name == 'CI' && "
-    "github.event.workflow_run.path == '.github/workflows/ci.yml' && "
-    "github.event.workflow_run.event == 'push' && "
-    "github.event.workflow_run.head_branch == 'main' && "
-    "github.event.workflow_run.status == 'completed' && "
-    "github.event.workflow_run.conclusion == 'success' && "
-    "github.workflow_sha == github.event.workflow_run.head_sha"
-)
 
 
 def _workflow() -> dict[str, object]:
@@ -40,168 +15,42 @@ def _workflow() -> dict[str, object]:
     return loaded
 
 
-def _normalized_expression(value: object) -> str:
-    assert isinstance(value, str)
-    expression = " ".join(value.split())
-    if expression.startswith("${{") and expression.endswith("}}"):
-        expression = expression[3:-2].strip()
-    return expression
-
-
-def _steps(job: object) -> list[dict[str, object]]:
-    assert isinstance(job, dict)
-    steps = job.get("steps")
-    assert isinstance(steps, list)
-    assert all(isinstance(step, dict) for step in steps)
-    return steps
-
-
-def test_deploy_main_has_only_exact_main_ci_workflow_run_trigger() -> None:
-    """Adding a manual, Release, PR, or non-main trigger could bypass promotion."""
+def test_deploy_main_is_manual_strict_disabled_noop() -> None:
     workflow = _workflow()
 
     assert workflow["name"] == "Deploy Main"
-    assert workflow["on"] == {
-        "workflow_run": {
-            "workflows": ["CI"],
-            "types": ["completed"],
-            "branches": ["main"],
-        }
-    }
-    assert workflow["permissions"] == {
-        "actions": "read",
-        "checks": "read",
-        "contents": "read",
-        "pull-requests": "read",
-    }
-    assert workflow["concurrency"] == {
-        "group": "weather-main-deploy",
-        "cancel-in-progress": "false",
-    }
-    assert set(workflow) == {
-        "name",
-        "on",
-        "permissions",
-        "concurrency",
-        "jobs",
-    }
+    assert workflow["on"] == "workflow_dispatch"
+    assert workflow["permissions"] == {"contents": "read"}
+    assert set(workflow) == {"name", "on", "permissions", "jobs"}
 
-
-def test_both_jobs_require_the_exact_two_mode_enabled_source_identity() -> None:
-    """Weakening either guard could schedule code for an untrusted or stale source."""
-    workflow = _workflow()
     jobs = workflow["jobs"]
     assert isinstance(jobs, dict)
-    assert set(jobs) == {"verify-main", "deploy-main"}
-
-    verify = jobs["verify-main"]
-    deploy = jobs["deploy-main"]
-    assert isinstance(verify, dict)
-    assert isinstance(deploy, dict)
-    assert verify["name"] == "verify-main"
-    assert deploy["name"] == "deploy-main"
-    assert _normalized_expression(verify["if"]) == EXACT_GUARD
-    assert _normalized_expression(deploy["if"]) == EXACT_GUARD
-
-
-def test_self_hosted_deploy_is_ordered_after_hosted_preflight() -> None:
-    """Removing the dependency would reserve the production runner before preflight."""
-    workflow = _workflow()
-    jobs = workflow["jobs"]
-    assert isinstance(jobs, dict)
-    verify = jobs["verify-main"]
-    deploy = jobs["deploy-main"]
-    assert isinstance(verify, dict)
-    assert isinstance(deploy, dict)
-
-    assert verify["runs-on"] == "ubuntu-latest"
-    assert "needs" not in verify
-    assert deploy["runs-on"] == ["self-hosted", "windows", "weather-prod"]
-    assert deploy["needs"] == "verify-main"
-    assert deploy["timeout-minutes"] == "60"
-    assert set(verify) == {"name", "if", "runs-on", "steps"}
-    assert set(deploy) == {
-        "name",
-        "needs",
-        "if",
-        "runs-on",
-        "timeout-minutes",
-        "steps",
-    }
-
-
-def test_jobs_use_only_pre_gate_safe_steps_and_exact_cli_entrypoints() -> None:
-    """No package code may execute before hosted verification or on the runner."""
-    workflow = _workflow()
-    jobs = workflow["jobs"]
-    assert isinstance(jobs, dict)
-    verify_steps = _steps(jobs["verify-main"])
-    deploy_steps = _steps(jobs["deploy-main"])
-    assert len(verify_steps) == 4
-    assert len(deploy_steps) == 3
-
-    verify_checkout, setup_python, verify_guarded, verify_protected = verify_steps
-    deploy_checkout, deploy_guarded, deploy_protected = deploy_steps
-    for checkout in (verify_checkout, deploy_checkout):
-        assert checkout.get("uses") == CHECKOUT_USE
-        assert checkout.get("with") == {
-            "ref": "${{ github.workflow_sha }}",
-            "persist-credentials": "false",
-        }
-        assert set(checkout) == {"name", "uses", "with"}
-
-    assert setup_python.get("uses") == SETUP_PYTHON_USE
-    assert setup_python.get("with") == {"python-version": "3.11.15"}
-    assert set(setup_python) == {"name", "uses", "with"}
-
-    common_env = {
-        "GOVERNANCE_MODE": "${{ vars.WEATHER_GOVERNANCE_MODE }}",
-        "DEPLOYMENT_ENABLED": "${{ vars.WEATHER_DEPLOYMENT_ENABLED }}",
-    }
-    expected_invocations = (
-        (
-            verify_guarded,
-            "Verify guarded private main identity",
-            "vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'",
-            VERIFY_COMMAND,
-            "pwsh",
-            {"GH_TOKEN": "${{ github.token }}", **common_env},
-        ),
-        (
-            verify_protected,
-            "Verify protected main identity",
-            "vars.WEATHER_GOVERNANCE_MODE == 'protected'",
-            VERIFY_COMMAND,
-            "pwsh",
+    assert set(jobs) == {"disabled"}
+    disabled = jobs["disabled"]
+    assert isinstance(disabled, dict)
+    assert disabled == {
+        "name": "disabled",
+        "if": "${{ false }}",
+        "runs-on": "ubuntu-latest",
+        "steps": [
             {
-                "GH_TOKEN": "${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}",
-                **common_env,
-            },
-        ),
-        (
-            deploy_guarded,
-            "Deploy guarded private main identity",
-            "vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'",
-            DEPLOY_COMMAND,
-            "powershell",
-            {"GH_TOKEN": "${{ github.token }}", **common_env},
-        ),
-        (
-            deploy_protected,
-            "Deploy protected main identity",
-            "vars.WEATHER_GOVERNANCE_MODE == 'protected'",
-            DEPLOY_COMMAND,
-            "powershell",
-            {
-                "GH_TOKEN": "${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}",
-                **common_env,
-            },
-        ),
-    )
-    for invoke, name, condition, command, shell, environment in expected_invocations:
-        assert invoke.get("name") == name
-        assert _normalized_expression(invoke.get("if")) == condition
-        assert invoke.get("run") == command
-        assert invoke.get("shell") == shell
-        assert invoke.get("env") == environment
-        assert set(invoke) == {"name", "if", "run", "shell", "env"}
+                "name": "Deployment disabled",
+                "run": "echo disabled",
+            }
+        ],
+    }
+
+
+def test_deploy_main_contains_no_runtime_authority_or_deployment_command() -> None:
+    workflow = _workflow()
+    text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    job_text = text.split("jobs:", 1)[1]
+
+    assert workflow["on"] == "workflow_dispatch"
+    assert "WEATHER_DEPLOYMENT_ENABLED" not in text
+    assert "self-hosted" not in text
+    assert "environment:" not in text
+    assert "secrets." not in text
+    assert "uses:" not in text
+    assert "deployment.main_cli" not in text
+    assert "deploy-main" not in job_text
