@@ -325,6 +325,18 @@ class MetricsR2Sink:
 
     @staticmethod
     def _put_r2_object(object_key: str, payload: bytes) -> None:
+        # 이 fork 에는 ops/metrics 를 읽는 소비자가 없다(조회 DB 적재 DAG 미이관). 소비자
+        # 없는 기록을 영구 적재하지 않도록 **PUT 만** 건너뛴다 — 레코드 파싱·반환은 그대로라
+        # dump_dbt_run_results 의 반환값(태스크 rows)이 바뀌지 않는다. 주입 sink(put_object)
+        # 와 ASAC_METRICS_DIR 파일 sink 는 명시적 선택이므로 잠그지 않는다.
+        # 경계와 되살리는 법: common.ops.telemetry_switch.
+        from common.ops.telemetry_switch import OPS_TELEMETRY_ENV, ops_telemetry_enabled
+
+        if not ops_telemetry_enabled():
+            LOGGER.info("[ops] telemetry off (%s 미설정) — 기록 생략: %s",
+                        OPS_TELEMETRY_ENV, object_key)
+            return
+
         import boto3
 
         # R2 자격 env 규약은 common.storage.r2_env 단일 출처(#230) — errors/admin_dong 과 공유.

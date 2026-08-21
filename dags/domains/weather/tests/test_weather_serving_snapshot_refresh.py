@@ -67,6 +67,16 @@ def test_hourly_snapshot_refresh_runs_only_public_weather_serving_selector():
         assert task.kwargs["on_failure_callback"] is module.record_weather_problem
 
 
+def test_snapshot_refresh_schedule_can_be_disabled_for_a_personal_runtime(
+    monkeypatch,
+):
+    monkeypatch.setenv("ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE", "")
+
+    module = _module()
+
+    assert module.dag.kwargs["schedule"] is None
+
+
 def test_hourly_snapshot_refresh_marks_the_existing_publication_asset_without_bronze_identity():
     module = _module()
     dag = module.dag

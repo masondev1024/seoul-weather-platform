@@ -20,6 +20,10 @@ def test_forbidden_paths_cover_local_harness_and_generated_outputs() -> None:
     assert forbidden == paths[:-1]
 
 
+def test_forbidden_paths_allow_the_secretless_environment_template() -> None:
+    assert find_forbidden_paths([".env.example"]) == []
+
+
 def test_secret_scanner_redacts_but_does_not_return_secret_value(tmp_path: Path) -> None:
     secret_file = tmp_path / "config.txt"
     secret_file.write_text("MARKETPLACE_API_KEY=ask_" + "a" * 32 + "\n", encoding="utf-8")

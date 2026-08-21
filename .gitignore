@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+weather-platform.prod.env
 *.crt
 *.key
 *.p12

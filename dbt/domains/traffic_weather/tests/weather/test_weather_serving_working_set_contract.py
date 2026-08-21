@@ -38,16 +38,26 @@ HOURLY_OUTLOOK = (
 )
 
 
-def test_serving_working_set_is_partitioned_and_bounded_before_fanout() -> None:
+def test_serving_working_set_is_atomically_rebuilt_and_bounded_before_fanout() -> None:
     sql = MODEL.read_text(encoding="utf-8")
 
-    assert "incremental_strategy='merge'" in sql
-    assert "full_refresh=false" in sql
+    assert "materialized='table'" in sql
+    assert "on_table_exists='rename'" in sql
+    assert "incremental_strategy='merge'" not in sql
     assert "ARRAY['day(forecast_at)']" in sql
-    assert "delete from {{ this }} where cast(forecast_at as date) <" in sql
     assert "cast(forecast_at as date) >= kst_window.min_forecast_date" in sql
+    assert "weather_serving_as_of_hour()" in sql
+    assert "interval '24' hour as min_issued_at" in sql
+    assert "issued_at >= kst_window.min_issued_at" in sql
     assert "max_by(" in sql
-    assert sql.index("selected_grid_forecast as") < sql.index("joined_payload as")
+    assert "bounded_grid_forecast as" in sql
+    assert "dense_rank() over" in sql
+    assert "partition by nx, ny, forecast_at" in sql
+    assert "where issue_rank <= 2" in sql
+    assert sql.index("selected_grid_forecast as") < sql.index(
+        "bounded_grid_forecast as"
+    )
+    assert sql.index("bounded_grid_forecast as") < sql.index("joined_payload as")
     assert "row_number() over" not in sql
 
 

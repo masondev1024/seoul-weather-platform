@@ -1,0 +1,15 @@
+{
+  "rootGroups": [
+    {
+      "name": "global",
+      "softMemoryLimit": "80%",
+      "hardConcurrencyLimit": 1,
+      "maxQueued": 10,
+      "schedulingPolicy": "fair",
+      "jmxExport": true
+    }
+  ],
+  "selectors": [
+    {"user": ".*", "group": "global"}
+  ]
+}

@@ -14,7 +14,7 @@ import subprocess
 import sys
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from airflow import DAG
@@ -55,6 +55,7 @@ from weather_dbt_runtime import (  # noqa: E402
     SERVING_AS_OF_HOUR_TASK_ID,
     WEATHER_DBT_CONTRACT_VARS,
     WEATHER_DBT_RUN_RESULTS_XCOM_KEY,
+    WEATHER_SNAPSHOT_LOAD_DATE_XCOM_KEY,
     WEATHER_SNAPSHOT_VAR,
     resolve_weather_serving_as_of_hour,
     run_weather_dbt_phase,
@@ -220,18 +221,25 @@ def resolve_weather_snapshot_run(**context) -> str:
             event_datetime = datetime.fromisoformat(
                 str(extra["event_at"]).replace("Z", "+00:00")
             )
+            if event_datetime.tzinfo is None:
+                raise ValueError("event_at must be timezone-aware")
+            load_date = date.fromisoformat(str(extra["load_date"]))
         except (TypeError, ValueError) as exc:
             raise AirflowFailException(
-                "weather Bronze asset event timestamp is malformed"
+                "weather Bronze asset event timestamp or load_date is malformed"
             ) from exc
-        event_metadata[index] = (extra, event_datetime)
+        if load_date != event_datetime.astimezone(KST).date():
+            raise AirflowFailException(
+                "weather Bronze asset event load_date does not match event_at"
+            )
+        event_metadata[index] = (extra, event_datetime, load_date)
 
-    extra, _event_datetime = max(
+    extra, _event_datetime, snapshot_load_date = max(
         event_metadata,
         key=lambda item: (item[1], str(item[0]["bronze_dag_run_id"])),
     )
     run_id = str(extra["bronze_dag_run_id"])
-    for candidate, _candidate_datetime in event_metadata:
+    for candidate, _candidate_datetime, _candidate_load_date in event_metadata:
         candidate_run_id = str(candidate["bronze_dag_run_id"])
         if candidate_run_id != run_id:
             build_weather_manifest().coalesce(
@@ -247,6 +255,15 @@ def resolve_weather_snapshot_run(**context) -> str:
         raise AirflowFailException(
             f"weather Bronze manifest identity mismatch for snapshot: {run_id}"
         )
+    ti = context.get("ti") or context.get("task_instance")
+    if ti is None:
+        raise AirflowFailException(
+            "weather Bronze snapshot partition requires an Airflow task instance"
+        )
+    ti.xcom_push(
+        key=WEATHER_SNAPSHOT_LOAD_DATE_XCOM_KEY,
+        value=snapshot_load_date.isoformat(),
+    )
     return run_id
 
 

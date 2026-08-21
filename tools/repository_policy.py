@@ -57,6 +57,8 @@ def _is_forbidden(path: str) -> bool:
     normalized = _normalized(path)
     if normalized.name in FORBIDDEN_BASENAMES:
         return True
+    if normalized.name == ".env.example":
+        return False
     if normalized.name == ".env" or normalized.name.startswith(".env."):
         return True
     return any(part in FORBIDDEN_PARTS for part in normalized.parts)

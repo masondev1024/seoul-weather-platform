@@ -29,6 +29,8 @@ def test_grid_silver_declares_incremental_merge_and_grain_key():
     assert ">= (" in sql
     assert "weather_w1_lookback_minutes()" in sql
     assert "- interval '{{ weather_w1_lookback_minutes() }}' minute" in sql
+    assert "var('weather_snapshot_load_date')" in sql
+    assert "bronze.load_date = '{{ snapshot_load_date" in sql
     # R2 카탈로그 유령 뷰 409 우회(#70) + 스키마 드리프트 명시 실패(#137)
     assert "views_enabled=false" in sql
     assert "on_table_exists='drop'" in sql
