@@ -54,29 +54,31 @@ validates its read-only API contract but does not deploy or mutate the Worker.
 
 ## Public visibility gate
 
-Visibility remains private unless every item below passes in one fresh review:
+Repo-local publication gates now pass for the reviewed tree:
 
-- redistribution rights for all imported/derived material are evidenced, or the
-  blocked material is replaced clean-room;
-- an authorized `LICENSE` and required notices are present;
-- the complete Git object history and every GitHub Release body/asset have passed
-  redacted secret and local-path scans;
-- all CI used by forks is GitHub-hosted, read-only, action-SHA-pinned, and
-  secretless;
-- the legacy self-hosted runtime job and `deploy-main` path are disabled or moved
-  to a separately private operations repository, with GitHub readback evidence;
-- branch protection, required checks, CODEOWNERS, SECURITY, and contribution
-  policy are configured;
-- the user receives the final evidence report and separately approves the
-  `PRIVATE -> PUBLIC` change.
+- redistribution rights for imported/derived material are recorded in
+  `provenance/source-files.jsonl`;
+- an authorized Apache-2.0 `LICENSE` and required notices are present;
+- hosted-only CI has no self-hosted route;
+- the disabled manual no-op deploy workflow is hosted-only and inert;
+- prior audit evidence recorded 0 GitHub Releases, 0 downloadable Release
+  artifacts, 121 GitHub Actions logs scanned clean, and a reachable-object scan
+  that passed at its audit point.
+
+The user authorized the full visibility cutover on 2026-08-21. The external
+GitHub cutover remains pending until a fresh public-readiness preflight,
+repository variables disabled/public readback, exact offline runner removal, PR
+CI and merge, public visibility readback, post-public branch protection readback,
+and a fresh delta/full scan immediately before visibility.
 
 A readiness PASS is evidence, not authorization. No repository script or workflow
 is allowed to change visibility.
 
 ## Current disposition
 
-The architecture is ready for incremental hardening, but publication is
-`BLOCKED`. Three fixed sources are classified `internal_private_snapshot_only`,
-there is no authorized root license, full history/Release scans have not yet been
-completed, and the legacy self-hosted/deployment workflows must be retired before
-visibility changes.
+The architecture disposition is current: repo-local publication gates are
+`PASS`, while GitHub external visibility cutover is `PENDING`.
+Public visibility has not yet been applied.
+Branch protection has not yet been applied after public visibility.
+Runtime operations remain private and require separate local approval before any
+Docker, Airflow, Trino, R2, D1, or Worker-affecting mutation.
