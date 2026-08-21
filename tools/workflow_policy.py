@@ -1540,6 +1540,13 @@ def _ci_promotion_source_contract_matches(
     command = main_push_steps[0].get("run")
     if not isinstance(command, str):
         return False
+    all_commands = "\n".join(
+        str(step.get("run"))
+        for step in steps
+        if isinstance(step, Mapping) and isinstance(step.get("run"), str)
+    )
+    if "initial-main-bootstrap" in all_commands:
+        return False
     required = (
         "python -m tools.promotion_source main-push "
         '--event-path "$GITHUB_EVENT_PATH" '

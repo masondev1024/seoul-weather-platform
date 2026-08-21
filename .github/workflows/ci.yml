@@ -133,31 +133,6 @@ jobs:
             --jq '[.[] | {base: {ref: .base.ref, sha: .base.sha, repo: {full_name: .base.repo.full_name}}, head: {ref: .head.ref, repo: {full_name: .head.repo.full_name}}, merged_at, merge_commit_sha}]' \
             > "$associated_prs_path"
           python -m tools.promotion_source main-push --event-path "$GITHUB_EVENT_PATH" --associated-prs-path "$associated_prs_path" --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
-      - name: Validate initial main bootstrap source
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.created == true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GOVERNANCE_MODE: ${{ vars.WEATHER_GOVERNANCE_MODE }}
-        run: |
-          repository_readback_path="${RUNNER_TEMP}/bootstrap-repository.json"
-          dev_readback_path="${RUNNER_TEMP}/bootstrap-dev.json"
-          main_readback_path="${RUNNER_TEMP}/bootstrap-main.json"
-          gh api --method GET \
-            --header "Accept: application/vnd.github+json" \
-            "repos/${GITHUB_REPOSITORY}" \
-            --jq '{full_name, default_branch}' \
-            > "$repository_readback_path"
-          gh api --method GET \
-            --header "Accept: application/vnd.github+json" \
-            "repos/${GITHUB_REPOSITORY}/branches/dev" \
-            --jq '{name, sha: .commit.sha}' \
-            > "$dev_readback_path"
-          gh api --method GET \
-            --header "Accept: application/vnd.github+json" \
-            "repos/${GITHUB_REPOSITORY}/branches/main" \
-            --jq '{name, sha: .commit.sha}' \
-            > "$main_readback_path"
-          python -m tools.promotion_source initial-main-bootstrap --event-path "$GITHUB_EVENT_PATH" --repository-readback-path "$repository_readback_path" --dev-branch-readback-path "$dev_readback_path" --main-branch-readback-path "$main_readback_path" --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" --governance-mode "$GOVERNANCE_MODE"
       - name: Accept non-promotion dev push
         if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
         run: echo "not-required"

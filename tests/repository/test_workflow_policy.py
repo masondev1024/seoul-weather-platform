@@ -258,7 +258,11 @@ def test_repository_ci_governance_and_required_gate_are_public_only() -> None:
     }
     assert "dagbag-runtime" not in required_commands
     assert "WEATHER_DEPLOYMENT_ENABLED" not in required_commands
+    assert "initial-main-bootstrap" not in required_commands
     assert '--governance-mode "$GOVERNANCE_MODE"' in required_commands
+
+    promotion_commands = "\n".join(_run_commands(jobs["promotion-source"]))
+    assert "initial-main-bootstrap" not in promotion_commands
 
 
 @pytest.mark.parametrize(
