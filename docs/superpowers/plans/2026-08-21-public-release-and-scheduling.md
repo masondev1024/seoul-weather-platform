@@ -159,4 +159,3 @@
   Require Airflow success, Trino restart `0`, OOM `false`, bounded memory, personal R2/Iceberg/D1 publication success, and a read-only Worker HTTP 200 response.
 
 - [ ] **Step 5: Record final public/runtime readbacks and rollback instructions**
-
