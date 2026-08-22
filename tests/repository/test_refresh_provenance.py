@@ -3,6 +3,7 @@ from __future__ import annotations
 from tools.refresh_provenance import (
     HANDOFF_OVERLAY_VALIDATORS,
     MAC_CUTOVER_ADAPTATION_VALIDATORS,
+    RETIRED_HANDOFF_PATHS,
     build_handoff_overlay_record,
     build_mac_cutover_adaptation_record,
     build_repository_record,
@@ -124,7 +125,13 @@ def test_handoff_overlay_is_derived_with_authorized_public_republication() -> No
 
 def test_handoff_overlay_allowlist_is_secret_free_and_complete() -> None:
     assert "weather-platform.prod.env" not in HANDOFF_OVERLAY_VALIDATORS
-    assert len(HANDOFF_OVERLAY_VALIDATORS) == 28
+    assert len(HANDOFF_OVERLAY_VALIDATORS) == 24
+    assert RETIRED_HANDOFF_PATHS == {
+        "README-MAC.md",
+        "docker-compose.mac.yml",
+        "docker-compose.prod.yml",
+        "marquez.prod.yml",
+    }
 
 
 def test_mac_cutover_adaptation_preserves_the_fixed_upstream_source() -> None:

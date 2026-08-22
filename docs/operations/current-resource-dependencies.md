@@ -7,7 +7,7 @@
 | 논리 리소스 | 역할 | 현재 상태 | owner/사용 승인 | 종료 시 영향 |
 |---|---|---|---|---|
 | Personal R2 raw/Data Catalog | KMA raw·Iceberg 저장 | 운영 중 | Mason | 신규 Bronze와 dbt query 불가 |
-| Local Trino | Bronze·Silver·Gold query | 5 GiB limit, FS cache 적용 | Mason의 Mac | transform·snapshot 중단 |
+| Local Trino | Bronze·Silver·Gold query | 5 GiB limit, FS cache 적용 | Mason의 로컬 노트북 | transform·snapshot 중단 |
 | Personal D1 | public product publication | 운영 중 | Mason Cloudflare | origin 최신 발행본 미제공 |
 | Personal Weather origin | `/skill/v1/...` 제공 | 운영 중 | Mason Cloudflare | proxy upstream 실패 |
 | Personal K-Skill proxy | 공개 3-route forwarding | 이 저장소에서 관리 | Mason Cloudflare | 기본 helper의 개인 origin 조회 실패 |
