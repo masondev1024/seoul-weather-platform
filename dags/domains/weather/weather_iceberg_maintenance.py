@@ -44,6 +44,7 @@ from common.runtime_guard import (  # noqa: E402
     default_target,
     validate_dev_runtime,
 )
+from weather_ingest.kma_coordination import weather_heavy_pool  # noqa: E402
 from weather_ingest.iceberg_maintenance import (  # noqa: E402
     MAINTAINED_TABLES,
     OPERATIONS,
@@ -146,7 +147,7 @@ def _action_task(schema: str, table_name: str, operation: str, *, isolate_table:
             "table_name": table_name,
             "operation": operation,
         },
-        "pool": TRINO_WEATHER_LEGACY_HEAVY_POOL,
+        "pool": weather_heavy_pool(TRINO_WEATHER_LEGACY_HEAVY_POOL),
         "pool_slots": 1,
         "weight_rule": "absolute",
         "retries": 0,

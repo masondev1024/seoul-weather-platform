@@ -20,6 +20,15 @@ AIRFLOW_LOCAL_SERVICES = (
 EXPECTED_KMA_DAG_SCHEDULE = "20 2,5,8,11,14,17,20,23 * * *"
 EXPECTED_SERVING_SNAPSHOT_DAG_SCHEDULE = "0 * * * *"
 EXPECTED_ENV_FILE = "${ASK_SEOUL_PROD_ENV_FILE:-.env.prod}"
+EXPECTED_DISABLED_OBSERVATION_ENVIRONMENT = {
+    "ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED": "false",
+    "ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE": "",
+    "ASK_SEOUL_KMA_CONTROL_ROOT": "/opt/airflow/logs/_weather_control",
+    "ASK_SEOUL_KMA_ATTEMPT_LEDGER_PATH": (
+        "/opt/airflow/logs/_weather_control/kma_api_budget.sqlite3"
+    ),
+    "ASK_SEOUL_KMA_DAILY_ATTEMPT_LIMIT": "7500",
+}
 
 
 class _ComposeLoader(yaml.SafeLoader):
@@ -81,7 +90,11 @@ def _write_valid_contract(repo_root: Path) -> None:
         f'      ASK_SEOUL_KMA_DAG_SCHEDULE: "{EXPECTED_KMA_DAG_SCHEDULE}"\n'
         "      ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE: "
         f'"{EXPECTED_SERVING_SNAPSHOT_DAG_SCHEDULE}"\n'
-        '      KMA_NUM_OF_ROWS: "2000"'
+        + "".join(
+            f'      {name}: "{value}"\n'
+            for name, value in EXPECTED_DISABLED_OBSERVATION_ENVIRONMENT.items()
+        )
+        + '      KMA_NUM_OF_ROWS: "2000"'
         for service in AIRFLOW_LOCAL_SERVICES
     )
     (repo_root / "docker-compose.local.yml").write_text(
@@ -227,6 +240,10 @@ def test_repository_keeps_the_local_runtime_budget_and_schedules() -> None:
         assert environment["ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE"] == (
             EXPECTED_SERVING_SNAPSHOT_DAG_SCHEDULE
         )
+        assert {
+            name: environment[name]
+            for name in EXPECTED_DISABLED_OBSERVATION_ENVIRONMENT
+        } == EXPECTED_DISABLED_OBSERVATION_ENVIRONMENT
         assert environment["KMA_NUM_OF_ROWS"] == "2000"
 
 
@@ -260,6 +277,14 @@ def test_validator_accepts_a_conservative_memory_and_lineage_contract(
             "ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE: "
             f'"{EXPECTED_SERVING_SNAPSHOT_DAG_SCHEDULE}"',
             'ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE: "5 * * * *"',
+        ),
+        (
+            'ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED: "false"',
+            'ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED: "true"',
+        ),
+        (
+            'ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE: ""',
+            'ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE: "45 * * * *"',
         ),
         ('KMA_NUM_OF_ROWS: "2000"', 'KMA_NUM_OF_ROWS: "1000"'),
         ("seoul-weather-platform-mac-net", "elt-infra-prod-net"),

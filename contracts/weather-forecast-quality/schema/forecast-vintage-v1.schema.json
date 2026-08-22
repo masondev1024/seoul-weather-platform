@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/masondev1024/seoul-weather-platform/contracts/weather-forecast-quality/forecast-vintage-v1.schema.json",
+  "title": "Forecast vintage record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "product_family", "grid_id", "nx", "ny", "variable", "value_kind", "value", "unit", "issued_at", "valid_at", "source_id", "source_revision"],
+  "properties": {
+    "schema_version": {"const": "forecast-vintage/v1"},
+    "product_family": {"const": "short_range"},
+    "grid_id": {"type": "string", "pattern": "^kma_[0-9]+_[0-9]+$"},
+    "nx": {"type": "integer"},
+    "ny": {"type": "integer"},
+    "variable": {"type": "string", "minLength": 1},
+    "value_kind": {"enum": ["continuous", "probability", "categorical"]},
+    "value": {},
+    "unit": {"type": "string", "minLength": 1},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "valid_at": {"type": "string", "format": "date-time"},
+    "source_id": {"type": "string", "minLength": 1},
+    "source_revision": {"type": "string", "minLength": 1}
+  },
+  "allOf": [
+    {"if": {"properties": {"value_kind": {"const": "continuous"}}}, "then": {"properties": {"value": {"type": "number"}}}},
+    {"if": {"properties": {"value_kind": {"const": "probability"}}}, "then": {"properties": {"value": {"type": "number", "minimum": 0, "maximum": 1}}}},
+    {"if": {"properties": {"value_kind": {"const": "categorical"}}}, "then": {"properties": {"value": {"type": "string", "minLength": 1}}}}
+  ]
+}

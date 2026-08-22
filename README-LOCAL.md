@@ -52,6 +52,14 @@ docker compose \
 
 처음에는 새 Airflow 메타데이터 DB가 생성되므로 DAG는 pause 상태로 시작한다. 개인 R2/D1 대상이 맞는지 확인한 뒤 Weather DAG family만 unpause한다. Traffic DAG는 건드리지 않는다.
 
+시간별 실황 DAG `weather_ultra_srt_ncst_bronze`는 다른 기존 Weather DAG와
+달리 코드가 있어도 기본 schedule이 없고, 로컬 override도
+`ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED=false` 및 빈 observation schedule을
+강제한다. 따라서 전체 Weather DAG를 일괄 unpause하지 않는다. 공유 SQLite
+physical-attempt ledger 초기화, `kma_api_requests` 1-slot pool 확인, 수동 80-grid
+canary 검증, 별도 활성화 승인을 거친 뒤 이 DAG만 개별적으로 활성화한다. 정확한
+순서는 `docs/operations/kma-observation-predeployment-plan.md`를 따른다.
+
 다른 호스트의 Docker named volume, Trino cache, Postgres 메타데이터, Airflow 로그는 이관하지 않는다. 새 호스트에서는 새 volume으로 시작하며, R2·Iceberg·D1의 운영 데이터는 환경 파일이 가리키는 개인 Cloudflare 저장소를 그대로 사용한다.
 
 `docker-compose.local.yml`은 운영 이미지 digest를 사용하지 않고 현재 `Dockerfile.airflow`로 로컬 이미지를 빌드한다. 따라서 첫 실행에는 base image 및 Python/dbt 의존성 다운로드 시간이 필요하다.

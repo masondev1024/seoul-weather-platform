@@ -60,6 +60,7 @@ MEDALLION_SCHEMA = "weather"
 MAINTAINED_TABLES: tuple[MaintainedTable, ...] = (
     # Bronze: 매 수집 사이클 append.
     MaintainedTable(BRONZE_SCHEMA, "bronze_kma_vilage_fcst"),
+    MaintainedTable(BRONZE_SCHEMA, "bronze_kma_ultra_srt_ncst"),
     MaintainedTable(BRONZE_SCHEMA, "bronze_collection_run_manifest"),
     # Silver: incremental.
     MaintainedTable(MEDALLION_SCHEMA, "silver_kma_vilage_fcst"),

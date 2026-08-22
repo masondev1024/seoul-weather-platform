@@ -1,5 +1,18 @@
 # Seoul Weather Platform
 
+Forecast-vintage versus observation-truth evaluation is specified in
+[`docs/architecture/weather-forecast-quality.md`](docs/architecture/weather-forecast-quality.md).
+Its checked-in 80-grid fixture is synthetic contract evidence, not a claim about
+current Seoul forecast accuracy.
+
+The primary observation-truth adapter is documented in
+[`docs/architecture/kma-observation-truth.md`](docs/architecture/kma-observation-truth.md).
+`getUltraSrtNcst` source parsing, shared physical-attempt budget, bounded retry,
+immutable 80-grid Raw landing, dedicated Iceberg Bronze, and a paused-by-default
+Airflow DAG are implemented locally. The public Compose defaults still set the
+rollout guard to `false` and the schedule to empty, so this code has not started
+collection or written observation data to R2, Iceberg, D1, or the Worker.
+
 Weather 수집, dbt 변환, D1 publication, Weather Risk K-Skill 연결 코드를 한 저장소에서 관리하는 공개 개인 데이터 플랫폼이다.
 
 코드는 public이지만 운영 plane은 개인 로컬 노트북과 개인 Cloudflare 계정에 남는다. 자격증명, Airflow metadata, Docker volume과 실행 로그는 저장소에 포함하지 않는다.
@@ -132,6 +145,8 @@ python dbt/serving_contract/validate_serving_contract.py --source dbt/domains/tr
 - `README-LOCAL.md` — 로컬 Compose 실행과 메모리 운영 기준
 - `docs/superpowers/specs/2026-08-14-weather-repository-separation-design.md` — 최종 분리 설계
 - `docs/architecture/platform-boundaries.md` — runtime ownership seam
+- `docs/architecture/kma-observation-truth.md` — KMA 실황 정답 데이터 계약과 배포 gate
+- `docs/operations/kma-observation-predeployment-plan.md` — 관측 파이프라인 승인 전 배포·복구 설계
 - `docs/operations/current-resource-dependencies.md` — 기존 resource 의존성
 - `docs/operations/predeployment-approval-gate.md` — Airflow 변경 승인 gate
 

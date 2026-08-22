@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from tools.refresh_provenance import (
     HANDOFF_OVERLAY_VALIDATORS,
+    HOST_TEST_PORTABILITY_ADAPTATIONS,
+    KMA_OBSERVATION_ADAPTATIONS,
     MAC_CUTOVER_ADAPTATION_VALIDATORS,
     RETIRED_HANDOFF_PATHS,
     build_handoff_overlay_record,
@@ -57,6 +59,29 @@ def test_unclassified_dbt_or_airflow_source_cannot_be_claimed_as_local() -> None
             assert "snapshot provenance" in str(exc)
         else:
             raise AssertionError(f"expected snapshot provenance failure for {target}")
+
+
+def test_observation_airflow_sources_are_explicitly_classified_as_local() -> None:
+    for target in (
+        "dags/domains/weather/weather_ingest/kma_coordination.py",
+        "dags/domains/weather/weather_ingest/kma_observation.py",
+        "dags/domains/weather/weather_ingest/kma_observation_bronze.py",
+        "dags/domains/weather/weather_ingest/kma_observation_http.py",
+        "dags/domains/weather/weather_ingest/kma_observation_landing.py",
+        "dags/domains/weather/weather_ingest/kma_observation_runtime.py",
+        "dags/domains/weather/weather_ultra_srt_ncst_bronze.py",
+        "dags/domains/weather/tests/test_weather_kma_attempt_ledger.py",
+        "dags/domains/weather/tests/test_weather_kma_coordination.py",
+        "dags/domains/weather/tests/test_weather_kma_deadline.py",
+        "dags/domains/weather/tests/test_weather_kma_observation.py",
+        "dags/domains/weather/tests/test_weather_kma_observation_bronze.py",
+        "dags/domains/weather/tests/test_weather_kma_observation_dag.py",
+        "dags/domains/weather/tests/test_weather_kma_observation_landing.py",
+        "dags/domains/weather/tests/test_weather_kma_retry_policy.py",
+    ):
+        record = build_repository_record(target, "c" * 64)
+        assert record["record_type"] == "local_authored"
+        assert record["target_path"] == target
 
 
 def test_refresh_preserves_snapshot_and_reviewed_derived_overrides() -> None:
@@ -178,8 +203,45 @@ def test_mac_cutover_adaptation_preserves_the_fixed_upstream_source() -> None:
 
 
 def test_mac_cutover_adaptation_allowlist_is_explicit_and_secret_free() -> None:
-    assert len(MAC_CUTOVER_ADAPTATION_VALIDATORS) == 10
+    assert len(MAC_CUTOVER_ADAPTATION_VALIDATORS) == 16
     assert "weather-platform.prod.env" not in MAC_CUTOVER_ADAPTATION_VALIDATORS
+
+
+def test_kma_observation_adaptations_preserve_inherited_source_lineage() -> None:
+    assert KMA_OBSERVATION_ADAPTATIONS == {
+        "dags/common/assets.py",
+        "dags/common/pools.py",
+        "dags/common/tests/test_pools.py",
+        "dags/domains/weather/tests/test_weather_runtime_http.py",
+        "dags/domains/weather/weather_ingest/common/runtime.py",
+    }
+    target = "dags/common/pools.py"
+    source_record = {
+        "record_type": "snapshot_copy",
+        "target_path": target,
+        "target_sha256": "a" * 64,
+        "source_repo": "ASAC-DE-bigkk/ASAC-DAG",
+        "source_commit": "b" * 40,
+        "source_path": "common/pools.py",
+        "source_content_sha256": "c" * 64,
+        "license_status": AUTHORIZED_LICENSE_STATUS,
+    }
+
+    record = build_mac_cutover_adaptation_record(
+        target,
+        target_checksum="d" * 64,
+        source_record=source_record,
+    )
+
+    assert record["scope"] == "kma_observation_coordination"
+    assert "shared" in record["reason"].lower()
+    assert record["derived_from"]["target_sha256"] == "a" * 64
+
+
+def test_host_test_portability_adaptation_is_explicit() -> None:
+    assert HOST_TEST_PORTABILITY_ADAPTATIONS == {
+        "dags/domains/weather/tests/test_weather_transform_execution.py"
+    }
 
 
 def test_current_outlook_grace_is_a_reviewed_availability_adaptation() -> None:

@@ -6,6 +6,7 @@ import json
 from typing import Final, NamedTuple
 
 
+KMA_API_POOL: Final = "kma_api_requests"
 TRINO_TRAFFIC_HEAVY_POOL: Final = "trino_traffic_heavy"
 TRINO_TRAFFIC_INGEST_POOL: Final = "trino_traffic_ingest"
 TRINO_TRAFFIC_TRANSFORM_POOL: Final = "trino_traffic_transform"
@@ -25,6 +26,12 @@ class AirflowPoolSpec(NamedTuple):
 
 
 TRINO_POOL_SPECS: Final = (
+    AirflowPoolSpec(
+        KMA_API_POOL,
+        1,
+        "Serialize KMA forecast and observation API requests",
+        False,
+    ),
     AirflowPoolSpec(
         TRINO_TRAFFIC_HEAVY_POOL,
         1,
@@ -107,6 +114,7 @@ def main() -> int:
 
 __all__ = [
     "AirflowPoolSpec",
+    "KMA_API_POOL",
     "TRINO_HEAVY_POOL",
     "TRINO_POOL_SPECS",
     "TRINO_TRAFFIC_HEAVY_POOL",

@@ -30,6 +30,11 @@ REQUIRED_WEATHER_KEYS = frozenset(
         "TRINO_MEMORY_HEAP_HEADROOM_PER_NODE",
         "TRINO_QUERY_MAX_MEMORY",
         "TRINO_QUERY_MAX_TOTAL_MEMORY",
+        "ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED",
+        "ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE",
+        "ASK_SEOUL_KMA_CONTROL_ROOT",
+        "ASK_SEOUL_KMA_ATTEMPT_LEDGER_PATH",
+        "ASK_SEOUL_KMA_DAILY_ATTEMPT_LIMIT",
     }
 )
 FORBIDDEN_LEGACY_KEYS = frozenset(
@@ -78,3 +83,17 @@ def test_public_environment_example_preserves_the_mac_memory_envelope() -> None:
     assert values["TRINO_MEMORY_HEAP_HEADROOM_PER_NODE"] == "1500MB"
     assert values["TRINO_QUERY_MAX_MEMORY"] == "800MB"
     assert values["TRINO_QUERY_MAX_TOTAL_MEMORY"] == "1200MB"
+
+
+def test_public_environment_example_keeps_hourly_observation_inert() -> None:
+    values = _parse_env(EXAMPLE_ENV)
+
+    assert values["ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED"] == "false"
+    assert values["ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE"] == ""
+    assert values["ASK_SEOUL_KMA_CONTROL_ROOT"] == (
+        "/opt/airflow/logs/_weather_control"
+    )
+    assert values["ASK_SEOUL_KMA_ATTEMPT_LEDGER_PATH"] == (
+        "/opt/airflow/logs/_weather_control/kma_api_budget.sqlite3"
+    )
+    assert values["ASK_SEOUL_KMA_DAILY_ATTEMPT_LIMIT"] == "7500"

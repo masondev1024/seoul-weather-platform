@@ -35,6 +35,13 @@ EXPECTED_TRINO_ENVIRONMENT = {
 }
 EXPECTED_AIRFLOW_ENVIRONMENT = {
     "ASK_SEOUL_KMA_DAG_SCHEDULE": "20 2,5,8,11,14,17,20,23 * * *",
+    "ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED": "false",
+    "ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE": "",
+    "ASK_SEOUL_KMA_CONTROL_ROOT": "/opt/airflow/logs/_weather_control",
+    "ASK_SEOUL_KMA_ATTEMPT_LEDGER_PATH": (
+        "/opt/airflow/logs/_weather_control/kma_api_budget.sqlite3"
+    ),
+    "ASK_SEOUL_KMA_DAILY_ATTEMPT_LIMIT": "7500",
     "ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE": "0 * * * *",
 }
 EXPECTED_TRINO_MOUNTS = {

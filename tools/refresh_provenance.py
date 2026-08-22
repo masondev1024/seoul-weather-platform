@@ -68,6 +68,27 @@ HANDOFF_OVERLAY_VALIDATORS = {
     "trino/resource-groups.properties": LOCAL_RUNTIME_VALIDATOR,
 }
 MAC_CUTOVER_ADAPTATION_VALIDATORS = {
+    "dags/common/assets.py": (
+        "PYTHONPATH=dags python -m pytest "
+        "dags/domains/weather/tests/test_weather_kma_observation_dag.py -q"
+    ),
+    "dags/common/pools.py": (
+        "PYTHONPATH=dags python -m pytest dags/common/tests/test_pools.py "
+        "dags/domains/weather/tests/test_weather_kma_coordination.py -q"
+    ),
+    "dags/common/tests/test_pools.py": (
+        "PYTHONPATH=dags python -m pytest dags/common/tests/test_pools.py -q"
+    ),
+    "dags/domains/weather/tests/test_weather_runtime_http.py": (
+        "PYTHONPATH=dags python -m pytest "
+        "dags/domains/weather/tests/test_weather_runtime_http.py "
+        "dags/domains/weather/tests/test_weather_kma_attempt_ledger.py -q"
+    ),
+    "dags/domains/weather/weather_ingest/common/runtime.py": (
+        "PYTHONPATH=dags python -m pytest "
+        "dags/domains/weather/tests/test_weather_runtime_http.py "
+        "dags/domains/weather/tests/test_weather_kma_attempt_ledger.py -q"
+    ),
     "dags/domains/weather/tests/test_weather_serving_snapshot_refresh.py": (
         "PYTHONPATH=dags python -m pytest "
         "dags/domains/weather/tests/test_weather_serving_snapshot_refresh.py -q"
@@ -75,6 +96,10 @@ MAC_CUTOVER_ADAPTATION_VALIDATORS = {
     "dags/domains/weather/tests/test_weather_transform_dag.py": (
         "PYTHONPATH=dags python -m pytest "
         "dags/domains/weather/tests/test_weather_transform_dag.py -q"
+    ),
+    "dags/domains/weather/tests/test_weather_transform_execution.py": (
+        "PYTHONPATH=dags python -m pytest "
+        "dags/domains/weather/tests/test_weather_transform_execution.py -q"
     ),
     "dags/domains/weather/weather_dbt_runtime.py": (
         "PYTHONPATH=dags python -m pytest "
@@ -134,6 +159,18 @@ MAC_AVAILABILITY_ADAPTATIONS = frozenset(
         "gold_weather_place_current_outlook.yml",
     }
 )
+KMA_OBSERVATION_ADAPTATIONS = frozenset(
+    {
+        "dags/common/assets.py",
+        "dags/common/pools.py",
+        "dags/common/tests/test_pools.py",
+        "dags/domains/weather/tests/test_weather_runtime_http.py",
+        "dags/domains/weather/weather_ingest/common/runtime.py",
+    }
+)
+HOST_TEST_PORTABILITY_ADAPTATIONS = frozenset(
+    {"dags/domains/weather/tests/test_weather_transform_execution.py"}
+)
 LOCAL_DBT_SOURCES = frozenset(
     {
         "dbt/domains/traffic_weather/dbt_project.yml",
@@ -157,6 +194,24 @@ LOCAL_DBT_SOURCES = frozenset(
 #: exclusion 파일을 제거했으므로 그 항목은 넣지 않는다.
 LOCAL_AIRFLOW_SOURCES = frozenset(
     {
+        # This repository's hourly observation implementation. Every new DAG,
+        # runtime module, and focused contract test is explicit so inherited
+        # Airflow code can never be silently reclassified as local authorship.
+        "dags/domains/weather/weather_ingest/kma_coordination.py",
+        "dags/domains/weather/weather_ingest/kma_observation.py",
+        "dags/domains/weather/weather_ingest/kma_observation_bronze.py",
+        "dags/domains/weather/weather_ingest/kma_observation_http.py",
+        "dags/domains/weather/weather_ingest/kma_observation_landing.py",
+        "dags/domains/weather/weather_ingest/kma_observation_runtime.py",
+        "dags/domains/weather/weather_ultra_srt_ncst_bronze.py",
+        "dags/domains/weather/tests/test_weather_kma_attempt_ledger.py",
+        "dags/domains/weather/tests/test_weather_kma_coordination.py",
+        "dags/domains/weather/tests/test_weather_kma_deadline.py",
+        "dags/domains/weather/tests/test_weather_kma_observation.py",
+        "dags/domains/weather/tests/test_weather_kma_observation_bronze.py",
+        "dags/domains/weather/tests/test_weather_kma_observation_dag.py",
+        "dags/domains/weather/tests/test_weather_kma_observation_landing.py",
+        "dags/domains/weather/tests/test_weather_kma_retry_policy.py",
         "dags/domains/weather/weather_reference_data_refresh.py",
         "dags/domains/weather/tests/test_weather_reference_data_refresh_dag.py",
         # 이 fork 전용 Iceberg 유지보수 DAG. 상류 dev-단일-스키마 모듈을 그대로
@@ -281,7 +336,24 @@ def build_mac_cutover_adaptation_record(
     if not isinstance(previous_checksum, str) or len(previous_checksum) != 64:
         raise ValueError(f"Mac cutover source checksum is invalid: {target}")
 
-    if target in MAC_MANUAL_SCHEDULE_ADAPTATIONS:
+    if target in KMA_OBSERVATION_ADAPTATIONS:
+        scope = "kma_observation_coordination"
+        reason = (
+            "Shared KMA observation and forecast safety adaptation for the "
+            "personal Weather runtime."
+        )
+        derivation = (
+            "Add the observation asset and one-slot pools, and reserve every "
+            "forecast physical retry in the same durable daily attempt ledger."
+        )
+    elif target in HOST_TEST_PORTABILITY_ADAPTATIONS:
+        scope = "weather_host_test_portability"
+        reason = "Weather dbt test adaptation for repository-host path isolation."
+        derivation = (
+            "Give the empty-selection regression an attempt-local temporary dbt "
+            "project so host tests never write the container-only /opt path."
+        )
+    elif target in MAC_MANUAL_SCHEDULE_ADAPTATIONS:
         scope = "weather_mac_manual_schedule_control"
         reason = "Personal Mac Weather runtime adaptation for explicit serving refresh triggers."
         derivation = (

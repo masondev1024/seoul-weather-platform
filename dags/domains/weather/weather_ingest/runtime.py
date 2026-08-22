@@ -27,6 +27,12 @@ from weather_ingest.collection_slots import (
     weather_vilage_fcst_slots,
 )
 from weather_ingest.kma import SOURCE_ID, build_kma_url
+from weather_ingest.kma_coordination import (
+    PhysicalAttempt,
+    PhysicalAttemptBudgetHook,
+    SqliteAttemptLedger,
+    shared_guards_enabled,
+)
 from weather_ingest.landing import KmaGrid, KmaLanding
 from weather_ingest.raw_spool import RawPayloadSpool, configured_raw_payload_spool
 from weather_ingest.run_manifest import WeatherRunManifest
@@ -101,11 +107,17 @@ class KmaHttpAdapter:
         *,
         delay_seconds: float = DEFAULT_KMA_REQUEST_DELAY_SECONDS,
         sleep: Callable[[float], None] = time.sleep,
+        before_attempt: Callable[[PhysicalAttempt], object] | None = None,
+        dag_run_id: str = "forecast-runtime",
+        request_id: Callable[[], str] = lambda: str(uuid.uuid4()),
     ) -> None:
         self._fetch = fetch
         self._delay_seconds = delay_seconds
         self._sleep = sleep
         self._has_successful_request = False
+        self._before_attempt = before_attempt
+        self._dag_run_id = dag_run_id
+        self._request_id = request_id
 
     def fetch_page(
         self,
@@ -119,6 +131,44 @@ class KmaHttpAdapter:
     ) -> tuple[int, bytes]:
         if self._has_successful_request:
             self._sleep(self._delay_seconds)
+        fetch_options = {
+            "max_attempts": 4,
+            "retry_statuses": KMA_RETRY_STATUSES,
+            "retry_base_delay_seconds": 30,
+            "retry_429_backoff_seconds": KMA_429_BACKOFF_SECONDS,
+        }
+        if self._before_attempt is not None:
+            logical_request_id = self._request_id()
+
+            def reserve(attempt_ordinal: int) -> None:
+                material = "\x1f".join(
+                    (
+                        SOURCE_ID,
+                        self._dag_run_id,
+                        base_date,
+                        base_time,
+                        str(nx),
+                        str(ny),
+                        str(page_no),
+                        logical_request_id,
+                        str(attempt_ordinal),
+                    )
+                )
+                self._before_attempt(
+                    PhysicalAttempt(
+                        reservation_id=hashlib.sha256(
+                            material.encode("utf-8")
+                        ).hexdigest(),
+                        source_id=SOURCE_ID,
+                        dag_run_id=self._dag_run_id,
+                        observed_slot=f"{base_date}T{base_time}",
+                        nx=nx,
+                        ny=ny,
+                        attempt_ordinal=attempt_ordinal,
+                    )
+                )
+
+            fetch_options["before_attempt"] = reserve
         response = self._fetch(
             build_kma_url(
                 base_date=base_date,
@@ -129,10 +179,7 @@ class KmaHttpAdapter:
                 num_of_rows=num_of_rows,
             ),
             "ask-seoul-kma-bronze/1.0",
-            max_attempts=4,
-            retry_statuses=KMA_RETRY_STATUSES,
-            retry_base_delay_seconds=30,
-            retry_429_backoff_seconds=KMA_429_BACKOFF_SECONDS,
+            **fetch_options,
         )
         self._has_successful_request = True
         return response
@@ -250,8 +297,18 @@ def build_weather_landing() -> KmaLanding:
             "Weather raw spool prune deferred: "
             f"error_type={type(exc).__name__}"
         )
+    before_attempt = None
+    if shared_guards_enabled():
+        before_attempt = PhysicalAttemptBudgetHook(
+            SqliteAttemptLedger.from_environment(),
+            clock=lambda: datetime.now(timezone.utc),
+        )
     return KmaLanding(
-        source=KmaHttpAdapter(fetch_url, delay_seconds=kma_request_delay_seconds()),
+        source=KmaHttpAdapter(
+            fetch_url,
+            delay_seconds=kma_request_delay_seconds(),
+            before_attempt=before_attempt,
+        ),
         raw_store=raw_store,
         raw_spool=raw_spool,
         raw_prefix=raw_prefix(),

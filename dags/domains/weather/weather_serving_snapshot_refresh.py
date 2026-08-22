@@ -39,6 +39,7 @@ from common.runtime_guard import (  # noqa: E402
     default_target,
     validate_dev_runtime,
 )
+from weather_ingest.kma_coordination import weather_heavy_pool  # noqa: E402
 import weather_dbt_execution as weather_dbt  # noqa: E402
 from weather_dbt_runtime import (  # noqa: E402
     DBT_RETRY_DELAY,
@@ -133,7 +134,7 @@ def _serving_snapshot_dbt_task(task_id: str, dbt_command: str) -> PythonOperator
             "serving_as_of_task_id": SERVING_AS_OF_HOUR_TASK_ID,
             "threads": 2,
         },
-        pool=TRINO_WEATHER_LEGACY_HEAVY_POOL,
+        pool=weather_heavy_pool(TRINO_WEATHER_LEGACY_HEAVY_POOL),
         weight_rule="absolute",
         priority_weight=SERVING_SNAPSHOT_PRIORITY_WEIGHT,
         retries=1,

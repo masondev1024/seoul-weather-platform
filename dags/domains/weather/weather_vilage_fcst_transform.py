@@ -47,6 +47,7 @@ from common.runtime_guard import (  # noqa: E402
     validate_dev_runtime,
 )
 from weather_ingest.common.resources import DbtWorkload  # noqa: E402
+from weather_ingest.kma_coordination import weather_heavy_pool  # noqa: E402
 from weather_ingest.runtime import build_weather_manifest  # noqa: E402
 import weather_dbt_execution as weather_dbt  # noqa: E402
 from weather_dbt_runtime import (  # noqa: E402
@@ -406,7 +407,9 @@ def dbt_task(spec: DbtPhaseSpec) -> PythonOperator:
         "on_failure_callback": record_weather_problem,
     }
     if spec.workload is DbtWorkload.TRINO:
-        operator_kwargs["pool"] = TRINO_WEATHER_LEGACY_HEAVY_POOL
+        operator_kwargs["pool"] = weather_heavy_pool(
+            TRINO_WEATHER_LEGACY_HEAVY_POOL
+        )
     return PythonOperator(**operator_kwargs)
 
 

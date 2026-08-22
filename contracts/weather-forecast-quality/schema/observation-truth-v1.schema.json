@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/masondev1024/seoul-weather-platform/contracts/weather-forecast-quality/observation-truth-v1.schema.json",
+  "title": "Observation truth record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "grid_id", "nx", "ny", "variable", "value_kind", "value", "unit", "observed_at", "truth_source", "truth_revision", "truth_as_of", "collected_at", "quality"],
+  "properties": {
+    "schema_version": {"const": "observation-truth/v1"},
+    "grid_id": {"type": "string", "pattern": "^kma_[0-9]+_[0-9]+$"},
+    "nx": {"type": "integer"},
+    "ny": {"type": "integer"},
+    "variable": {"type": "string", "minLength": 1},
+    "value_kind": {"enum": ["continuous", "binary", "categorical"]},
+    "value": {},
+    "unit": {"type": "string", "minLength": 1},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "truth_source": {"type": "string", "minLength": 1},
+    "truth_revision": {"type": "string", "minLength": 1},
+    "truth_as_of": {"type": "string", "format": "date-time"},
+    "collected_at": {"type": "string", "format": "date-time"},
+    "quality": {"enum": ["provisional", "final", "rejected"]}
+  },
+  "allOf": [
+    {"if": {"properties": {"value_kind": {"const": "continuous"}}}, "then": {"properties": {"value": {"type": "number"}}}},
+    {"if": {"properties": {"value_kind": {"const": "binary"}}}, "then": {"properties": {"value": {"enum": [0, 1, false, true]}}}},
+    {"if": {"properties": {"value_kind": {"const": "categorical"}}}, "then": {"properties": {"value": {"type": "string", "minLength": 1}}}}
+  ]
+}
