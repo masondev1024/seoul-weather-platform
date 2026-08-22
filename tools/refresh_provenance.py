@@ -30,10 +30,20 @@ HANDOFF_PRIOR_AIRFLOW_PATHS = frozenset(
         "dags/domains/weather/weather_vilage_fcst_bronze.py",
     }
 )
+LOCAL_RUNTIME_VALIDATOR = (
+    "python -m pytest tests/deploy/test_local_runtime_contract.py -q"
+)
+RETIRED_HANDOFF_PATHS = frozenset(
+    {
+        "README-MAC.md",
+        "docker-compose.mac.yml",
+        "docker-compose.prod.yml",
+        "marquez.prod.yml",
+    }
+)
 HANDOFF_OVERLAY_VALIDATORS = {
     ".dockerignore": "python -m tools.repository_policy --repo-root .",
-    "Dockerfile.airflow": "python -m pytest tests/deploy/test_mac_runtime_contract.py -q",
-    "README-MAC.md": "python -m pytest tests/deploy/test_mac_runtime_contract.py -q",
+    "Dockerfile.airflow": LOCAL_RUNTIME_VALIDATOR,
     "dags/common/ops/run_sink.py": "python -m pytest dags/common/tests -q",
     "dags/common/ops/telemetry_switch.py": "python -m pytest dags/common/tests -q",
     "dags/common/raw_write.py": "python -m pytest dags/common/tests -q",
@@ -47,18 +57,15 @@ HANDOFF_OVERLAY_VALIDATORS = {
     "dags/domains/weather/weather_ingest/raw_spool.py": "python -m pytest dags/domains/weather/tests -q",
     "dags/domains/weather/weather_ingest/runtime.py": "python -m pytest dags/domains/weather/tests -q",
     "dags/domains/weather/weather_vilage_fcst_bronze.py": "python -m pytest dags/domains/weather/tests -q",
-    "docker-compose.mac.yml": "python -m pytest tests/deploy/test_mac_runtime_contract.py -q",
-    "docker-compose.prod.yml": "python -m pytest tests/deploy/test_mac_runtime_contract.py -q",
-    "docker-compose.yml": "python -m pytest tests/deploy/test_mac_runtime_contract.py -q",
-    "marquez.prod.yml": "python -m pytest tests/deploy/test_mac_runtime_contract.py -q",
+    "docker-compose.yml": LOCAL_RUNTIME_VALIDATOR,
     "scripts/safe-trigger-dag.sh": "bash -n scripts/safe-trigger-dag.sh",
     "scripts/safe_trigger_dag.py": "python -m compileall -q scripts/safe_trigger_dag.py",
-    "trino/catalog-prod/iceberg.properties": "python -m pytest tests/deploy/test_mac_runtime_contract.py -q",
-    "trino/config.properties": "python -m pytest tests/deploy/test_mac_runtime_contract.py -q",
-    "trino/iceberg.properties": "python -m pytest tests/deploy/test_mac_runtime_contract.py -q",
-    "trino/jvm.config": "python -m pytest tests/deploy/test_mac_runtime_contract.py -q",
-    "trino/resource-groups.json": "python -m pytest tests/deploy/test_mac_runtime_contract.py -q",
-    "trino/resource-groups.properties": "python -m pytest tests/deploy/test_mac_runtime_contract.py -q",
+    "trino/catalog-prod/iceberg.properties": LOCAL_RUNTIME_VALIDATOR,
+    "trino/config.properties": LOCAL_RUNTIME_VALIDATOR,
+    "trino/iceberg.properties": LOCAL_RUNTIME_VALIDATOR,
+    "trino/jvm.config": LOCAL_RUNTIME_VALIDATOR,
+    "trino/resource-groups.json": LOCAL_RUNTIME_VALIDATOR,
+    "trino/resource-groups.properties": LOCAL_RUNTIME_VALIDATOR,
 }
 MAC_CUTOVER_ADAPTATION_VALIDATORS = {
     "dags/domains/weather/tests/test_weather_serving_snapshot_refresh.py": (
@@ -397,6 +404,8 @@ def rendered_manifest(repo_root: Path, manifest_path: Path) -> bytes:
         for record in preserved_source_records(existing)
         if _normalized(str(record.get("target_path", "")))
         not in HANDOFF_OVERLAY_VALIDATORS
+        and _normalized(str(record.get("target_path", "")))
+        not in RETIRED_HANDOFF_PATHS
         and _normalized(str(record.get("target_path", "")))
         not in MAC_CUTOVER_ADAPTATION_VALIDATORS
     ]

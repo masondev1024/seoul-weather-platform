@@ -17,8 +17,8 @@ post-public branch protection on `main`.
 | Gate | Current evidence | Status |
 |---|---|---|
 | Repo-local publication gates | Apache-2.0 `LICENSE`, `NOTICE`, provenance authorization, secretless example config, and public-release validator are current | **PASS** |
-| Secretless example | `.env.example` contains Weather-only placeholders and the Mac Trino envelope | Pass |
-| Runtime separation | Compose project `seoul-weather-platform-mac`; personal secrets remain Git-ignored | Pass for local design |
+| Secretless example | `.env.example` contains Weather-only placeholders and the local Trino envelope | Pass |
+| Runtime separation | `docker-compose.local.yml`; compatibility project ID `seoul-weather-platform-mac`; personal secrets remain Git-ignored | Pass for local design |
 | Runtime lineage cost | Marquez inactive; Airflow/dbt OpenLineage disabled; file provenance retained | Pass |
 | Redistribution rights | `provenance/source-files.jsonl` records approved 2026-08-21 public republication authorization while retaining lineage | Pass |
 | Authorized license/notice | Root `LICENSE` and `NOTICE` record Apache-2.0 terms and attribution | Pass |

@@ -113,6 +113,7 @@ def find_secret_candidates(repo_root: Path, paths: Iterable[str]) -> list[Secret
 
 
 def repository_candidate_paths(repo_root: Path) -> list[str]:
+    root = repo_root.resolve()
     result = subprocess.run(
         [
             "git",
@@ -128,7 +129,11 @@ def repository_candidate_paths(repo_root: Path) -> list[str]:
         text=True,
         encoding="utf-8",
     )
-    return [line for line in result.stdout.splitlines() if line]
+    return [
+        line
+        for line in result.stdout.splitlines()
+        if line and (root / Path(line)).is_file()
+    ]
 
 
 def build_parser() -> argparse.ArgumentParser:

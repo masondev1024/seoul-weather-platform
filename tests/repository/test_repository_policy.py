@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
-from tools.repository_policy import find_forbidden_paths, find_secret_candidates
+from tools.repository_policy import (
+    find_forbidden_paths,
+    find_secret_candidates,
+    repository_candidate_paths,
+)
 
 
 def test_forbidden_paths_cover_local_harness_and_generated_outputs() -> None:
@@ -22,6 +27,21 @@ def test_forbidden_paths_cover_local_harness_and_generated_outputs() -> None:
 
 def test_forbidden_paths_allow_the_secretless_environment_template() -> None:
     assert find_forbidden_paths([".env.example"]) == []
+
+
+def test_repository_candidates_exclude_deleted_tracked_paths(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    retained = tmp_path / "retained.txt"
+    deleted = tmp_path / "deleted.txt"
+    retained.write_text("retained\n", encoding="utf-8")
+    deleted.write_text("deleted\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", "retained.txt", "deleted.txt"],
+        check=True,
+    )
+    deleted.unlink()
+
+    assert repository_candidate_paths(tmp_path) == ["retained.txt"]
 
 
 def test_secret_scanner_redacts_but_does_not_return_secret_value(tmp_path: Path) -> None:

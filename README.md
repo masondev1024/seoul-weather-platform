@@ -2,7 +2,7 @@
 
 Weather 수집, dbt 변환, D1 publication, Weather Risk K-Skill 연결 코드를 한 저장소에서 관리하는 공개 개인 데이터 플랫폼이다.
 
-코드는 public이지만 운영 plane은 개인 Mac과 개인 Cloudflare 계정에 남는다. 자격증명, Airflow metadata, Docker volume과 실행 로그는 저장소에 포함하지 않는다.
+코드는 public이지만 운영 plane은 개인 로컬 노트북과 개인 Cloudflare 계정에 남는다. 자격증명, Airflow metadata, Docker volume과 실행 로그는 저장소에 포함하지 않는다.
 
 ## 현재 경계
 
@@ -124,9 +124,12 @@ python dbt/serving_contract/validate_serving_contract.py --source dbt/domains/tr
 
 리소스 owner, 장애 영향과 복구 경계는 `docs/operations/current-resource-dependencies.md`에 secret 없이 기록한다.
 
+로컬 실행은 공통 `docker-compose.yml`과 `docker-compose.local.yml` 두 파일만 조합한다. 명령과 리소스 제한은 `README-LOCAL.md`를 따른다.
+
 ## 주요 문서
 
 - `CONTEXT.md` — 저장소 용어와 정본 경계
+- `README-LOCAL.md` — 로컬 Compose 실행과 메모리 운영 기준
 - `docs/superpowers/specs/2026-08-14-weather-repository-separation-design.md` — 최종 분리 설계
 - `docs/architecture/platform-boundaries.md` — runtime ownership seam
 - `docs/operations/current-resource-dependencies.md` — 기존 resource 의존성

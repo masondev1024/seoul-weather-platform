@@ -1,7 +1,12 @@
-name: elt-infra-prod
+# Personal local runtime overlay. Apply this after docker-compose.yml.
+#
+# The Compose project and network names intentionally retain their existing
+# values so this file continues to manage the current containers and named
+# volumes. Renaming those identifiers requires a separate state-migration plan.
+name: seoul-weather-platform-mac
 
-x-prod-airflow: &prod-airflow
-  image: "${ASK_SEOUL_AIRFLOW_IMAGE:?ASK_SEOUL_AIRFLOW_IMAGE must be an immutable digest}"
+x-local-airflow: &local-airflow
+  image: ask-seoul-weather-airflow:mac-local
   build: !reset null
   env_file: !override
     - "${ASK_SEOUL_PROD_ENV_FILE:-.env.prod}"
@@ -12,38 +17,30 @@ x-prod-airflow: &prod-airflow
     AIRFLOW__OPENLINEAGE__DISABLE_SOURCE_CODE: "true"
     AIRFLOW__OPENLINEAGE__INCLUDE_FULL_TASK_INFO: "false"
     AIRFLOW__OPENLINEAGE__DEBUG_MODE: "false"
-    ASK_SEOUL_DBT_OPENLINEAGE_ENABLED: "true"
     ASK_SEOUL_DBT_OPENLINEAGE_URL: "http://marquez-api:5000"
     ASK_SEOUL_DBT_OPENLINEAGE_ENDPOINT: "api/v1/lineage"
     ASK_SEOUL_DBT_OPENLINEAGE_NAMESPACE_PREFIX: "ask-seoul-prod-dbt"
+    AIRFLOW__OPENLINEAGE__DISABLED: "true"
+    ASK_SEOUL_DBT_OPENLINEAGE_ENABLED: "false"
+    ASK_SEOUL_KMA_DAG_SCHEDULE: "20 2,5,8,11,14,17,20,23 * * *"
+    ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE: "0 * * * *"
+    KMA_NUM_OF_ROWS: "2000"
 
 services:
   postgres:
     env_file: !override
       - "${ASK_SEOUL_PROD_ENV_FILE:-.env.prod}"
 
-  marquez-db:
-    environment:
-      POSTGRES_USER: "${MARQUEZ_POSTGRES_USER:?MARQUEZ_POSTGRES_USER is required in prod}"
-      POSTGRES_PASSWORD: "${MARQUEZ_POSTGRES_PASSWORD:?MARQUEZ_POSTGRES_PASSWORD is required in prod}"
-      POSTGRES_DB: "${MARQUEZ_POSTGRES_DB:?MARQUEZ_POSTGRES_DB is required in prod}"
-
-  marquez-api:
-    environment:
-      MARQUEZ_CONFIG: /usr/src/app/marquez.prod.yml
-      MARQUEZ_PORT: "5000"
-      MARQUEZ_ADMIN_PORT: "5001"
-      POSTGRES_HOST: marquez-db
-      POSTGRES_PORT: "5432"
-      POSTGRES_USER: "${MARQUEZ_POSTGRES_USER:?MARQUEZ_POSTGRES_USER is required in prod}"
-      POSTGRES_PASSWORD: "${MARQUEZ_POSTGRES_PASSWORD:?MARQUEZ_POSTGRES_PASSWORD is required in prod}"
-      POSTGRES_DB: "${MARQUEZ_POSTGRES_DB:?MARQUEZ_POSTGRES_DB is required in prod}"
-    volumes:
-      - ./marquez.prod.yml:/usr/src/app/marquez.prod.yml:ro
-
   trino:
     env_file: !override
       - "${ASK_SEOUL_PROD_ENV_FILE:-.env.prod}"
+    mem_limit: 5g
+    environment:
+      TRINO_TASK_CONCURRENCY: "2"
+      TRINO_QUERY_MAX_MEMORY_PER_NODE: "800MB"
+      TRINO_MEMORY_HEAP_HEADROOM_PER_NODE: "1500MB"
+      TRINO_QUERY_MAX_MEMORY: "800MB"
+      TRINO_QUERY_MAX_TOTAL_MEMORY: "1200MB"
     depends_on:
       trino-cache-init:
         condition: service_completed_successfully
@@ -65,19 +62,26 @@ services:
       - trino_cache:/data/trino
 
   airflow-init:
-    <<: *prod-airflow
+    <<: *local-airflow
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
   airflow-apiserver:
-    <<: *prod-airflow
+    <<: *local-airflow
+    build: !reset null
   airflow-scheduler:
-    <<: *prod-airflow
+    <<: *local-airflow
+    build: !reset null
   airflow-dag-processor:
-    <<: *prod-airflow
+    <<: *local-airflow
+    build: !reset null
   airflow-triggerer:
-    <<: *prod-airflow
+    <<: *local-airflow
+    build: !reset null
 
 networks:
   elt_net:
-    name: elt-infra-prod-net
+    name: seoul-weather-platform-mac-net
 
 volumes:
   trino_cache:
