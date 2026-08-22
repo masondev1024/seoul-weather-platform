@@ -292,4 +292,3 @@ def test_module_cli_initializes_the_configured_ledger_idempotently(
         assert "schema_version=1" in result.stdout
 
     assert path.is_file()
-

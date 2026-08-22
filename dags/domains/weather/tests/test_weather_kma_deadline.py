@@ -203,4 +203,3 @@ def test_expired_cycle_fails_before_http_admission():
 
     with pytest.raises(CycleDeadlineExceeded, match="request"):
         deadline.require_request(request_timeout_seconds=1, headroom_seconds=0)
-
