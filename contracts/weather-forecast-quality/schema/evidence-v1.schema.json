@@ -1,0 +1,326 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/masondev1024/seoul-weather-platform/contracts/weather-forecast-quality/evidence-v1.schema.json",
+  "title": "Weather forecast-quality AI evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fixture_notice",
+    "evaluation_as_of",
+    "policy_versions",
+    "universe",
+    "adapters",
+    "cohorts",
+    "vintage_gap_count",
+    "vintage_gap_counts",
+    "truth_excluded_counts",
+    "limitations",
+    "evidence_revision"
+  ],
+  "properties": {
+    "schema_version": {"const": "weather-forecast-quality-evidence/v1"},
+    "fixture_notice": {"const": "synthetic_reference_only_not_current_seoul_accuracy"},
+    "evaluation_as_of": {"type": "string", "format": "date-time"},
+    "evidence_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "policy_versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vintage", "truth", "evidence_gate", "calibration"],
+      "properties": {
+        "vintage": {"const": "forecast-vintage-cutoff/v1"},
+        "truth": {"const": "observation-truth-policy/v1"},
+        "evidence_gate": {"const": "metric-evidence-gate/v1"},
+        "calibration": {"const": "pop-calibration/v1"}
+      }
+    },
+    "universe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "expected_grid_count", "observed_grid_count", "population_revision"],
+      "properties": {
+        "scope": {"const": "seoul_kma_80"},
+        "expected_grid_count": {"const": 80},
+        "observed_grid_count": {"const": 80},
+        "population_revision": {"type": "string", "pattern": "^seoul_kma_80:[0-9a-f]{64}$"}
+      }
+    },
+    "adapters": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["product_family", "status"],
+        "properties": {
+          "product_family": {"enum": ["short_range", "ultra_short", "mid_term"]},
+          "status": {"enum": ["fixture_enabled", "contract_only_disabled"]}
+        }
+      }
+    },
+    "cohorts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/cohort"}
+    },
+    "vintage_gap_count": {"type": "integer", "minimum": 0},
+    "vintage_gap_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["D-1", "D-2", "D-3"],
+      "properties": {
+        "D-1": {"type": "integer", "minimum": 0},
+        "D-2": {"type": "integer", "minimum": 0},
+        "D-3": {"type": "integer", "minimum": 0}
+      }
+    },
+    "truth_excluded_counts": {
+      "type": "object",
+      "additionalProperties": {"type": "integer", "minimum": 0}
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "$defs": {
+    "cohort": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cohort_id",
+        "product_family",
+        "variable",
+        "vintage_label",
+        "valid_from",
+        "valid_to",
+        "metric_family",
+        "unit",
+        "grid_scope",
+        "population_revision",
+        "expected_count",
+        "sample_count",
+        "matched_coverage",
+        "excluded_counts",
+        "evidence_state",
+        "evidence_gate_version",
+        "truth_policy_version",
+        "truth_sources",
+        "truth_revisions",
+        "metrics",
+        "metric_metadata",
+        "limitations"
+      ],
+      "properties": {
+        "cohort_id": {"type": "string", "pattern": "^[0-9a-f]{24}$"},
+        "product_family": {"const": "short_range"},
+        "variable": {"type": "string", "minLength": 1},
+        "vintage_label": {"enum": ["D-3", "D-2", "D-1"]},
+        "valid_from": {"type": "string", "format": "date-time"},
+        "valid_to": {"type": "string", "format": "date-time"},
+        "metric_family": {"enum": ["continuous", "probabilistic", "categorical"]},
+        "unit": {"type": "string", "minLength": 1},
+        "grid_scope": {"const": "seoul_kma_80"},
+        "population_revision": {"const": "seoul_kma_80:ed99fc182211cacfb61409a34b85dee7db95742a1adbb7eb47d0624698370c7d"},
+        "expected_count": {"type": "integer", "minimum": 1},
+        "sample_count": {"type": "integer", "minimum": 0},
+        "matched_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "excluded_counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+        "evidence_state": {"enum": ["sufficient", "degraded", "insufficient_evidence"]},
+        "evidence_gate_version": {"const": "metric-evidence-gate/v1"},
+        "truth_policy_version": {"const": "observation-truth-policy/v1"},
+        "truth_sources": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "truth_revisions": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "metrics": {"type": "object"},
+        "metric_metadata": {"type": "object"},
+        "limitations": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"metric_family": {"const": "continuous"}}},
+          "then": {"properties": {"metric_metadata": {"$ref": "#/$defs/continuousMetricMetadata"}}}
+        },
+        {
+          "if": {"properties": {"metric_family": {"const": "probabilistic"}}},
+          "then": {"properties": {"metric_metadata": {"$ref": "#/$defs/probabilityMetricMetadata"}}}
+        },
+        {
+          "if": {"properties": {"metric_family": {"const": "categorical"}}},
+          "then": {"properties": {"metric_metadata": {"$ref": "#/$defs/categoricalMetricMetadata"}}}
+        },
+        {
+          "if": {"properties": {"metric_family": {"const": "continuous"}, "sample_count": {"minimum": 1}}},
+          "then": {"properties": {"metrics": {"$ref": "#/$defs/continuousMetrics"}}}
+        },
+        {
+          "if": {"properties": {"metric_family": {"const": "probabilistic"}, "sample_count": {"minimum": 1}}},
+          "then": {"properties": {"metrics": {"$ref": "#/$defs/probabilityMetrics"}}}
+        },
+        {
+          "if": {"properties": {"metric_family": {"const": "categorical"}, "sample_count": {"minimum": 1}}},
+          "then": {"properties": {"metrics": {"$ref": "#/$defs/categoricalOnlyMetrics"}}}
+        },
+        {
+          "if": {"properties": {"sample_count": {"const": 0}}},
+          "then": {
+            "properties": {
+              "metrics": {"type": "object", "maxProperties": 0},
+              "evidence_state": {"const": "insufficient_evidence"}
+            }
+          }
+        }
+      ]
+    },
+    "metricDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit", "direction"],
+      "properties": {
+        "unit": {"type": "string", "minLength": 1},
+        "direction": {"enum": ["lower_is_better", "higher_is_better", "zero_is_best", "descriptive"]}
+      }
+    },
+    "continuousMetricMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["continuous"],
+      "properties": {
+        "continuous": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mae", "rmse", "bias"],
+          "properties": {
+            "mae": {"$ref": "#/$defs/metricDefinition"},
+            "rmse": {"$ref": "#/$defs/metricDefinition"},
+            "bias": {"$ref": "#/$defs/metricDefinition"}
+          }
+        }
+      }
+    },
+    "categoricalMetricDefinitions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["true_positive", "false_positive", "true_negative", "false_negative", "precision", "recall", "f1", "accuracy", "positive_prevalence"],
+      "properties": {
+        "true_positive": {"$ref": "#/$defs/metricDefinition"},
+        "false_positive": {"$ref": "#/$defs/metricDefinition"},
+        "true_negative": {"$ref": "#/$defs/metricDefinition"},
+        "false_negative": {"$ref": "#/$defs/metricDefinition"},
+        "precision": {"$ref": "#/$defs/metricDefinition"},
+        "recall": {"$ref": "#/$defs/metricDefinition"},
+        "f1": {"$ref": "#/$defs/metricDefinition"},
+        "accuracy": {"$ref": "#/$defs/metricDefinition"},
+        "positive_prevalence": {"$ref": "#/$defs/metricDefinition"}
+      }
+    },
+    "categoricalMetricMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["categorical"],
+      "properties": {"categorical": {"$ref": "#/$defs/categoricalMetricDefinitions"}}
+    },
+    "probabilityMetricMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["probabilistic", "categorical"],
+      "properties": {
+        "probabilistic": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["brier_score", "expected_calibration_error"],
+          "properties": {
+            "brier_score": {"$ref": "#/$defs/metricDefinition"},
+            "expected_calibration_error": {"$ref": "#/$defs/metricDefinition"}
+          }
+        },
+        "categorical": {"$ref": "#/$defs/categoricalMetricDefinitions"}
+      }
+    },
+    "continuousMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["continuous"],
+      "properties": {
+        "continuous": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["metric_family", "sample_count", "mae", "rmse", "bias"],
+          "properties": {
+            "metric_family": {"const": "continuous"},
+            "sample_count": {"type": "integer", "minimum": 1},
+            "mae": {"type": "number", "minimum": 0},
+            "rmse": {"type": "number", "minimum": 0},
+            "bias": {"type": "number"}
+          }
+        }
+      }
+    },
+    "probabilityMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["probabilistic", "categorical"],
+      "properties": {
+        "probabilistic": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["metric_family", "sample_count", "brier_score", "expected_calibration_error", "calibration_bins"],
+          "properties": {
+            "metric_family": {"const": "probabilistic"},
+            "sample_count": {"type": "integer", "minimum": 1},
+            "brier_score": {"type": "number", "minimum": 0, "maximum": 1},
+            "expected_calibration_error": {"type": "number", "minimum": 0, "maximum": 1},
+            "calibration_bins": {
+              "type": "array",
+              "minItems": 10,
+              "maxItems": 10,
+              "items": {"$ref": "#/$defs/calibrationBin"}
+            }
+          }
+        },
+        "categorical": {"$ref": "#/$defs/categoricalMetrics"}
+      }
+    },
+    "categoricalOnlyMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["categorical"],
+      "properties": {"categorical": {"$ref": "#/$defs/categoricalMetrics"}}
+    },
+    "calibrationBin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bin_index", "lower_bound", "upper_bound", "lower_inclusive", "upper_inclusive", "sample_count", "mean_forecast_probability", "observed_frequency", "weighted_absolute_calibration_gap"],
+      "properties": {
+        "bin_index": {"type": "integer", "minimum": 0, "maximum": 9},
+        "lower_bound": {"type": "number", "minimum": 0, "maximum": 0.9},
+        "upper_bound": {"type": "number", "minimum": 0.1, "maximum": 1},
+        "lower_inclusive": {"const": true},
+        "upper_inclusive": {"type": "boolean"},
+        "sample_count": {"type": "integer", "minimum": 0},
+        "mean_forecast_probability": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "observed_frequency": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "weighted_absolute_calibration_gap": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "categoricalMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric_family", "sample_count", "true_positive", "false_positive", "true_negative", "false_negative", "precision", "recall", "f1", "accuracy", "positive_prevalence"],
+      "properties": {
+        "metric_family": {"const": "categorical"},
+        "sample_count": {"type": "integer", "minimum": 1},
+        "true_positive": {"type": "integer", "minimum": 0},
+        "false_positive": {"type": "integer", "minimum": 0},
+        "true_negative": {"type": "integer", "minimum": 0},
+        "false_negative": {"type": "integer", "minimum": 0},
+        "precision": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "recall": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "f1": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "positive_prevalence": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    }
+  }
+}

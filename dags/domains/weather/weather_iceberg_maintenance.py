@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from airflow import DAG
@@ -38,7 +38,7 @@ if DAGS_ROOT_DIR not in sys.path:
     sys.path.insert(0, DAGS_ROOT_DIR)
 
 from common.errors.airflow import problem_failure_callback  # noqa: E402
-from common.pools import TRINO_WEATHER_LEGACY_HEAVY_POOL  # noqa: E402
+from common.pools import TRINO_WEATHER_HEAVY_POOL  # noqa: E402
 from common.runtime_guard import (  # noqa: E402
     TARGET_CHOICES,
     default_target,
@@ -55,6 +55,12 @@ from weather_ingest.iceberg_maintenance import (  # noqa: E402
 KST = ZoneInfo("Asia/Seoul")
 DOMAIN = "weather"
 record_weather_problem = problem_failure_callback(domain=DOMAIN)
+
+# A single-node personal Trino must always prioritize fresh serving data over
+# optional file compaction. The task bound caps a stalled maintenance action,
+# and no maintenance mutation is retried.
+MAINTENANCE_ACTION_TIMEOUT = timedelta(minutes=8)
+MAINTENANCE_PRIORITY_WEIGHT = 1
 
 DEFAULT_PARAMS = {
     "target": Param(
@@ -146,9 +152,11 @@ def _action_task(schema: str, table_name: str, operation: str, *, isolate_table:
             "table_name": table_name,
             "operation": operation,
         },
-        "pool": TRINO_WEATHER_LEGACY_HEAVY_POOL,
+        "pool": TRINO_WEATHER_HEAVY_POOL,
         "pool_slots": 1,
         "weight_rule": "absolute",
+        "priority_weight": MAINTENANCE_PRIORITY_WEIGHT,
+        "execution_timeout": MAINTENANCE_ACTION_TIMEOUT,
         "retries": 0,
         "on_failure_callback": record_weather_problem,
     }
@@ -161,10 +169,8 @@ def _action_task(schema: str, table_name: str, operation: str, *, isolate_table:
 
 
 def maintenance_schedule() -> str | None:
-    """주 1회, 일요일 04:00 KST. 테스트에서 override 가능."""
-    if "ASK_SEOUL_WEATHER_MAINTENANCE_DAG_SCHEDULE" in os.environ:
-        return os.environ["ASK_SEOUL_WEATHER_MAINTENANCE_DAG_SCHEDULE"] or None
-    return "0 4 * * 0"
+    """Require an explicit schedule for destructive, low-priority maintenance."""
+    return os.getenv("ASK_SEOUL_WEATHER_MAINTENANCE_DAG_SCHEDULE", "").strip() or None
 
 
 with DAG(

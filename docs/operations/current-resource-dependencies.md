@@ -1,16 +1,17 @@
-# 기존 Weather 운영 리소스 의존성
+# 개인 Weather 운영 리소스 의존성
 
 ## 상태
 
-이 문서는 secret 값을 저장하지 않는다. 1차 저장소 분리 동안 기존 ASK Seoul 리소스는 외부 의존성으로 남아 있으며 새 저장소가 소유하지 않는다.
+이 문서는 secret 값을 저장하지 않는다. Cloud resource는 Mason의 개인 계정에 있지만 public repository와 분리된 private operations plane이다.
 
 | 논리 리소스 | 역할 | 현재 상태 | owner/사용 승인 | 종료 시 영향 |
 |---|---|---|---|---|
-| Existing R2 raw | KMA raw·manifest 저장 | 확인 필요 | 확인 필요 | 신규 Bronze replay 불가 |
-| Existing Iceberg/Trino | Bronze·Silver·Gold query | 로컬 서비스 running 관찰 | 확인 필요 | dbt run·product 검증 불가 |
-| Existing D1 | public product publication | 확인 필요 | 확인 필요 | origin이 최신 publication을 읽지 못함 |
-| Existing Weather origin | `/skill/v1/...` 제공 | 확인 필요 | 확인 필요 | hosted proxy upstream 실패 |
-| NomaDamas hosted proxy | K-Skill public route | 외부 upstream | NomaDamas | 설치된 skill query 실패 |
+| Personal R2 raw/Data Catalog | KMA raw·Iceberg 저장 | 운영 중 | Mason | 신규 Bronze와 dbt query 불가 |
+| Local Trino | Bronze·Silver·Gold query | 5 GiB limit, FS cache 적용 | Mason의 로컬 노트북 | transform·snapshot 중단 |
+| Personal D1 | public product publication | 운영 중 | Mason Cloudflare | origin 최신 발행본 미제공 |
+| Personal Weather origin | `/skill/v1/...` 제공 | 운영 중 | Mason Cloudflare | proxy upstream 실패 |
+| Personal K-Skill proxy | 공개 3-route forwarding | 이 저장소에서 관리 | Mason Cloudflare | 기본 helper의 개인 origin 조회 실패 |
+| NomaDamas hosted proxy | 기본 K-Skill route | 조직 origin stale 관측 | NomaDamas | 기본 설정 query가 503 |
 
 ## Airflow 배포 승인 gate
 
@@ -23,11 +24,11 @@
 
 사용자의 명시 승인 전에는 기존 파이프라인을 pause·stop·restart하거나 새 DAG를 enable·trigger하지 않는다.
 
-## Exit criterion
+## 운영 완료 기준
 
-다음 조건이 확인돼야 기존 리소스 의존성을 제거할 수 있다.
+다음 조건을 함께 확인해야 end-to-end 정상으로 판정한다.
 
-- 개인 R2/Iceberg/D1 생성과 권한 검증
-- raw checksum copy 또는 KMA 재수집 결정
-- 개인 환경 Bronze → Silver → Gold replay
-- origin shadow comparison과 hosted proxy rollback 준비
+- Docker health, restart, OOM 상태 정상
+- 최신 Bronze → Silver → Gold run 성공
+- D1 publication/watchdog 성공과 API readback 일치
+- 개인 proxy 경유 K-Skill query 200 및 publication identity 확인

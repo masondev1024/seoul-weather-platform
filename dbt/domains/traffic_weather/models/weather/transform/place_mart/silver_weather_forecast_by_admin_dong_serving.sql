@@ -1,26 +1,20 @@
--- Serving working set for the public place forecast-change product.
--- Keep the legacy full-history relation intact; this relation contains only
--- yesterday onward forecast targets so normal publication never hashes the
--- expired-history target during MERGE.
+-- Serving working set for the public place forecast products.
+-- Rebuild through dbt-trino's intermediate-table rename path so publication
+-- never hashes the multi-million-row target during MERGE.  Only the latest
+-- and previous KMA issues per grid × forecast hour are needed downstream.
 {{ config(
-    materialized='incremental',
-    incremental_strategy='merge',
-    unique_key=['place_id', 'issued_at', 'forecast_at', 'category'],
-    on_schema_change='fail',
-    full_refresh=false,
-    views_enabled=false,
-    on_table_exists='drop',
+    materialized='table',
+    on_table_exists='rename',
     properties={
         "partitioning": "ARRAY['day(forecast_at)']"
     },
-    pre_hook=[
-        "{% if is_incremental() %}delete from {{ this }} where cast(forecast_at as date) < cast(current_timestamp at time zone 'Asia/Seoul' as date) - interval '1' day{% endif %}"
-    ],
     tags=['ask_seoul_weather_transform_serving_place_mart']
 ) }}
 
 with kst_window as (
-    select cast(current_timestamp at time zone 'Asia/Seoul' as date) - interval '1' day as min_forecast_date
+    select
+        cast({{ weather_serving_as_of_hour() }} as date) - interval '1' day as min_forecast_date,
+        {{ weather_serving_as_of_hour() }} - interval '24' hour as min_issued_at
 ),
 
 grid_forecast as (
@@ -48,13 +42,7 @@ grid_forecast as (
     from {{ ref('silver_kma_vilage_fcst') }}
     cross join kst_window
     where cast(forecast_at as date) >= kst_window.min_forecast_date
-    {% if is_incremental() %}
-      and collected_at >= (
-          select coalesce(max(collected_at), timestamp '1970-01-01 00:00:00')
-                 - interval '{{ weather_w1_lookback_minutes() }}' minute
-          from {{ this }}
-      )
-    {% endif %}
+      and issued_at >= kst_window.min_issued_at
 ),
 
 place_grid as (
@@ -132,6 +120,20 @@ selected_grid_forecast as (
     ) ranked_grid
 ),
 
+bounded_grid_forecast as (
+    select *
+    from (
+        select
+            selected_grid_forecast.*,
+            dense_rank() over (
+                partition by nx, ny, forecast_at
+                order by issued_at desc nulls last
+            ) as issue_rank
+        from selected_grid_forecast
+    ) ranked_issue
+    where issue_rank <= 2
+),
+
 joined_payload as (
     select
         grid_forecast.request_id,
@@ -166,7 +168,7 @@ joined_payload as (
         grid_forecast.load_date,
         grid_forecast.collected_at,
         grid_forecast.dag_run_id
-    from selected_grid_forecast as grid_forecast
+    from bounded_grid_forecast as grid_forecast
     inner join place_grid
         on grid_forecast.nx = place_grid.nx
        and grid_forecast.ny = place_grid.ny

@@ -127,11 +127,33 @@ def test_toolchain_lock_is_secret_free_and_records_required_runtimes() -> None:
 def test_runtime_dependency_locks_and_all_test_roots_are_declared() -> None:
     airflow_lock = REPO_ROOT / "runtime" / "requirements-airflow.lock.txt"
     dbt_lock = REPO_ROOT / "runtime" / "requirements-dbt.lock.txt"
+    airflow_dockerfile = (REPO_ROOT / "Dockerfile.airflow").read_text(
+        encoding="utf-8"
+    )
     project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert airflow_lock.is_file()
     assert dbt_lock.is_file()
-    assert "apache-airflow==3.2.2" in airflow_lock.read_text(encoding="utf-8")
+    airflow_requirements = airflow_lock.read_text(encoding="utf-8")
+    assert "apache-airflow==3.2.2" in airflow_requirements
+    for dependency in (
+        "boto3==1.43.0",
+        "trino==0.338.0",
+        "pyiceberg[pyarrow,s3fs]==0.11.1",
+        "pyiceberg-core==0.8.0",
+        "pyarrow==24.0.0",
+        "s3fs==2026.6.0",
+        "astronomer-cosmos[openlineage]==1.15.0",
+        "apache-airflow-providers-trino==6.6.0",
+    ):
+        assert dependency in airflow_requirements
+    assert "COPY --chown=airflow:root runtime/requirements-airflow.lock.txt" in (
+        airflow_dockerfile
+    )
+    assert "pip install --no-cache-dir -r /tmp/requirements-airflow.lock.txt" in (
+        airflow_dockerfile
+    )
+    assert "-r /tmp/requirements-dbt.lock.txt" in airflow_dockerfile
     assert "dbt-core==1.10.22" in dbt_lock.read_text(encoding="utf-8")
     assert "dbt-trino==1.10.2" in dbt_lock.read_text(encoding="utf-8")
     assert project["tool"]["pytest"]["ini_options"]["testpaths"] == [

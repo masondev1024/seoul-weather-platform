@@ -39,6 +39,7 @@ from common.runtime_guard import (  # noqa: E402
     default_target,
     validate_dev_runtime,
 )
+from weather_ingest.kma_coordination import weather_heavy_pool  # noqa: E402
 import weather_dbt_execution as weather_dbt  # noqa: E402
 from weather_dbt_runtime import (  # noqa: E402
     DBT_RETRY_DELAY,
@@ -77,6 +78,15 @@ REFRESH_DBT_TASK_IDS = (
 WEATHER_GOLD_PUBLICATION_READY_ASSET_REF = Asset(
     WEATHER_GOLD_PUBLICATION_READY_ASSET
 )
+
+
+def serving_snapshot_schedule() -> str | None:
+    """Allow personal runtimes to require explicit serving refresh triggers."""
+
+    variable = "ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE"
+    if variable in os.environ:
+        return os.environ[variable] or None
+    return "0 * * * *"
 
 
 def run_dbt_phase(
@@ -124,7 +134,7 @@ def _serving_snapshot_dbt_task(task_id: str, dbt_command: str) -> PythonOperator
             "serving_as_of_task_id": SERVING_AS_OF_HOUR_TASK_ID,
             "threads": 2,
         },
-        pool=TRINO_WEATHER_LEGACY_HEAVY_POOL,
+        pool=weather_heavy_pool(TRINO_WEATHER_LEGACY_HEAVY_POOL),
         weight_rule="absolute",
         priority_weight=SERVING_SNAPSHOT_PRIORITY_WEIGHT,
         retries=1,
@@ -204,7 +214,7 @@ with DAG(
     dag_id="weather_serving_snapshot_refresh",
     description="KST hourly refresh of the four public Weather serving snapshots.",
     start_date=datetime(2026, 1, 1, tzinfo=KST),
-    schedule="0 * * * *",
+    schedule=serving_snapshot_schedule(),
     catchup=False,
     max_active_runs=1,
     default_args={"retries": 1, "retry_delay": DBT_RETRY_DELAY},

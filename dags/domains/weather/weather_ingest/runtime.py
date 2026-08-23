@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import uuid
-import time
 import os
+import time
+import uuid
 from datetime import datetime, timezone
 from collections.abc import Iterable, Mapping
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
 from common.collection_slots import ExpectedSlot, is_slot_active, parse_activation_at, require_policy_boundary
 from common.raw_manifest import validate_raw_manifest
@@ -27,6 +27,12 @@ from weather_ingest.collection_slots import (
     weather_vilage_fcst_slots,
 )
 from weather_ingest.kma import SOURCE_ID, build_kma_url
+from weather_ingest.kma_coordination import (
+    PhysicalAttempt,
+    PhysicalAttemptBudgetHook,
+    SqliteAttemptLedger,
+    shared_guards_enabled,
+)
 from weather_ingest.landing import KmaGrid, KmaLanding
 from weather_ingest.raw_spool import RawPayloadSpool, configured_raw_payload_spool
 from weather_ingest.run_manifest import WeatherRunManifest
@@ -45,6 +51,7 @@ KMA_429_BACKOFF_SECONDS = (60.0, 180.0, 300.0)
 KMA_REQUEST_DELAY_SECONDS_ENV = "ASK_SEOUL_KMA_REQUEST_DELAY_SECONDS"
 DEFAULT_KMA_REQUEST_DELAY_SECONDS = 1.0
 _MISSING_OBJECT_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
+R2_TRANSIENT_RETRY_DELAYS_SECONDS = (1.0, 2.0)
 _COLLECTION_SLOT_ACTIVATION_ENV = "ASK_SEOUL_COLLECTION_SLOT_ACTIVATION_AT"
 _WEATHER_HISTORICAL_BOUNDARY_ENV = (
     "ASK_SEOUL_WEATHER_API_HUB_HISTORICAL_EARLIEST_ISSUED_AT"
@@ -101,11 +108,17 @@ class KmaHttpAdapter:
         *,
         delay_seconds: float = DEFAULT_KMA_REQUEST_DELAY_SECONDS,
         sleep: Callable[[float], None] = time.sleep,
+        before_attempt: Callable[[PhysicalAttempt], object] | None = None,
+        dag_run_id: str = "forecast-runtime",
+        request_id: Callable[[], str] = lambda: str(uuid.uuid4()),
     ) -> None:
         self._fetch = fetch
         self._delay_seconds = delay_seconds
         self._sleep = sleep
         self._has_successful_request = False
+        self._before_attempt = before_attempt
+        self._dag_run_id = dag_run_id
+        self._request_id = request_id
 
     def fetch_page(
         self,
@@ -119,6 +132,44 @@ class KmaHttpAdapter:
     ) -> tuple[int, bytes]:
         if self._has_successful_request:
             self._sleep(self._delay_seconds)
+        fetch_options = {
+            "max_attempts": 4,
+            "retry_statuses": KMA_RETRY_STATUSES,
+            "retry_base_delay_seconds": 30,
+            "retry_429_backoff_seconds": KMA_429_BACKOFF_SECONDS,
+        }
+        if self._before_attempt is not None:
+            logical_request_id = self._request_id()
+
+            def reserve(attempt_ordinal: int) -> None:
+                material = "\x1f".join(
+                    (
+                        SOURCE_ID,
+                        self._dag_run_id,
+                        base_date,
+                        base_time,
+                        str(nx),
+                        str(ny),
+                        str(page_no),
+                        logical_request_id,
+                        str(attempt_ordinal),
+                    )
+                )
+                self._before_attempt(
+                    PhysicalAttempt(
+                        reservation_id=hashlib.sha256(
+                            material.encode("utf-8")
+                        ).hexdigest(),
+                        source_id=SOURCE_ID,
+                        dag_run_id=self._dag_run_id,
+                        observed_slot=f"{base_date}T{base_time}",
+                        nx=nx,
+                        ny=ny,
+                        attempt_ordinal=attempt_ordinal,
+                    )
+                )
+
+            fetch_options["before_attempt"] = reserve
         response = self._fetch(
             build_kma_url(
                 base_date=base_date,
@@ -129,23 +180,53 @@ class KmaHttpAdapter:
                 num_of_rows=num_of_rows,
             ),
             "ask-seoul-kma-bronze/1.0",
-            max_attempts=4,
-            retry_statuses=KMA_RETRY_STATUSES,
-            retry_base_delay_seconds=30,
-            retry_429_backoff_seconds=KMA_429_BACKOFF_SECONDS,
+            **fetch_options,
         )
         self._has_successful_request = True
         return response
 
 
 class R2RawObjectStore:
-    def __init__(self, client: S3Client, *, bucket: str) -> None:
+    def __init__(
+        self,
+        client: S3Client,
+        *,
+        bucket: str,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._client = client
         self._bucket = bucket
+        self._sleep = sleep
+
+    def _retry_transient(self, operation: Callable[[], Any]) -> Any:
+        """Retry bounded R2 transport faults without retrying data-contract errors.
+
+        The SDK retries individual HTTP attempts. This small second envelope
+        covers a short Docker DNS outage after the SDK has exhausted its own
+        request attempts. Callers use immutable or conditional writes, so a
+        repeated invocation cannot silently overwrite a different payload.
+        """
+        from botocore.exceptions import (
+            ConnectionClosedError,
+            EndpointConnectionError,
+            ReadTimeoutError,
+        )
+
+        retryable = (ConnectionClosedError, EndpointConnectionError, ReadTimeoutError)
+        for delay in (*R2_TRANSIENT_RETRY_DELAYS_SECONDS, None):
+            try:
+                return operation()
+            except retryable:
+                if delay is None:
+                    raise
+                self._sleep(delay)
+        raise AssertionError("unreachable")
 
     def exists(self, key: str) -> bool:
         try:
-            self._client.head_object(Bucket=self._bucket, Key=key)
+            self._retry_transient(
+                lambda: self._client.head_object(Bucket=self._bucket, Key=key)
+            )
         except Exception as exc:
             error = (getattr(exc, "response", {}) or {}).get("Error", {})
             if str(error.get("Code", "")) in _MISSING_OBJECT_CODES:
@@ -154,21 +235,27 @@ class R2RawObjectStore:
         return True
 
     def read_bytes(self, key: str) -> bytes:
-        response = self._client.get_object(Bucket=self._bucket, Key=key)
+        response = self._retry_transient(
+            lambda: self._client.get_object(Bucket=self._bucket, Key=key)
+        )
         return response["Body"].read()
 
     def read_sha256(self, key: str) -> str | None:
-        response = self._client.head_object(Bucket=self._bucket, Key=key) or {}
+        response = self._retry_transient(
+            lambda: self._client.head_object(Bucket=self._bucket, Key=key)
+        ) or {}
         metadata = response.get("Metadata") or {}
         value = metadata.get("sha256")
         return str(value) if value is not None else None
 
     def write_bytes(self, key: str, payload: bytes, content_type: str) -> None:
-        self._client.put_object(
-            Bucket=self._bucket,
-            Key=key,
-            Body=payload,
-            ContentType=content_type,
+        self._retry_transient(
+            lambda: self._client.put_object(
+                Bucket=self._bucket,
+                Key=key,
+                Body=payload,
+                ContentType=content_type,
+            )
         )
 
     def write_bytes_if_absent(
@@ -181,16 +268,18 @@ class R2RawObjectStore:
 
         for _ in range(3):
             try:
-                self._client.put_object(
-                    Bucket=self._bucket,
-                    Key=key,
-                    Body=payload,
-                    ContentType=content_type,
-                    IfNoneMatch="*",
-                    Metadata={"sha256": hashlib.sha256(payload).hexdigest()},
-                    ContentMD5=base64.b64encode(
-                        hashlib.md5(payload, usedforsecurity=False).digest()
-                    ).decode("ascii"),
+                self._retry_transient(
+                    lambda: self._client.put_object(
+                        Bucket=self._bucket,
+                        Key=key,
+                        Body=payload,
+                        ContentType=content_type,
+                        IfNoneMatch="*",
+                        Metadata={"sha256": hashlib.sha256(payload).hexdigest()},
+                        ContentMD5=base64.b64encode(
+                            hashlib.md5(payload, usedforsecurity=False).digest()
+                        ).decode("ascii"),
+                    )
                 )
                 return True
             except ClientError as exc:
@@ -212,6 +301,10 @@ def _r2_client_config():
     from botocore.config import Config
 
     return Config(
+        connect_timeout=3,
+        read_timeout=30,
+        tcp_keepalive=True,
+        retries={"mode": "standard", "total_max_attempts": 3},
         request_checksum_calculation="when_required",
         response_checksum_validation="when_required",
     )
@@ -250,8 +343,18 @@ def build_weather_landing() -> KmaLanding:
             "Weather raw spool prune deferred: "
             f"error_type={type(exc).__name__}"
         )
+    before_attempt = None
+    if shared_guards_enabled():
+        before_attempt = PhysicalAttemptBudgetHook(
+            SqliteAttemptLedger.from_environment(),
+            clock=lambda: datetime.now(timezone.utc),
+        )
     return KmaLanding(
-        source=KmaHttpAdapter(fetch_url, delay_seconds=kma_request_delay_seconds()),
+        source=KmaHttpAdapter(
+            fetch_url,
+            delay_seconds=kma_request_delay_seconds(),
+            before_attempt=before_attempt,
+        ),
         raw_store=raw_store,
         raw_spool=raw_spool,
         raw_prefix=raw_prefix(),

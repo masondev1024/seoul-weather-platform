@@ -108,3 +108,31 @@ def test_inventory_manifest_contract_accepts_derived_airflow_record() -> None:
     ]
 
     assert inventory_manifest_errors(entries, records, "a" * 40) == []
+
+
+def test_inventory_manifest_contract_accepts_nested_cutover_derivation() -> None:
+    entries = [
+        {
+            "source_id": "airflow_weather",
+            "source_path": "domains/weather/weather_vilage_fcst_transform.py",
+            "target_path": "dags/domains/weather/weather_vilage_fcst_transform.py",
+        }
+    ]
+    records = [
+        {
+            "record_type": "derived",
+            "target_path": "dags/domains/weather/weather_vilage_fcst_transform.py",
+            "derived_from": {
+                "record_type": "derived",
+                "target_path": "dags/domains/weather/weather_vilage_fcst_transform.py",
+                "target_sha256": "b" * 64,
+                "upstream": {
+                    "record_type": "snapshot_copy",
+                    "source_commit": "a" * 40,
+                    "source_path": "domains/weather/weather_vilage_fcst_transform.py",
+                },
+            },
+        }
+    ]
+
+    assert inventory_manifest_errors(entries, records, "a" * 40) == []

@@ -24,11 +24,14 @@ DBT_RETRY_DELAY = timedelta(minutes=2)
 WEATHER_DBT_CONTRACT_VARS = {"weather_w2_canonical_revision_date": "2025-04-01"}
 WEATHER_DBT_RUN_RESULTS_XCOM_KEY = "weather_dbt_run_results_path"
 WEATHER_SNAPSHOT_VAR = "weather_snapshot_dag_run_id"
+WEATHER_SNAPSHOT_LOAD_DATE_VAR = "weather_snapshot_load_date"
+WEATHER_SNAPSHOT_LOAD_DATE_XCOM_KEY = "weather_snapshot_load_date"
 WEATHER_SERVING_AS_OF_HOUR_VAR = "weather_serving_as_of_hour"
 SERVING_AS_OF_HOUR_TASK_ID = "resolve_weather_serving_as_of_hour"
 
 KST = ZoneInfo("Asia/Seoul")
 _SERVING_AS_OF_HOUR_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:00:00$")
+_SNAPSHOT_LOAD_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def resolve_weather_serving_as_of_hour(
@@ -50,6 +53,26 @@ def _serving_as_of_hour_from_task(ti: Any, task_id: str | None) -> str | None:
     raw = ti.xcom_pull(task_ids=task_id)
     if not isinstance(raw, str) or not _SERVING_AS_OF_HOUR_RE.fullmatch(raw):
         raise RuntimeError("weather serving dbt phase requires a valid frozen KST as-of hour")
+    return raw
+
+
+def _snapshot_load_date_from_task(ti: Any, task_id: str | None) -> str | None:
+    if task_id is None:
+        return None
+    raw = ti.xcom_pull(
+        task_ids=task_id,
+        key=WEATHER_SNAPSHOT_LOAD_DATE_XCOM_KEY,
+    )
+    if not isinstance(raw, str) or not _SNAPSHOT_LOAD_DATE_RE.fullmatch(raw):
+        raise RuntimeError(
+            "weather serving dbt phase requires a valid Bronze load_date"
+        )
+    try:
+        datetime.strptime(raw, "%Y-%m-%d")
+    except ValueError as error:
+        raise RuntimeError(
+            "weather serving dbt phase requires a valid Bronze load_date"
+        ) from error
     return raw
 
 
@@ -109,12 +132,14 @@ def run_weather_dbt_phase(
     snapshot_run_id = (
         ti.xcom_pull(task_ids=snapshot_task_id) if snapshot_task_id else None
     )
+    snapshot_load_date = _snapshot_load_date_from_task(ti, snapshot_task_id)
     serving_as_of_hour = _serving_as_of_hour_from_task(ti, serving_as_of_task_id)
     run_results_path = None
     try:
         variables: dict[str, object] = dict(WEATHER_DBT_CONTRACT_VARS)
         if snapshot_task_id:
             variables[WEATHER_SNAPSHOT_VAR] = snapshot_run_id
+            variables[WEATHER_SNAPSHOT_LOAD_DATE_VAR] = snapshot_load_date
         if serving_as_of_hour is not None:
             variables[WEATHER_SERVING_AS_OF_HOUR_VAR] = serving_as_of_hour
         execution = dbt_executor.execute_dbt_phase(

@@ -1,0 +1,98 @@
+# Personal local runtime overlay. Apply this after docker-compose.yml.
+#
+# The Compose project and network names intentionally retain their existing
+# values so this file continues to manage the current containers and named
+# volumes. Renaming those identifiers requires a separate state-migration plan.
+name: seoul-weather-platform-mac
+
+x-local-airflow: &local-airflow
+  image: ask-seoul-weather-airflow:mac-local
+  build: !reset null
+  env_file: !override
+    - "${ASK_SEOUL_PROD_ENV_FILE:-.env.prod}"
+  environment:
+    AIRFLOW__OPENLINEAGE__TRANSPORT: '{"type": "http", "url": "http://marquez-api:5000", "endpoint": "api/v1/lineage"}'
+    AIRFLOW__OPENLINEAGE__NAMESPACE: "ask-seoul-prod-airflow"
+    AIRFLOW__OPENLINEAGE__SELECTIVE_ENABLE: "true"
+    AIRFLOW__OPENLINEAGE__DISABLE_SOURCE_CODE: "true"
+    AIRFLOW__OPENLINEAGE__INCLUDE_FULL_TASK_INFO: "false"
+    AIRFLOW__OPENLINEAGE__DEBUG_MODE: "false"
+    ASK_SEOUL_DBT_OPENLINEAGE_URL: "http://marquez-api:5000"
+    ASK_SEOUL_DBT_OPENLINEAGE_ENDPOINT: "api/v1/lineage"
+    ASK_SEOUL_DBT_OPENLINEAGE_NAMESPACE_PREFIX: "ask-seoul-prod-dbt"
+    AIRFLOW__OPENLINEAGE__DISABLED: "true"
+    ASK_SEOUL_DBT_OPENLINEAGE_ENABLED: "false"
+    # Airflow 3 Execution API token, not the public/UI JWT. A dbt subprocess
+    # can otherwise return after the default token lifetime and fail only when
+    # it reports XCom/task state.
+    AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "7200"
+    ASK_SEOUL_KMA_DAG_SCHEDULE: "20 2,5,8,11,14,17,20,23 * * *"
+    # Hourly observation is checked in but remains inert until the separately
+    # approved ledger bootstrap, pool validation, canary, and unpause sequence.
+    ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED: "false"
+    ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE: ""
+    ASK_SEOUL_KMA_CONTROL_ROOT: "/opt/airflow/logs/_weather_control"
+    ASK_SEOUL_KMA_ATTEMPT_LEDGER_PATH: "/opt/airflow/logs/_weather_control/kma_api_budget.sqlite3"
+    ASK_SEOUL_KMA_DAILY_ATTEMPT_LIMIT: "7500"
+    ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE: "0 * * * *"
+    KMA_NUM_OF_ROWS: "2000"
+
+services:
+  postgres:
+    env_file: !override
+      - "${ASK_SEOUL_PROD_ENV_FILE:-.env.prod}"
+
+  trino:
+    env_file: !override
+      - "${ASK_SEOUL_PROD_ENV_FILE:-.env.prod}"
+    mem_limit: 5g
+    environment:
+      TRINO_TASK_CONCURRENCY: "2"
+      TRINO_QUERY_MAX_MEMORY_PER_NODE: "800MB"
+      TRINO_MEMORY_HEAP_HEADROOM_PER_NODE: "1500MB"
+      TRINO_QUERY_MAX_MEMORY: "800MB"
+      TRINO_QUERY_MAX_TOTAL_MEMORY: "1200MB"
+    depends_on:
+      trino-cache-init:
+        condition: service_completed_successfully
+    volumes: !override
+      - ./trino/catalog-prod:/etc/trino/catalog:ro
+      - ./trino/jvm.config:/etc/trino/jvm.config:ro
+      - ./trino/config.properties:/etc/trino/config.properties:ro
+      - ./trino/resource-groups.properties:/etc/trino/resource-groups.properties:ro
+      - ./trino/resource-groups.json:/etc/trino/resource-groups.json:ro
+      - trino_cache:/data/trino
+
+  trino-cache-init:
+    image: trinodb/trino:482
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mkdir -p /data/trino/cache && chown trino:trino /data/trino/cache"]
+    volumes:
+      - trino_cache:/data/trino
+
+  airflow-init:
+    <<: *local-airflow
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+  airflow-apiserver:
+    <<: *local-airflow
+    build: !reset null
+  airflow-scheduler:
+    <<: *local-airflow
+    build: !reset null
+  airflow-dag-processor:
+    <<: *local-airflow
+    build: !reset null
+  airflow-triggerer:
+    <<: *local-airflow
+    build: !reset null
+
+networks:
+  elt_net:
+    name: seoul-weather-platform-mac-net
+
+volumes:
+  trino_cache:

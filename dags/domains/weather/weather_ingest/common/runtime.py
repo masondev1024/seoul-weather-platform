@@ -4,6 +4,7 @@ import re
 import urllib.parse
 import time
 from datetime import datetime, timezone
+from typing import Callable
 
 from common.errors import types as error_types
 from common.http import HttpCore, NoAuth, OK_2XX, QueryKey
@@ -150,6 +151,7 @@ def fetch_url(
     retry_statuses: tuple[int, ...] = (),
     retry_base_delay_seconds: float = 1.0,
     retry_429_backoff_seconds: tuple[float, ...] | None = None,
+    before_attempt: Callable[[int], object] | None = None,
 ) -> tuple[int, bytes]:
     retry_codes = set(retry_statuses)
     auth = QueryKey("serviceKey", required_env("KMA_SERVICE_KEY"))
@@ -159,6 +161,8 @@ def fetch_url(
             None,
             {"User-Agent": user_agent},
         )
+        if before_attempt is not None:
+            before_attempt(attempt)
         try:
             response = _HTTP.get(
                 prepared.url,

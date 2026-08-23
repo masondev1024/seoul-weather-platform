@@ -1,0 +1,24 @@
+Seoul Weather Platform
+
+This repository is published under the Apache License, Version 2.0.
+
+Publication authorization:
+
+The project team recorded approved team-code republication authorization dated 2026-08-21
+for this repository's selected Weather Platform source tree. That
+authorization permits public republication of the repository content while
+retaining the file-level source lineage, checksums, derivation notes, and
+validators recorded in provenance/source-files.jsonl.
+
+Third-party attribution:
+
+Portions of the Weather Risk contract evidence and K-Skill release material
+record provenance from NomaDamas/k-skill. That upstream project is attributed
+under the MIT License. This notice preserves attribution and does not assert
+exclusive authorship over upstream work.
+
+Operational boundary:
+
+This notice does not authorize publication of secrets, private runtime state,
+GitHub Releases, Docker images, Airflow deployments, or any infrastructure
+resource outside the repository content covered by the recorded authorization.

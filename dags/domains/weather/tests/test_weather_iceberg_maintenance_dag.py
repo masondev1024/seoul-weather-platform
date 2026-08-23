@@ -16,14 +16,23 @@ def _action_task_id(schema, name, operation):
     return f"{schema}__{name}__{operation}"
 
 
-def test_maintenance_dag_runs_weekly_and_is_paused_on_creation():
+def test_maintenance_dag_is_manual_by_default_and_paused_on_creation(monkeypatch):
+    monkeypatch.delenv("ASK_SEOUL_WEATHER_MAINTENANCE_DAG_SCHEDULE", raising=False)
     module = _module()
     dag = module.dag
     assert dag.dag_id == "weather_iceberg_maintenance"
-    assert dag.kwargs["schedule"] == "0 4 * * 0"
+    assert dag.kwargs["schedule"] is None
     assert dag.kwargs["max_active_runs"] == 1
     # 데이터 파괴 가능 DDL 을 돌리므로 생성 시 paused. 사람이 확인 후 unpause.
     assert dag.kwargs["is_paused_upon_creation"] is True
+
+
+def test_maintenance_schedule_requires_an_explicit_opt_in(monkeypatch):
+    monkeypatch.setenv("ASK_SEOUL_WEATHER_MAINTENANCE_DAG_SCHEDULE", "0 4 * * 0")
+
+    module = _module()
+
+    assert module.dag.kwargs["schedule"] == "0 4 * * 0"
 
 
 def test_every_owned_table_gets_all_three_operations_in_order():
@@ -38,7 +47,7 @@ def test_every_owned_table_gets_all_three_operations_in_order():
         assert dag.task_dict[ids[1]].downstream_task_ids >= {ids[2]}
 
 
-def test_actions_are_serialized_on_a_single_pool_slot_without_retry():
+def test_actions_are_serialized_bounded_and_low_priority_without_retry():
     module = _module()
     dag = module.dag
     for table in module.MAINTAINED_TABLES:
@@ -46,9 +55,11 @@ def test_actions_are_serialized_on_a_single_pool_slot_without_retry():
             task = dag.task_dict[_action_task_id(table.schema, table.name, op)]
             assert isinstance(task, FakePythonOperator)
             assert task.python_callable is module.run_maintenance_action
-            assert task.kwargs["pool"] == module.TRINO_WEATHER_LEGACY_HEAVY_POOL
+            assert task.kwargs["pool"] == module.TRINO_WEATHER_HEAVY_POOL
             assert task.kwargs["pool_slots"] == 1
             assert task.kwargs["weight_rule"] == "absolute"
+            assert task.kwargs["priority_weight"] == module.MAINTENANCE_PRIORITY_WEIGHT
+            assert task.kwargs["execution_timeout"] == module.MAINTENANCE_ACTION_TIMEOUT
             # mutation 은 자동 retry 하지 않는다.
             assert task.kwargs["retries"] == 0
 

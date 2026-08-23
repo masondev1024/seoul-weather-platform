@@ -1,0 +1,15 @@
+{
+  "schema_version": "forecast-vintage/v1",
+  "product_family": "short_range",
+  "grid_id": "kma_60_127",
+  "nx": 60,
+  "ny": 127,
+  "variable": "temperature_air_2m",
+  "value_kind": "continuous",
+  "value": 24.5,
+  "unit": "degC",
+  "issued_at": "2026-08-19T12:00:00+09:00",
+  "valid_at": "2026-08-20T12:00:00+09:00",
+  "source_id": "kma_vilage_fcst",
+  "source_revision": "example-v1"
+}

@@ -106,20 +106,21 @@ jobs:
       - name: Test secretless DagBag policy
         run: python -m pytest tests/repository/test_dagbag_harness.py tests/repository/test_scaffold_contract.py -q
 
-  dagbag-runtime:
-    name: dagbag-runtime
-    if: >
-      vars.WEATHER_GOVERNANCE_MODE == 'protected' &&
-      github.event_name == 'push' &&
-      (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
-    runs-on: [self-hosted, windows, weather-prod]
+  k-skill-proxy:
+    name: k-skill-proxy
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout protected branch commit
+      - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Check isolated runtime DagBag
-        run: python -m tools.dagbag_check --repo-root .
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.13.0
+      - name: Test personal K-skill proxy
+        run: npm test
+        working-directory: k-skill-proxy
 
   promotion-source:
     name: Promotion Source / required
@@ -136,34 +137,6 @@ jobs:
       - name: Validate pull request promotion source
         if: github.event_name == 'pull_request'
         run: python -m tools.promotion_source pull-request --event-path "$GITHUB_EVENT_PATH" --repository "$GITHUB_REPOSITORY"
-      - name: Require protected dev DagBag evidence
-        if: >-
-          vars.WEATHER_GOVERNANCE_MODE == 'protected' &&
-          github.event_name == 'pull_request' &&
-          github.base_ref == 'main'
-        env:
-          DEV_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          workflow_runs_path="${RUNNER_TEMP}/dagbag-runtime-workflow-runs.json"
-          runtime_evidence_path="${RUNNER_TEMP}/dagbag-runtime-check.json"
-          gh api --method GET \
-            --header "Accept: application/vnd.github+json" \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
-            -f branch=dev \
-            -f event=push \
-            -f head_sha="${DEV_HEAD_SHA}" \
-            -f status=success \
-            --jq "[.workflow_runs[] | select(.name == \"CI\" and .path == \".github/workflows/ci.yml\" and .event == \"push\" and .head_branch == \"dev\" and .head_sha == \"${DEV_HEAD_SHA}\" and .status == \"completed\" and .conclusion == \"success\")] | map({id})" \
-            > "$workflow_runs_path"
-          run_id="$(jq -r '.[0].id // empty' "$workflow_runs_path")"
-          test "$run_id" -gt 0
-          gh api --method GET \
-            --header "Accept: application/vnd.github+json" \
-            "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs" \
-            --jq "[.jobs[] | select(.run_id == ${run_id} and .name == \"dagbag-runtime\" and .status == \"completed\" and .conclusion == \"success\" and .head_sha == \"${DEV_HEAD_SHA}\")] | {matching: length}" \
-            > "$runtime_evidence_path"
-          test "$(jq -r '.matching' "$runtime_evidence_path")" -ge 1
       - name: Validate main push promotion source
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.created != true
         env:
@@ -176,31 +149,6 @@ jobs:
             --jq '[.[] | {base: {ref: .base.ref, sha: .base.sha, repo: {full_name: .base.repo.full_name}}, head: {ref: .head.ref, repo: {full_name: .head.repo.full_name}}, merged_at, merge_commit_sha}]' \
             > "$associated_prs_path"
           python -m tools.promotion_source main-push --event-path "$GITHUB_EVENT_PATH" --associated-prs-path "$associated_prs_path" --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
-      - name: Validate initial main bootstrap source
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.created == true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GOVERNANCE_MODE: ${{ vars.WEATHER_GOVERNANCE_MODE }}
-        run: |
-          repository_readback_path="${RUNNER_TEMP}/bootstrap-repository.json"
-          dev_readback_path="${RUNNER_TEMP}/bootstrap-dev.json"
-          main_readback_path="${RUNNER_TEMP}/bootstrap-main.json"
-          gh api --method GET \
-            --header "Accept: application/vnd.github+json" \
-            "repos/${GITHUB_REPOSITORY}" \
-            --jq '{full_name, default_branch}' \
-            > "$repository_readback_path"
-          gh api --method GET \
-            --header "Accept: application/vnd.github+json" \
-            "repos/${GITHUB_REPOSITORY}/branches/dev" \
-            --jq '{name, sha: .commit.sha}' \
-            > "$dev_readback_path"
-          gh api --method GET \
-            --header "Accept: application/vnd.github+json" \
-            "repos/${GITHUB_REPOSITORY}/branches/main" \
-            --jq '{name, sha: .commit.sha}' \
-            > "$main_readback_path"
-          python -m tools.promotion_source initial-main-bootstrap --event-path "$GITHUB_EVENT_PATH" --repository-readback-path "$repository_readback_path" --dev-branch-readback-path "$dev_readback_path" --main-branch-readback-path "$main_readback_path" --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" --governance-mode "$GOVERNANCE_MODE"
       - name: Accept non-promotion dev push
         if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
         run: echo "not-required"
@@ -214,7 +162,7 @@ jobs:
           GOVERNANCE_MODE: ${{ vars.WEATHER_GOVERNANCE_MODE }}
         run: |
           case "$GOVERNANCE_MODE" in
-            "protected"|"guarded_private") ;;
+            "public") ;;
             *) echo "Unsupported or missing WEATHER_GOVERNANCE_MODE." >&2; exit 1 ;;
           esac
 
@@ -225,7 +173,7 @@ jobs:
       - dbt-weather
       - airflow-tests
       - dagbag-policy
-      - dagbag-runtime
+      - k-skill-proxy
       - promotion-source
       - governance-mode
     if: always()
@@ -248,7 +196,7 @@ jobs:
           DBT_WEATHER: ${{ needs.dbt-weather.result }}
           AIRFLOW_TESTS: ${{ needs.airflow-tests.result }}
           DAGBAG_POLICY: ${{ needs.dagbag-policy.result }}
-          DAGBAG_RUNTIME: ${{ needs.dagbag-runtime.result }}
+          K_SKILL_PROXY: ${{ needs.k-skill-proxy.result }}
           PROMOTION_SOURCE: ${{ needs.promotion-source.result }}
           GOVERNANCE_MODE_RESULT: ${{ needs.governance-mode.result }}
         run: |
@@ -260,6 +208,6 @@ jobs:
             --result "dbt-weather=${DBT_WEATHER}" \
             --result "airflow-tests=${AIRFLOW_TESTS}" \
             --result "dagbag-policy=${DAGBAG_POLICY}" \
-            --result "dagbag-runtime=${DAGBAG_RUNTIME}" \
+            --result "k-skill-proxy=${K_SKILL_PROXY}" \
             --result "promotion-source=${PROMOTION_SOURCE}" \
             --result "governance-mode=${GOVERNANCE_MODE_RESULT}"

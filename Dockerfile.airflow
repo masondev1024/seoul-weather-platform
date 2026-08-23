@@ -1,0 +1,28 @@
+ARG AIRFLOW_VERSION=3.2.2
+# 지원 Python: **3.10~3.13** (Airflow 3.2.2 베이스 태그 실측 — 3.9 태그는 존재하지 않음/404).
+# 3.11 = 이 프로젝트 canonical(전 도메인 DAG import·OL/Cosmos/lineage 검증 완료 조합).
+# 버전 변경 시(상향 포함) 아래 가드가 즉시 차단·안내하며, 전 도메인 영향 검증 절차는
+# dags/domains/commerce/docs/cosmos.md §6 트러블슈팅 참고.
+ARG PYTHON_VERSION=3.11
+
+FROM apache/airflow:${AIRFLOW_VERSION}-python${PYTHON_VERSION}
+
+USER airflow
+
+# fail-fast: 지원 범위 밖 Python 이면 빌드를 명확한 메시지로 즉시 실패시킨다
+# (3.9 등으로 빌드 시 base 태그 부재로 정체불명 실패가 나거나, 우회 빌드 시 OL provider 2.x /
+#  cosmos 1.15 가 런타임에서 깨진다 — 'Marquez/lineage 가 Python 때문에 안 됨'으로 오인되는 원인).
+RUN python -c "import sys; v=sys.version_info[:2]; assert (3,10)<=v<(3,14), \
+    f'지원 Python 3.10~3.13 (현재 {v[0]}.{v[1]}) — PYTHON_VERSION build-arg 확인. canonical=3.11'"
+
+ENV DBT_VENV=/home/airflow/dbt-venv
+ENV DBT_BIN=/home/airflow/dbt-venv/bin/dbt
+
+COPY --chown=airflow:root runtime/requirements-airflow.lock.txt /tmp/requirements-airflow.lock.txt
+COPY --chown=airflow:root runtime/requirements-dbt.lock.txt /tmp/requirements-dbt.lock.txt
+
+RUN pip install --no-cache-dir -r /tmp/requirements-airflow.lock.txt \
+    && python -m venv "${DBT_VENV}" \
+    && "${DBT_VENV}/bin/pip" install --no-cache-dir --upgrade pip \
+    && "${DBT_VENV}/bin/pip" install --no-cache-dir \
+        -r /tmp/requirements-dbt.lock.txt
