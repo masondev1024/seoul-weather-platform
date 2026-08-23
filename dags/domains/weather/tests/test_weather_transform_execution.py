@@ -295,8 +295,11 @@ def test_weather_failed_dbt_command_pushes_existing_artifact_before_raising(
     ]
 
 
-def test_weather_empty_selection_stops_before_phase_and_raises(monkeypatch):
+def test_weather_empty_selection_stops_before_phase_and_raises(
+    tmp_path, monkeypatch
+):
     module = load_transform_module()
+    monkeypatch.setattr(module, "DBT_PROJECT", str(tmp_path / "weather"))
     commands = []
     ti = FakeTaskInstance(task_id="dbt_test_gold", try_number=1)
 

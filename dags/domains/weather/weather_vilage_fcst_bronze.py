@@ -84,6 +84,7 @@ from weather_ingest.kma import (  # noqa: E402
     load_kma_grids,
     resolve_kma_base_datetime,
 )
+from weather_ingest.kma_coordination import kma_api_pool_kwargs  # noqa: E402
 from weather_ingest.landing import (  # noqa: E402
     KmaGrid,
     KmaLandingRequest,
@@ -548,6 +549,7 @@ def build_kma_bronze_dag(
                 record_weather_raw_product_failure,
             ],
             on_success_callback=record_weather_raw_product_event,
+            **kma_api_pool_kwargs(),
         )
 
         load_bronze = PythonOperator(

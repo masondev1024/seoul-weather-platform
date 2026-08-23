@@ -1,0 +1,27 @@
+name = "seoul-weather-risk-proxy-masondev1024"
+main = "src/index.js"
+compatibility_date = "2026-08-21"
+workers_dev = true
+preview_urls = false
+
+[vars]
+ASK_SEOUL_ORIGIN = "https://ask-seoul-weather-personal-e2e.masondev1024.workers.dev"
+
+[secrets]
+required = ["ASK_SEOUL_SERVICE_TOKEN"]
+
+[[services]]
+binding = "ASK_SEOUL_ORIGIN_SERVICE"
+service = "ask-seoul-weather-personal-e2e"
+
+[[ratelimits]]
+name = "KSKILL_RATE_LIMITER"
+namespace_id = "22082201"
+
+  [ratelimits.simple]
+  limit = 30
+  period = 60
+
+[observability]
+enabled = true
+head_sampling_rate = 1

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/masondev1024/seoul-weather-platform/contracts/weather-forecast-quality/scenario-v1.schema.json",
+  "title": "Synthetic forecast-quality reference scenario v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "product_family",
+    "source_revision",
+    "valid_at",
+    "truth_as_of",
+    "collected_at",
+    "evaluation_as_of"
+  ],
+  "properties": {
+    "schema_version": {"const": "weather-forecast-quality-scenario/v1"},
+    "product_family": {"const": "short_range"},
+    "source_revision": {"type": "string", "minLength": 1},
+    "valid_at": {"type": "string", "format": "date-time"},
+    "truth_as_of": {"type": "string", "format": "date-time"},
+    "collected_at": {"type": "string", "format": "date-time"},
+    "evaluation_as_of": {"type": "string", "format": "date-time"}
+  }
+}

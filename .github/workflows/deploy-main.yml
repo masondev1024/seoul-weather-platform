@@ -1,106 +1,15 @@
 name: Deploy Main
 
-on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
+on: workflow_dispatch
 
 permissions:
-  actions: read
-  checks: read
   contents: read
-  pull-requests: read
-
-concurrency:
-  group: weather-main-deploy
-  cancel-in-progress: false
 
 jobs:
-  verify-main:
-    name: verify-main
-    if: >-
-      (
-        vars.WEATHER_GOVERNANCE_MODE == 'protected' ||
-        vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'
-      ) &&
-      vars.WEATHER_DEPLOYMENT_ENABLED == 'enabled' &&
-      github.event_name == 'workflow_run' &&
-      github.event.action == 'completed' &&
-      github.event.workflow_run.name == 'CI' &&
-      github.event.workflow_run.path == '.github/workflows/ci.yml' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.status == 'completed' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.workflow_sha == github.event.workflow_run.head_sha
+  disabled:
+    name: disabled
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout trusted deploy workflow
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ github.workflow_sha }}
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with:
-          python-version: 3.11.15
-      - name: Verify guarded private main identity
-        if: vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'
-        run: python -m deployment.main_cli verify-main --event-path "$env:GITHUB_EVENT_PATH" --workflow-ref "$env:GITHUB_WORKFLOW_REF" --workflow-sha "$env:GITHUB_WORKFLOW_SHA"
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GOVERNANCE_MODE: ${{ vars.WEATHER_GOVERNANCE_MODE }}
-          DEPLOYMENT_ENABLED: ${{ vars.WEATHER_DEPLOYMENT_ENABLED }}
-      - name: Verify protected main identity
-        if: vars.WEATHER_GOVERNANCE_MODE == 'protected'
-        run: python -m deployment.main_cli verify-main --event-path "$env:GITHUB_EVENT_PATH" --workflow-ref "$env:GITHUB_WORKFLOW_REF" --workflow-sha "$env:GITHUB_WORKFLOW_SHA"
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}
-          GOVERNANCE_MODE: ${{ vars.WEATHER_GOVERNANCE_MODE }}
-          DEPLOYMENT_ENABLED: ${{ vars.WEATHER_DEPLOYMENT_ENABLED }}
-
-  deploy-main:
-    name: deploy-main
-    needs: verify-main
-    if: >-
-      (
-        vars.WEATHER_GOVERNANCE_MODE == 'protected' ||
-        vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'
-      ) &&
-      vars.WEATHER_DEPLOYMENT_ENABLED == 'enabled' &&
-      github.event_name == 'workflow_run' &&
-      github.event.action == 'completed' &&
-      github.event.workflow_run.name == 'CI' &&
-      github.event.workflow_run.path == '.github/workflows/ci.yml' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.status == 'completed' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.workflow_sha == github.event.workflow_run.head_sha
-    runs-on: [self-hosted, windows, weather-prod]
-    timeout-minutes: 60
-    steps:
-      - name: Checkout trusted deploy workflow
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ github.workflow_sha }}
-          persist-credentials: false
-      - name: Deploy guarded private main identity
-        if: vars.WEATHER_GOVERNANCE_MODE == 'guarded_private'
-        run: python -m deployment.main_cli deploy-main --event-path "$env:GITHUB_EVENT_PATH" --workflow-ref "$env:GITHUB_WORKFLOW_REF" --workflow-sha "$env:GITHUB_WORKFLOW_SHA"
-        shell: powershell
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GOVERNANCE_MODE: ${{ vars.WEATHER_GOVERNANCE_MODE }}
-          DEPLOYMENT_ENABLED: ${{ vars.WEATHER_DEPLOYMENT_ENABLED }}
-      - name: Deploy protected main identity
-        if: vars.WEATHER_GOVERNANCE_MODE == 'protected'
-        run: python -m deployment.main_cli deploy-main --event-path "$env:GITHUB_EVENT_PATH" --workflow-ref "$env:GITHUB_WORKFLOW_REF" --workflow-sha "$env:GITHUB_WORKFLOW_SHA"
-        shell: powershell
-        env:
-          GH_TOKEN: ${{ secrets.WEATHER_GOVERNANCE_READ_TOKEN }}
-          GOVERNANCE_MODE: ${{ vars.WEATHER_GOVERNANCE_MODE }}
-          DEPLOYMENT_ENABLED: ${{ vars.WEATHER_DEPLOYMENT_ENABLED }}
+      - name: Deployment disabled
+        run: echo disabled

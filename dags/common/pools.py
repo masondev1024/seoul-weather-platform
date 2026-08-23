@@ -6,11 +6,16 @@ import json
 from typing import Final, NamedTuple
 
 
+KMA_API_POOL: Final = "kma_api_requests"
 TRINO_TRAFFIC_HEAVY_POOL: Final = "trino_traffic_heavy"
 TRINO_TRAFFIC_INGEST_POOL: Final = "trino_traffic_ingest"
 TRINO_TRAFFIC_TRANSFORM_POOL: Final = "trino_traffic_transform"
 TRINO_TRANSIT_HEAVY_POOL: Final = "trino_transit_heavy"
 TRINO_WEATHER_HEAVY_POOL: Final = "trino_weather_heavy"
+# Compatibility fallback for the explicitly disabled shared-guard rollout.
+# The active personal runtime enables the guard and maps Weather transforms to
+# TRINO_WEATHER_HEAVY_POOL; keep the historical pool registered so a deliberate
+# rollback does not leave operators assigned to a nonexistent pool.
 TRINO_WEATHER_LEGACY_HEAVY_POOL: Final = "trino_weather_legacy_heavy"
 TRINO_WEATHER_RECOVERY_HEAVY_POOL: Final = "trino_weather_recovery_heavy"
 TRINO_HEAVY_POOL: Final = "trino_heavy"
@@ -25,6 +30,12 @@ class AirflowPoolSpec(NamedTuple):
 
 
 TRINO_POOL_SPECS: Final = (
+    AirflowPoolSpec(
+        KMA_API_POOL,
+        1,
+        "Serialize KMA forecast and observation API requests",
+        False,
+    ),
     AirflowPoolSpec(
         TRINO_TRAFFIC_HEAVY_POOL,
         1,
@@ -58,7 +69,7 @@ TRINO_POOL_SPECS: Final = (
     AirflowPoolSpec(
         TRINO_WEATHER_LEGACY_HEAVY_POOL,
         1,
-        "Serialize legacy Weather transform writes",
+        "Compatibility fallback for an explicitly disabled Weather guard",
         False,
     ),
     AirflowPoolSpec(
@@ -107,6 +118,7 @@ def main() -> int:
 
 __all__ = [
     "AirflowPoolSpec",
+    "KMA_API_POOL",
     "TRINO_HEAVY_POOL",
     "TRINO_POOL_SPECS",
     "TRINO_TRAFFIC_HEAVY_POOL",

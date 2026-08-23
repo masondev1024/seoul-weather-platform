@@ -1,3 +1,4 @@
+import json
 import types
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -459,6 +460,7 @@ def test_weather_transform_publishes_dbt_run_metrics_as_non_gating_teardown():
 def test_weather_transform_resolves_the_exact_triggering_snapshot(monkeypatch):
     module = load_transform_module()
     calls = []
+    ti = FakeTaskInstance(task_id=module.SNAPSHOT_TASK_ID)
 
     class Manifest:
         def require_publishable(self, run_id):
@@ -480,9 +482,81 @@ def test_weather_transform_resolves_the_exact_triggering_snapshot(monkeypatch):
     )
 
     assert module.resolve_weather_snapshot_run(
-        triggering_asset_events={module.WEATHER_BRONZE_ASSET: [event]}
+        triggering_asset_events={module.WEATHER_BRONZE_ASSET: [event]},
+        ti=ti,
     ) == "weather-run-42"
     assert calls == ["weather-run-42"]
+    assert ti.pushes == [
+        (module.WEATHER_SNAPSHOT_LOAD_DATE_XCOM_KEY, "2026-07-15")
+    ]
+
+
+def test_weather_snapshot_resolver_rejects_load_date_outside_event_partition(
+    monkeypatch,
+):
+    module = load_transform_module()
+    event = types.SimpleNamespace(
+        extra={
+            "source_id": "kma_vilage_fcst",
+            "bronze_run_id": "weather-run-42",
+            "bronze_dag_run_id": "weather-run-42",
+            "event_at": "2026-07-15T12:00:00+09:00",
+            "load_date": "2026-07-14",
+            "row_count": 3,
+            "payload_hash": "b" * 64,
+            "is_publishable": True,
+        }
+    )
+
+    with pytest.raises(module.AirflowFailException, match="load_date"):
+        module.resolve_weather_snapshot_run(
+            triggering_asset_events={module.WEATHER_BRONZE_ASSET: [event]},
+            ti=FakeTaskInstance(task_id=module.SNAPSHOT_TASK_ID),
+        )
+
+
+def test_weather_dbt_phase_passes_snapshot_partition_to_dbt(monkeypatch):
+    module = load_transform_module()
+    captured = {}
+
+    def fake_execute_dbt_phase(**kwargs):
+        captured.update(kwargs)
+        return types.SimpleNamespace(
+            existing_run_results_path="/tmp/weather/run_results.json",
+            existing_sources_path=None,
+            existing_manifest_path="/tmp/weather/manifest.json",
+            selected_unique_ids=(),
+            missing_expected_artifacts=False,
+            attempts=(),
+            completed=types.SimpleNamespace(returncode=0),
+        )
+
+    monkeypatch.setattr(module.weather_dbt, "execute_dbt_phase", fake_execute_dbt_phase)
+    ti = FakeTaskInstance(
+        task_id="dbt_run_silver",
+        pulls={
+            (module.SNAPSHOT_TASK_ID, None): "weather-run-42",
+            (
+                module.SNAPSHOT_TASK_ID,
+                module.WEATHER_SNAPSHOT_LOAD_DATE_XCOM_KEY,
+            ): "2026-07-15",
+            (module.SERVING_AS_OF_HOUR_TASK_ID, None): "2026-07-15 12:00:00",
+        },
+    )
+
+    module.run_dbt_phase(
+        dbt_command="run",
+        selector="ask_seoul_weather_transform_silver",
+        snapshot_task_id=module.SNAPSHOT_TASK_ID,
+        serving_as_of_task_id=module.SERVING_AS_OF_HOUR_TASK_ID,
+        ti=ti,
+        run_id="asset__weather-run-42",
+        params={"target": "prod"},
+    )
+
+    assert json.loads(captured["variables"])["weather_snapshot_load_date"] == (
+        "2026-07-15"
+    )
 
 
 def test_weather_snapshot_resolver_rejects_missing_asset_event():

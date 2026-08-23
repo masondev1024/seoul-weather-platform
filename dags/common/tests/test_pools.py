@@ -12,6 +12,11 @@ import unittest
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = REPOSITORY_ROOT / "common" / "pools.py"
 EXPECTED_POOL_IMPORT_PAYLOAD = {
+    "kma_api_requests": {
+        "slots": 1,
+        "description": "Serialize KMA forecast and observation API requests",
+        "include_deferred": False,
+    },
     "trino_traffic_heavy": {
         "slots": 1,
         "description": "Serialize Traffic Trino writes and exact tests",
@@ -39,7 +44,7 @@ EXPECTED_POOL_IMPORT_PAYLOAD = {
     },
     "trino_weather_legacy_heavy": {
         "slots": 1,
-        "description": "Serialize legacy Weather transform writes",
+        "description": "Compatibility fallback for an explicitly disabled Weather guard",
         "include_deferred": False,
     },
     "trino_weather_recovery_heavy": {
@@ -130,6 +135,7 @@ class PoolRegistryTest(unittest.TestCase):
         self.assertEqual(
             {
                 registry.TRINO_TRAFFIC_HEAVY_POOL,
+                registry.KMA_API_POOL,
                 registry.TRINO_TRAFFIC_INGEST_POOL,
                 registry.TRINO_TRAFFIC_TRANSFORM_POOL,
                 registry.TRINO_TRANSIT_HEAVY_POOL,

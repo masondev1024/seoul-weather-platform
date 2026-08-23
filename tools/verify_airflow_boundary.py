@@ -70,6 +70,28 @@ def _airflow_commit(source_lock: dict[str, Any]) -> str:
     raise ValueError("source lock does not define airflow_weather")
 
 
+def _source_identities(record: dict[str, Any]) -> set[tuple[str, str]]:
+    """Return fixed source identities through reviewed derivation wrappers."""
+    identities: set[tuple[str, str]] = set()
+    pending = [record]
+    visited: set[int] = set()
+    while pending:
+        candidate = pending.pop()
+        identity = id(candidate)
+        if identity in visited:
+            continue
+        visited.add(identity)
+        source_commit = candidate.get("source_commit")
+        source_path = candidate.get("source_path")
+        if isinstance(source_commit, str) and isinstance(source_path, str):
+            identities.add((source_commit, source_path))
+        for key in ("derived_from", "upstream"):
+            nested = candidate.get(key)
+            if isinstance(nested, dict):
+                pending.append(nested)
+    return identities
+
+
 def entrypoint_errors(entries: Iterable[dict[str, Any]]) -> list[str]:
     actual = {
         entry.get("source_path")
@@ -104,15 +126,13 @@ def inventory_manifest_errors(
         if not isinstance(target_path, str) or not target_path.startswith("dags/"):
             continue
 
-        source_commit = record.get("source_commit")
-        source_path = record.get("source_path")
-        derived_from = record.get("derived_from")
-        if isinstance(derived_from, dict):
-            source_commit = derived_from.get("source_commit")
-            source_path = derived_from.get("source_path")
-
-        if source_commit == airflow_commit and isinstance(source_path, str):
-            manifest[target_path] = source_path
+        matching_source_paths = {
+            source_path
+            for source_commit, source_path in _source_identities(record)
+            if source_commit == airflow_commit
+        }
+        if len(matching_source_paths) == 1:
+            manifest[target_path] = next(iter(matching_source_paths))
     errors: list[str] = []
     for target_path in sorted(inventory):
         manifest_source = manifest.get(target_path)

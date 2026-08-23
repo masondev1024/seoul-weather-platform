@@ -15,6 +15,7 @@ EXPECTED_DAG_IDS = frozenset(
         "weather_serving_export",
         "weather_serving_freshness_watchdog",
         "weather_serving_snapshot_refresh",
+        "weather_ultra_srt_ncst_bronze",
         "weather_vilage_fcst_bronze",
         "weather_vilage_fcst_bronze_backfill",
         "weather_vilage_fcst_collection_slot_reconciliation",
