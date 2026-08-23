@@ -298,6 +298,61 @@ def test_r2_store_does_not_hide_permission_or_transport_failures():
         R2RawObjectStore(DeniedClient(), bucket="seoul-dev").exists("raw/page.json")
 
 
+def test_r2_store_retries_a_transient_endpoint_failure_before_writing():
+    from botocore.exceptions import EndpointConnectionError
+
+    class EndpointFailureThenSuccessClient(FakeS3Client):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def put_object(self, **kwargs) -> None:
+            self.calls += 1
+            if self.calls == 1:
+                raise EndpointConnectionError(endpoint_url="https://r2.invalid")
+            super().put_object(**kwargs)
+
+    sleeps: list[float] = []
+    client = EndpointFailureThenSuccessClient()
+    store = R2RawObjectStore(client, bucket="seoul-dev", sleep=sleeps.append)
+
+    assert store.write_bytes_if_absent("raw/page.json", b"payload", "application/json")
+    assert client.calls == 2
+    assert sleeps == [1.0]
+
+
+def test_r2_store_fails_after_a_bounded_number_of_endpoint_retries():
+    from botocore.exceptions import EndpointConnectionError
+
+    class EndpointFailureClient(FakeS3Client):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def put_object(self, **_kwargs) -> None:
+            self.calls += 1
+            raise EndpointConnectionError(endpoint_url="https://r2.invalid")
+
+    sleeps: list[float] = []
+    client = EndpointFailureClient()
+    store = R2RawObjectStore(client, bucket="seoul-dev", sleep=sleeps.append)
+
+    with pytest.raises(EndpointConnectionError):
+        store.write_bytes_if_absent("raw/page.json", b"payload", "application/json")
+
+    assert client.calls == 3
+    assert sleeps == [1.0, 2.0]
+
+
+def test_r2_client_uses_an_explicit_bounded_standard_retry_policy():
+    config = runtime._r2_client_config()
+
+    assert config.retries == {"mode": "standard", "total_max_attempts": 3}
+    assert config.connect_timeout == 3
+    assert config.read_timeout == 30
+    assert config.tcp_keepalive is True
+
+
 def test_runtime_factory_lazily_composes_domain_landing(monkeypatch):
     sentinel_fetch = object()
     sentinel_s3 = object()

@@ -57,7 +57,11 @@ def test_enabled_landing_uses_shared_api_pool_and_bounded_timeout(monkeypatch):
     assert land.kwargs["pool"] == "kma_api_requests"
     assert land.kwargs["pool_slots"] == 1
     assert land.kwargs["execution_timeout"] <= timedelta(minutes=20)
-    assert land.kwargs["retries"] == 0
+    # R2 checkpoint writes are idempotent. A single short retry absorbs a
+    # transient DNS/transport outage without widening the 40-minute run SLA.
+    assert land.kwargs["retries"] == 1
+    assert land.kwargs["retry_delay"] == timedelta(seconds=30)
+    assert land.kwargs["retry_exponential_backoff"] is False
 
 
 def test_load_and_verify_share_the_canonical_one_slot_weather_pool():

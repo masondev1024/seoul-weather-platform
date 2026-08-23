@@ -43,6 +43,9 @@ airflow.db
 
 # Local-only ASK Seoul records
 LessonRun.md
+# Keep the incident learning record publishable; macOS Git ignores paths
+# case-insensitively, so the legacy root-level pattern would otherwise hide it.
+!docs/lessonrun.md
 engineering-decision-log.md
 
 # OS / editor

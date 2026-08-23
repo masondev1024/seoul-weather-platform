@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import uuid
-import time
 import os
+import time
+import uuid
 from datetime import datetime, timezone
 from collections.abc import Iterable, Mapping
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
 from common.collection_slots import ExpectedSlot, is_slot_active, parse_activation_at, require_policy_boundary
 from common.raw_manifest import validate_raw_manifest
@@ -51,6 +51,7 @@ KMA_429_BACKOFF_SECONDS = (60.0, 180.0, 300.0)
 KMA_REQUEST_DELAY_SECONDS_ENV = "ASK_SEOUL_KMA_REQUEST_DELAY_SECONDS"
 DEFAULT_KMA_REQUEST_DELAY_SECONDS = 1.0
 _MISSING_OBJECT_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
+R2_TRANSIENT_RETRY_DELAYS_SECONDS = (1.0, 2.0)
 _COLLECTION_SLOT_ACTIVATION_ENV = "ASK_SEOUL_COLLECTION_SLOT_ACTIVATION_AT"
 _WEATHER_HISTORICAL_BOUNDARY_ENV = (
     "ASK_SEOUL_WEATHER_API_HUB_HISTORICAL_EARLIEST_ISSUED_AT"
@@ -186,13 +187,46 @@ class KmaHttpAdapter:
 
 
 class R2RawObjectStore:
-    def __init__(self, client: S3Client, *, bucket: str) -> None:
+    def __init__(
+        self,
+        client: S3Client,
+        *,
+        bucket: str,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._client = client
         self._bucket = bucket
+        self._sleep = sleep
+
+    def _retry_transient(self, operation: Callable[[], Any]) -> Any:
+        """Retry bounded R2 transport faults without retrying data-contract errors.
+
+        The SDK retries individual HTTP attempts. This small second envelope
+        covers a short Docker DNS outage after the SDK has exhausted its own
+        request attempts. Callers use immutable or conditional writes, so a
+        repeated invocation cannot silently overwrite a different payload.
+        """
+        from botocore.exceptions import (
+            ConnectionClosedError,
+            EndpointConnectionError,
+            ReadTimeoutError,
+        )
+
+        retryable = (ConnectionClosedError, EndpointConnectionError, ReadTimeoutError)
+        for delay in (*R2_TRANSIENT_RETRY_DELAYS_SECONDS, None):
+            try:
+                return operation()
+            except retryable:
+                if delay is None:
+                    raise
+                self._sleep(delay)
+        raise AssertionError("unreachable")
 
     def exists(self, key: str) -> bool:
         try:
-            self._client.head_object(Bucket=self._bucket, Key=key)
+            self._retry_transient(
+                lambda: self._client.head_object(Bucket=self._bucket, Key=key)
+            )
         except Exception as exc:
             error = (getattr(exc, "response", {}) or {}).get("Error", {})
             if str(error.get("Code", "")) in _MISSING_OBJECT_CODES:
@@ -201,21 +235,27 @@ class R2RawObjectStore:
         return True
 
     def read_bytes(self, key: str) -> bytes:
-        response = self._client.get_object(Bucket=self._bucket, Key=key)
+        response = self._retry_transient(
+            lambda: self._client.get_object(Bucket=self._bucket, Key=key)
+        )
         return response["Body"].read()
 
     def read_sha256(self, key: str) -> str | None:
-        response = self._client.head_object(Bucket=self._bucket, Key=key) or {}
+        response = self._retry_transient(
+            lambda: self._client.head_object(Bucket=self._bucket, Key=key)
+        ) or {}
         metadata = response.get("Metadata") or {}
         value = metadata.get("sha256")
         return str(value) if value is not None else None
 
     def write_bytes(self, key: str, payload: bytes, content_type: str) -> None:
-        self._client.put_object(
-            Bucket=self._bucket,
-            Key=key,
-            Body=payload,
-            ContentType=content_type,
+        self._retry_transient(
+            lambda: self._client.put_object(
+                Bucket=self._bucket,
+                Key=key,
+                Body=payload,
+                ContentType=content_type,
+            )
         )
 
     def write_bytes_if_absent(
@@ -228,16 +268,18 @@ class R2RawObjectStore:
 
         for _ in range(3):
             try:
-                self._client.put_object(
-                    Bucket=self._bucket,
-                    Key=key,
-                    Body=payload,
-                    ContentType=content_type,
-                    IfNoneMatch="*",
-                    Metadata={"sha256": hashlib.sha256(payload).hexdigest()},
-                    ContentMD5=base64.b64encode(
-                        hashlib.md5(payload, usedforsecurity=False).digest()
-                    ).decode("ascii"),
+                self._retry_transient(
+                    lambda: self._client.put_object(
+                        Bucket=self._bucket,
+                        Key=key,
+                        Body=payload,
+                        ContentType=content_type,
+                        IfNoneMatch="*",
+                        Metadata={"sha256": hashlib.sha256(payload).hexdigest()},
+                        ContentMD5=base64.b64encode(
+                            hashlib.md5(payload, usedforsecurity=False).digest()
+                        ).decode("ascii"),
+                    )
                 )
                 return True
             except ClientError as exc:
@@ -259,6 +301,10 @@ def _r2_client_config():
     from botocore.config import Config
 
     return Config(
+        connect_timeout=3,
+        read_timeout=30,
+        tcp_keepalive=True,
+        retries={"mode": "standard", "total_max_attempts": 3},
         request_checksum_calculation="when_required",
         response_checksum_validation="when_required",
     )

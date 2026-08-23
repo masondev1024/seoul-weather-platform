@@ -12,7 +12,10 @@ TRINO_TRAFFIC_INGEST_POOL: Final = "trino_traffic_ingest"
 TRINO_TRAFFIC_TRANSFORM_POOL: Final = "trino_traffic_transform"
 TRINO_TRANSIT_HEAVY_POOL: Final = "trino_transit_heavy"
 TRINO_WEATHER_HEAVY_POOL: Final = "trino_weather_heavy"
-TRINO_WEATHER_LEGACY_HEAVY_POOL: Final = "trino_weather_legacy_heavy"
+# Compatibility name for existing DAG modules. It aliases the canonical pool
+# so a disabled rollout flag cannot create a second concurrent Weather write
+# lane on the 5-GiB local Trino coordinator.
+TRINO_WEATHER_LEGACY_HEAVY_POOL: Final = TRINO_WEATHER_HEAVY_POOL
 TRINO_WEATHER_RECOVERY_HEAVY_POOL: Final = "trino_weather_recovery_heavy"
 TRINO_HEAVY_POOL: Final = "trino_heavy"
 SERVING_D1_PUBLISH_POOL: Final = "serving_d1_publish"
@@ -60,12 +63,6 @@ TRINO_POOL_SPECS: Final = (
         TRINO_WEATHER_HEAVY_POOL,
         1,
         "Serialize Weather Trino writes and recovery",
-        False,
-    ),
-    AirflowPoolSpec(
-        TRINO_WEATHER_LEGACY_HEAVY_POOL,
-        1,
-        "Serialize legacy Weather transform writes",
         False,
     ),
     AirflowPoolSpec(

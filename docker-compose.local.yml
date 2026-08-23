@@ -22,6 +22,10 @@ x-local-airflow: &local-airflow
     ASK_SEOUL_DBT_OPENLINEAGE_NAMESPACE_PREFIX: "ask-seoul-prod-dbt"
     AIRFLOW__OPENLINEAGE__DISABLED: "true"
     ASK_SEOUL_DBT_OPENLINEAGE_ENABLED: "false"
+    # Airflow 3 Execution API token, not the public/UI JWT. A dbt subprocess
+    # can otherwise return after the default token lifetime and fail only when
+    # it reports XCom/task state.
+    AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "7200"
     ASK_SEOUL_KMA_DAG_SCHEDULE: "20 2,5,8,11,14,17,20,23 * * *"
     # Hourly observation is checked in but remains inert until the separately
     # approved ledger bootstrap, pool validation, canary, and unpause sequence.

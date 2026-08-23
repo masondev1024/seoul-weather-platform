@@ -17,6 +17,10 @@ x-airflow-common: &airflow-common
     AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_SECRET_KEY}
     AIRFLOW__API_AUTH__JWT_ISSUER: airflow
+    # Long-running dbt phases can make no Execution API call for many minutes.
+    # Keep the internal task token valid through a bounded local operation;
+    # this is distinct from the public API/UI JWT lifetime.
+    AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "7200"
     AIRFLOW__API__BASE_URL: http://localhost:30585
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"

@@ -210,7 +210,12 @@ with DAG(
         task_id="land_observation_raw",
         python_callable=land_observation_raw,
         execution_timeout=timedelta(minutes=20),
-        retries=0,
+        # R2 control checkpoints and raw objects are immutable. One short retry
+        # recovers a transient Docker DNS/transport flap while the 40-minute
+        # DAG deadline remains the hard upper bound for a collection cycle.
+        retries=1,
+        retry_delay=timedelta(seconds=30),
+        retry_exponential_backoff=False,
         **kma_api_pool_kwargs(),
     )
     load_bronze_task = PythonOperator(

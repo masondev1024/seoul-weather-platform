@@ -149,6 +149,8 @@ python dbt/serving_contract/validate_serving_contract.py --source dbt/domains/tr
 - `docs/operations/kma-observation-predeployment-plan.md` — 관측 파이프라인 승인 전 배포·복구 설계
 - `docs/operations/current-resource-dependencies.md` — 기존 resource 의존성
 - `docs/operations/predeployment-approval-gate.md` — Airflow 변경 승인 gate
+- `docs/data-engineering-decision.md` — 운영 선택, 대안, 근거가 남는 decision log
+- `docs/lessonrun.md` — 실제 장애를 data flow와 contract 관점에서 복기한 lesson run
 
 ## Git 주의
 
