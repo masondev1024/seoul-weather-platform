@@ -9,6 +9,7 @@ KST serving anchor; individual DAG modules still own topology and callbacks.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from collections.abc import Callable, Mapping
@@ -122,6 +123,8 @@ def run_weather_dbt_phase(
     runner: Callable[..., Any],
     pipeline: str,
     failure_exception: Callable[[bool, str], Exception],
+    additional_variables: Mapping[str, str] | None = None,
+    environment_overrides: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Run one dbt task with a stable serving time boundary and isolated artifacts."""
 
@@ -137,6 +140,8 @@ def run_weather_dbt_phase(
     run_results_path = None
     try:
         variables: dict[str, object] = dict(WEATHER_DBT_CONTRACT_VARS)
+        if additional_variables:
+            variables.update(additional_variables)
         if snapshot_task_id:
             variables[WEATHER_SNAPSHOT_VAR] = snapshot_run_id
             variables[WEATHER_SNAPSHOT_LOAD_DATE_VAR] = snapshot_load_date
@@ -160,6 +165,11 @@ def run_weather_dbt_phase(
             project_dir=dbt_project,
             executable=dbt_bin,
             runner=runner,
+            environ=(
+                {**os.environ, **environment_overrides}
+                if environment_overrides
+                else None
+            ),
         )
         run_results_path = execution.existing_run_results_path
     finally:

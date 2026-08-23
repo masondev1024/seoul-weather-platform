@@ -35,6 +35,9 @@ x-local-airflow: &local-airflow
     ASK_SEOUL_KMA_ATTEMPT_LEDGER_PATH: "/opt/airflow/logs/_weather_control/kma_api_budget.sqlite3"
     ASK_SEOUL_KMA_DAILY_ATTEMPT_LIMIT: "7500"
     ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE: "0 * * * *"
+    # Forecast-quality Gold stays inert until its separate shadow-run and
+    # Airflow activation approval; it never participates in D1 serving.
+    ASK_SEOUL_WEATHER_QUALITY_DAG_SCHEDULE: ""
     KMA_NUM_OF_ROWS: "2000"
 
 services:

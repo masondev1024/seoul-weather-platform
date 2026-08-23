@@ -34,6 +34,17 @@ EXPECTED_WEATHER_MODELS = {
     "models/weather/transform/grid_mart/gold_weather_forecast_by_grid_serving.sql",
     "models/weather/transform/silver/silver_kma_vilage_fcst.sql",
 }
+INTERNAL_QUALITY_MODELS = {
+    "models/weather/quality/silver/silver_weather_quality_forecast_vintage.sql",
+    "models/weather/quality/silver/silver_kma_observation_truth.sql",
+    "models/weather/quality/silver/silver_weather_forecast_observation_match.sql",
+    "models/weather/quality/gold/gold_weather_forecast_quality_grid_score_history.sql",
+    "models/weather/quality/gold/gold_weather_forecast_quality_grid_score.sql",
+    "models/weather/quality/gold/gold_weather_forecast_quality_hourly_history.sql",
+    "models/weather/quality/gold/gold_weather_forecast_quality_hourly.sql",
+    "models/weather/quality/gold/gold_weather_forecast_quality_daily_history.sql",
+    "models/weather/quality/gold/gold_weather_forecast_quality_daily.sql",
+}
 
 
 def _load_yaml(relative_path: str) -> dict:
@@ -69,10 +80,21 @@ def test_weather_dbt_boundary_keeps_only_the_four_public_products() -> None:
         {"method": "fqn", "value": "gold_weather_place_forecast_change_daily", "indirect_selection": "empty"},
     ]
 
-    assert [source["name"] for source in sources] == ["weather_bronze"]
+    assert [source["name"] for source in sources] == [
+        "weather_bronze",
+        "weather_quality_control",
+    ]
     assert [table["name"] for table in sources[0]["tables"]] == [
         "kma_vilage_fcst",
+        "kma_ultra_srt_ncst",
         "collection_run_manifest",
+    ]
+    assert sources[1]["schema"] == "{{ env_var('WEATHER_SCHEMA', 'weather') }}"
+    assert sources[1]["tables"] == [
+        {
+            "name": "quality_publication_manifest",
+            "identifier": "weather_forecast_quality_publication_manifest",
+        }
     ]
     # weather_coverage_grid 는 80-grid coverage mart 의 입력이다. 공개 제품이 아니며
     # 위 ask_seoul_weather_d1_public_products assert 가 D1 공개 경계를 계속 지킨다.
@@ -94,6 +116,9 @@ def test_weather_dbt_boundary_keeps_only_the_four_public_products() -> None:
         item["value"] for item in selector["definition"]["union"]
     }
     assert "gold_weather_place_risk_query_availability" not in public_model_names
+    assert public_model_names.isdisjoint(
+        {Path(model).stem for model in INTERNAL_QUALITY_MODELS}
+    )
 
 
 def _selector_model_names(selectors: list[dict], name: str) -> set[str]:
@@ -170,10 +195,10 @@ def test_weather_singular_tests_share_the_weather_group() -> None:
 
 
 def test_weather_dbt_model_inventory_has_no_cross_domain_or_legacy_models() -> None:
-    """Keeps the executable graph at the reviewed Weather-only extraction boundary."""
+    """Keeps public serving and internal analytics at reviewed, disjoint paths."""
     actual = {
         path.relative_to(PROJECT_DIR).as_posix()
         for path in (PROJECT_DIR / "models").rglob("*.sql")
     }
 
-    assert actual == EXPECTED_WEATHER_MODELS
+    assert actual == EXPECTED_WEATHER_MODELS | INTERNAL_QUALITY_MODELS

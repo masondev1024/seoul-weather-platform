@@ -100,6 +100,12 @@ def test_maintained_tables_only_cover_fork_owned_schemas():
         in MAINTAINED_TABLES
     )
     assert MaintainedTable("weather", "gold_weather_place_hourly_outlook") in MAINTAINED_TABLES
+    assert MaintainedTable(
+        "weather", "gold_weather_forecast_quality_daily_history"
+    ) in MAINTAINED_TABLES
+    assert MaintainedTable(
+        "weather", "weather_forecast_quality_publication_manifest"
+    ) in MAINTAINED_TABLES
 
 
 def test_resolve_maintained_tables_keeps_canonical_order_and_rejects_unknown():
