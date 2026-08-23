@@ -312,6 +312,44 @@ def test_new_place_mart_issue_window_test_is_repository_owned() -> None:
     assert record["owner"] == "masondev1024/seoul-weather-platform"
 
 
+def test_forecast_quality_sources_require_explicit_local_authorship() -> None:
+    targets = (
+        "dags/domains/weather/weather_quality_runtime.py",
+        "dags/domains/weather/tests/test_weather_quality_runtime.py",
+        "dags/domains/weather/weather_quality_publication.py",
+        "dags/domains/weather/weather_quality_dag_factory.py",
+        "dags/domains/weather/weather_forecast_quality_daily.py",
+        "dags/domains/weather/weather_forecast_quality_backfill.py",
+        "dags/domains/weather/tests/test_weather_quality_publication.py",
+        "dags/domains/weather/tests/test_weather_forecast_quality_dags.py",
+        "dags/domains/weather/tests/test_weather_dbt_runtime_contract.py",
+        "dbt/domains/traffic_weather/macros/weather/weather_quality_contract.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/"
+        "silver/silver_weather_forecast_observation_match.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/"
+        "gold/gold_weather_forecast_quality_grid_score_history.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/"
+        "gold/gold_weather_forecast_quality_hourly_history.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/"
+        "gold/gold_weather_forecast_quality_hourly.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/"
+        "gold/gold_weather_forecast_quality_daily_history.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/"
+        "gold/gold_weather_forecast_quality_daily.sql",
+        "dbt/domains/traffic_weather/tests/weather/quality/"
+        "assert_quality_grid_score_reconciles.sql",
+        "dbt/domains/traffic_weather/tests/weather/quality/"
+        "assert_quality_hourly_reconciles.sql",
+        "dbt/domains/traffic_weather/tests/weather/quality/"
+        "assert_quality_daily_reconciles.sql",
+    )
+
+    for target in targets:
+        record = build_repository_record(target, "f" * 64)
+        assert record["record_type"] == "local_authored"
+        assert record["owner"] == "masondev1024/seoul-weather-platform"
+
+
 def test_mac_cutover_adaptation_is_idempotent_after_reclassification() -> None:
     source_record = {
         "record_type": "snapshot_copy",

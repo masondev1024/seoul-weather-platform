@@ -1,0 +1,113 @@
+version: 2
+
+models:
+  - name: gold_weather_forecast_quality_grid_score_history
+    description: >
+      Run-versioned forecast-quality grid-hour score history at evaluation run,
+      canonical grid, valid hour, variable, and D-1/D-2/D-3 forecast horizon grain.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - evaluation_run_id
+              - grid_id
+              - valid_at
+              - variable
+              - forecast_horizon
+    columns:
+      - name: evaluation_run_id
+        tests: [not_null]
+      - name: evaluation_date_kst
+        tests: [not_null]
+      - name: grid_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_weather_coverage_grid')
+                field: grid_id
+      - name: valid_at
+        tests: [not_null]
+      - name: variable
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - temperature_air_2m
+                  - precipitation_occurrence
+                  - precipitation_occurrence_category
+      - name: forecast_horizon
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [D-1, D-2, D-3]
+      - name: match_state
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - matched
+                  - missing_vintage
+                  - missing_truth
+                  - invalid_forecast
+                  - invalid_truth
+                  - incompatible_contract
+      - name: expected_count
+        tests: [not_null]
+
+  - name: gold_weather_forecast_quality_grid_score
+    description: >
+      Latest successful forecast-quality grid score publication view, resolving
+      exactly one successful evaluation run per KST evaluation date.
+    columns:
+      - name: evaluation_run_id
+        tests: [not_null]
+      - name: evaluation_date_kst
+        tests: [not_null]
+      - name: grid_id
+        tests: [not_null]
+      - name: valid_at
+        tests: [not_null]
+      - name: variable
+        tests: [not_null]
+      - name: forecast_horizon
+        tests: [not_null]
+
+  - name: gold_weather_forecast_quality_hourly_history
+    description: >
+      Run-versioned hourly quality aggregates built directly from grid-score
+      components, never by averaging hourly metric values into a later rollup.
+    columns:
+      - name: evaluation_run_id
+        tests: [not_null]
+      - name: valid_at
+        tests: [not_null]
+      - name: evidence_state
+        tests:
+          - accepted_values:
+              arguments:
+                values: [sufficient, degraded, insufficient_evidence]
+
+  - name: gold_weather_forecast_quality_daily_history
+    description: >
+      Run-versioned daily quality aggregates built directly from grid-score
+      components so MAE, RMSE, Brier, and classification metrics remain exact.
+    columns:
+      - name: evaluation_run_id
+        tests: [not_null]
+      - name: evaluation_date_kst
+        tests: [not_null]
+      - name: evidence_state
+        tests:
+          - accepted_values:
+              arguments:
+                values: [sufficient, degraded, insufficient_evidence]
+
+  - name: gold_weather_forecast_quality_hourly
+    description: Latest successful internal hourly quality publication view.
+
+  - name: gold_weather_forecast_quality_daily
+    description: Latest successful internal daily quality publication view.

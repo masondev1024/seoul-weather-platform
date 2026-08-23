@@ -145,6 +145,8 @@ python dbt/serving_contract/validate_serving_contract.py --source dbt/domains/tr
 - `README-LOCAL.md` — 로컬 Compose 실행과 메모리 운영 기준
 - `docs/superpowers/specs/2026-08-14-weather-repository-separation-design.md` — 최종 분리 설계
 - `docs/architecture/platform-boundaries.md` — runtime ownership seam
+- `docs/architecture/weather-forecast-quality.md` — internal forecast-quality Gold architecture
+- `docs/operations/weather-forecast-quality-runbook.md` — Quality Gold shadow/activation/rollback gate
 - `docs/architecture/kma-observation-truth.md` — KMA 실황 정답 데이터 계약과 배포 gate
 - `docs/operations/kma-observation-predeployment-plan.md` — 관측 파이프라인 승인 전 배포·복구 설계
 - `docs/operations/current-resource-dependencies.md` — 기존 resource 의존성

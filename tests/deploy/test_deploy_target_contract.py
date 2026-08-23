@@ -146,6 +146,19 @@ def test_deploy_target_requires_writer_subset(tmp_path: Path):
         _load(tmp_path, payload)
 
 
+def test_deploy_target_treats_paused_quality_dags_as_writers_for_safe_drain(
+    tmp_path: Path,
+):
+    payload = _valid_target()
+
+    target = _load(tmp_path, payload)
+
+    assert {
+        "weather_forecast_quality_daily",
+        "weather_forecast_quality_backfill",
+    } <= target.writer_dag_allowlist
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
