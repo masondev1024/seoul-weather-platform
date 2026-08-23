@@ -17,6 +17,7 @@ from weather_quality_runtime import (  # noqa: E402
     QUALITY_TRUTH_POLICY_VERSION,
     QUALITY_VINTAGE_POLICY_VERSION,
     QualityWindowError,
+    quality_window_from_dbt_vars,
     quality_schedule,
     resolve_backfill_quality_window,
     resolve_daily_quality_window,
@@ -151,6 +152,21 @@ def test_as_dbt_vars_returns_stable_contract_keys_and_policy_versions():
         "weather_quality_evidence_policy_version": QUALITY_EVIDENCE_POLICY_VERSION,
         "weather_quality_pop_policy_version": QUALITY_POP_POLICY_VERSION,
     }
+
+
+def test_quality_window_from_dbt_vars_rehydrates_only_the_bounded_contract():
+    window = resolve_daily_quality_window(
+        now=datetime(2026, 8, 22, 3, 5, tzinfo=KST),
+        run_id="scheduled__quality",
+    )
+
+    assert quality_window_from_dbt_vars(window.as_dbt_vars()) == window
+
+    invalid = window.as_dbt_vars() | {
+        "weather_quality_forecast_load_start_date": "2026-08-10"
+    }
+    with pytest.raises(QualityWindowError, match="runtime variables are invalid"):
+        quality_window_from_dbt_vars(invalid)
 
 
 def test_quality_schedule_trims_env_override_and_defaults_to_none(monkeypatch):

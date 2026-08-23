@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from math import sqrt
 from pathlib import Path
 import re
 
@@ -13,6 +14,14 @@ QUALITY_MODELS = ROOT / "dbt/domains/traffic_weather/models/weather/quality"
 MATCH_SQL = QUALITY_MODELS / "silver/silver_weather_forecast_observation_match.sql"
 HISTORY_SQL = QUALITY_MODELS / "gold/gold_weather_forecast_quality_grid_score_history.sql"
 VIEW_SQL = QUALITY_MODELS / "gold/gold_weather_forecast_quality_grid_score.sql"
+HOURLY_HISTORY_SQL = (
+    QUALITY_MODELS / "gold/gold_weather_forecast_quality_hourly_history.sql"
+)
+HOURLY_VIEW_SQL = QUALITY_MODELS / "gold/gold_weather_forecast_quality_hourly.sql"
+DAILY_HISTORY_SQL = (
+    QUALITY_MODELS / "gold/gold_weather_forecast_quality_daily_history.sql"
+)
+DAILY_VIEW_SQL = QUALITY_MODELS / "gold/gold_weather_forecast_quality_daily.sql"
 MATCH_TEST_SQL = (
     ROOT
     / "dbt/domains/traffic_weather/tests/weather/quality/assert_quality_match_unique.sql"
@@ -113,6 +122,35 @@ def probability_components(probability: float, observed: bool) -> dict[str, floa
         "false_positive": int(predicted and not observed),
         "true_negative": int((not predicted) and (not observed)),
         "false_negative": int((not predicted) and observed),
+    }
+
+
+def aggregate_temperature_components(
+    samples: list[tuple[float, float]],
+) -> dict[str, float]:
+    errors = [forecast - observed for forecast, observed in samples]
+    return {
+        "mae": sum(abs(error) for error in errors) / len(errors),
+        "rmse": sqrt(sum(error * error for error in errors) / len(errors)),
+        "bias": sum(errors) / len(errors),
+    }
+
+
+def aggregate_probability_components(
+    samples: list[tuple[float, bool]],
+) -> dict[str, float | int]:
+    components = [probability_components(probability, observed) for probability, observed in samples]
+    true_positive = sum(int(component["true_positive"]) for component in components)
+    false_positive = sum(int(component["false_positive"]) for component in components)
+    false_negative = sum(int(component["false_negative"]) for component in components)
+    return {
+        "brier": sum(float(component["brier_component"]) for component in components)
+        / len(components),
+        "true_positive": true_positive,
+        "true_negative": sum(int(component["true_negative"]) for component in components),
+        "precision": true_positive / (true_positive + false_positive),
+        "recall": true_positive / (true_positive + false_negative),
+        "f1": 2 * true_positive / (2 * true_positive + false_positive + false_negative),
     }
 
 
@@ -272,6 +310,52 @@ def test_gold_history_and_view_are_manifest_gated_latest_success_without_serving
     assert "publication_rank = 1" in view
     assert "serving" not in (history + view).lower()
     assert "d1" not in (history + view).lower()
+
+
+def test_hourly_and_daily_metrics_are_derived_from_grid_score_components() -> None:
+    assert aggregate_temperature_components([(12.0, 10.0), (14.0, 15.0)]) == {
+        "mae": 1.5,
+        "rmse": sqrt(2.5),
+        "bias": 0.5,
+    }
+    probability_metrics = aggregate_probability_components([(0.8, True), (0.2, False)])
+    assert probability_metrics["brier"] == pytest.approx(0.04)
+    assert probability_metrics["true_positive"] == 1
+    assert probability_metrics["true_negative"] == 1
+    assert probability_metrics["precision"] == 1.0
+    assert probability_metrics["recall"] == 1.0
+    assert probability_metrics["f1"] == 1.0
+
+    hourly_history = HOURLY_HISTORY_SQL.read_text(encoding="utf-8")
+    daily_history = DAILY_HISTORY_SQL.read_text(encoding="utf-8")
+    for sql in (hourly_history, daily_history):
+        assert "ref('gold_weather_forecast_quality_grid_score_history')" in sql
+        assert "temperature_absolute_error_sum" in sql
+        assert "temperature_squared_error_sum" in sql
+        assert "brier_component_sum" in sql
+        assert "expected_calibration_error" in sql
+        assert "weather_quality_evidence_state" in sql
+        assert "cast(true_positive as double)" in sql
+        assert "cast(categorical_match_count as double)" in sql
+        assert "sample_count < 30" not in sql
+        assert "d1" not in sql.lower()
+        assert "serving" not in sql.lower()
+
+    assert "ref('gold_weather_forecast_quality_hourly_history')" not in daily_history
+    assert "materialized='incremental'" in hourly_history
+    assert "materialized='incremental'" in daily_history
+    assert "day(valid_at)" in hourly_history
+    assert "day(evaluation_date_kst)" in daily_history
+
+
+def test_hourly_and_daily_views_use_only_successful_internal_publications() -> None:
+    for view in (HOURLY_VIEW_SQL.read_text(encoding="utf-8"), DAILY_VIEW_SQL.read_text(encoding="utf-8")):
+        assert "source('weather_quality_control', 'quality_publication_manifest')" in view
+        assert "cast(status as varchar) = 'SUCCESS'" in view
+        assert "partition by dates.evaluation_date_kst" in view
+        assert "publication_rank = 1" in view
+        assert "serving" not in view.lower()
+        assert "d1" not in view.lower()
 
 
 def test_quality_sql_data_tests_protect_expected_grain_and_reconciliation() -> None:

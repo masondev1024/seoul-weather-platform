@@ -6,6 +6,7 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from collections.abc import Mapping
 from zoneinfo import ZoneInfo
 
 
@@ -17,6 +18,20 @@ QUALITY_EVIDENCE_POLICY_VERSION = "metric-evidence-gate/v1"
 QUALITY_POP_POLICY_VERSION = "pop-threshold-0.5/v1"
 QUALITY_BACKFILL_CONFIRMATION = "BACKFILL_ONE_KST_DATE"
 QUALITY_SCHEDULE_ENV = "ASK_SEOUL_WEATHER_QUALITY_DAG_SCHEDULE"
+QUALITY_DBT_VAR_KEYS = frozenset(
+    {
+        "weather_quality_run_id",
+        "weather_quality_evaluation_as_of",
+        "weather_quality_window_start_date",
+        "weather_quality_window_end_date",
+        "weather_quality_forecast_load_start_date",
+        "weather_quality_forecast_load_end_date",
+        "weather_quality_truth_policy_version",
+        "weather_quality_vintage_policy_version",
+        "weather_quality_evidence_policy_version",
+        "weather_quality_pop_policy_version",
+    }
+)
 
 KST = ZoneInfo("Asia/Seoul")
 _ISO_KST_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -61,6 +76,59 @@ def quality_schedule() -> str | None:
 
 def as_dbt_vars(window: QualityEvaluationWindow) -> dict[str, str]:
     return window.as_dbt_vars()
+
+
+def quality_window_from_dbt_vars(values: Mapping[str, object]) -> QualityEvaluationWindow:
+    """Rehydrate and validate the immutable evaluation contract from XCom-safe vars."""
+
+    if set(values) != QUALITY_DBT_VAR_KEYS or any(
+        not isinstance(value, str) for value in values.values()
+    ):
+        raise QualityWindowError("weather quality runtime variables are incomplete")
+    run_id = _require_safe_run_id(str(values["weather_quality_run_id"]))
+    try:
+        evaluation_as_of = datetime.fromisoformat(
+            str(values["weather_quality_evaluation_as_of"])
+        )
+        start_date = date.fromisoformat(str(values["weather_quality_window_start_date"]))
+        end_date = date.fromisoformat(str(values["weather_quality_window_end_date"]))
+        forecast_start = date.fromisoformat(
+            str(values["weather_quality_forecast_load_start_date"])
+        )
+        forecast_end = date.fromisoformat(
+            str(values["weather_quality_forecast_load_end_date"])
+        )
+    except ValueError as exc:
+        raise QualityWindowError("weather quality runtime variables are invalid") from exc
+    if evaluation_as_of.tzinfo is None or evaluation_as_of.utcoffset() is None:
+        raise QualityWindowError("weather quality runtime variables are invalid")
+    if end_date < start_date or (end_date - start_date).days + 1 not in {
+        1,
+        QUALITY_REPAIR_DAYS,
+    }:
+        raise QualityWindowError("weather quality runtime variables are invalid")
+    if forecast_start != start_date - timedelta(days=FORECAST_LOAD_LOOKBACK_DAYS):
+        raise QualityWindowError("weather quality runtime variables are invalid")
+    if forecast_end != end_date - timedelta(days=1):
+        raise QualityWindowError("weather quality runtime variables are invalid")
+    if end_date >= evaluation_as_of.astimezone(KST).date():
+        raise QualityWindowError("weather quality runtime variables are invalid")
+    expected_policies = {
+        "weather_quality_truth_policy_version": QUALITY_TRUTH_POLICY_VERSION,
+        "weather_quality_vintage_policy_version": QUALITY_VINTAGE_POLICY_VERSION,
+        "weather_quality_evidence_policy_version": QUALITY_EVIDENCE_POLICY_VERSION,
+        "weather_quality_pop_policy_version": QUALITY_POP_POLICY_VERSION,
+    }
+    if any(values[name] != expected for name, expected in expected_policies.items()):
+        raise QualityWindowError("weather quality runtime variables are invalid")
+    return QualityEvaluationWindow(
+        evaluation_run_id=run_id,
+        evaluation_as_of=evaluation_as_of.astimezone(timezone.utc),
+        window_start_date=start_date,
+        window_end_date=end_date,
+        forecast_load_start_date=forecast_start,
+        forecast_load_end_date=forecast_end,
+    )
 
 
 def resolve_daily_quality_window(

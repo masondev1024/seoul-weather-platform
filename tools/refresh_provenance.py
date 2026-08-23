@@ -182,6 +182,10 @@ LOCAL_DBT_SOURCES = frozenset(
         "dbt/domains/traffic_weather/models/weather/quality/gold/_quality_gold.yml",
         "dbt/domains/traffic_weather/models/weather/quality/gold/gold_weather_forecast_quality_grid_score.sql",
         "dbt/domains/traffic_weather/models/weather/quality/gold/gold_weather_forecast_quality_grid_score_history.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/gold/gold_weather_forecast_quality_hourly_history.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/gold/gold_weather_forecast_quality_hourly.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/gold/gold_weather_forecast_quality_daily_history.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/gold/gold_weather_forecast_quality_daily.sql",
         "dbt/domains/traffic_weather/models/weather/quality/silver/_quality_silver.yml",
         "dbt/domains/traffic_weather/models/weather/quality/silver/silver_kma_observation_truth.sql",
         "dbt/domains/traffic_weather/models/weather/quality/silver/silver_weather_forecast_observation_match.sql",
@@ -189,6 +193,8 @@ LOCAL_DBT_SOURCES = frozenset(
         "dbt/domains/traffic_weather/seeds/weather/_weather_inputs.yml",
         "dbt/domains/traffic_weather/tests/weather/quality/assert_quality_forecast_vintage_unique.sql",
         "dbt/domains/traffic_weather/tests/weather/quality/assert_quality_grid_score_reconciles.sql",
+        "dbt/domains/traffic_weather/tests/weather/quality/assert_quality_hourly_reconciles.sql",
+        "dbt/domains/traffic_weather/tests/weather/quality/assert_quality_daily_reconciles.sql",
         "dbt/domains/traffic_weather/tests/weather/quality/assert_quality_match_unique.sql",
         "dbt/domains/traffic_weather/tests/weather/quality/assert_quality_observation_truth_complete_hours.sql",
         "dbt/domains/traffic_weather/tests/weather/quality/assert_quality_observation_truth_unique.sql",
@@ -213,6 +219,13 @@ LOCAL_AIRFLOW_SOURCES = frozenset(
         # provenance without a reviewed allowlist addition and test update.
         "dags/domains/weather/weather_quality_runtime.py",
         "dags/domains/weather/tests/test_weather_quality_runtime.py",
+        "dags/domains/weather/weather_quality_publication.py",
+        "dags/domains/weather/weather_quality_dag_factory.py",
+        "dags/domains/weather/weather_forecast_quality_daily.py",
+        "dags/domains/weather/weather_forecast_quality_backfill.py",
+        "dags/domains/weather/tests/test_weather_quality_publication.py",
+        "dags/domains/weather/tests/test_weather_forecast_quality_dags.py",
+        "dags/domains/weather/tests/test_weather_dbt_runtime_contract.py",
         # This repository's hourly observation implementation. Every new DAG,
         # runtime module, and focused contract test is explicit so inherited
         # Airflow code can never be silently reclassified as local authorship.

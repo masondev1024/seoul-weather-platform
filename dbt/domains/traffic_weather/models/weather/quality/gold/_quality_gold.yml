@@ -75,3 +75,39 @@ models:
         tests: [not_null]
       - name: forecast_horizon
         tests: [not_null]
+
+  - name: gold_weather_forecast_quality_hourly_history
+    description: >
+      Run-versioned hourly quality aggregates built directly from grid-score
+      components, never by averaging hourly metric values into a later rollup.
+    columns:
+      - name: evaluation_run_id
+        tests: [not_null]
+      - name: valid_at
+        tests: [not_null]
+      - name: evidence_state
+        tests:
+          - accepted_values:
+              arguments:
+                values: [sufficient, degraded, insufficient_evidence]
+
+  - name: gold_weather_forecast_quality_daily_history
+    description: >
+      Run-versioned daily quality aggregates built directly from grid-score
+      components so MAE, RMSE, Brier, and classification metrics remain exact.
+    columns:
+      - name: evaluation_run_id
+        tests: [not_null]
+      - name: evaluation_date_kst
+        tests: [not_null]
+      - name: evidence_state
+        tests:
+          - accepted_values:
+              arguments:
+                values: [sufficient, degraded, insufficient_evidence]
+
+  - name: gold_weather_forecast_quality_hourly
+    description: Latest successful internal hourly quality publication view.
+
+  - name: gold_weather_forecast_quality_daily
+    description: Latest successful internal daily quality publication view.
