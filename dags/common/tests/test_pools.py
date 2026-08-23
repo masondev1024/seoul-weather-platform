@@ -42,6 +42,11 @@ EXPECTED_POOL_IMPORT_PAYLOAD = {
         "description": "Serialize Weather Trino writes and recovery",
         "include_deferred": False,
     },
+    "trino_weather_legacy_heavy": {
+        "slots": 1,
+        "description": "Compatibility fallback for an explicitly disabled Weather guard",
+        "include_deferred": False,
+    },
     "trino_weather_recovery_heavy": {
         "slots": 1,
         "description": "Serialize Weather observation recovery",
@@ -135,6 +140,7 @@ class PoolRegistryTest(unittest.TestCase):
                 registry.TRINO_TRAFFIC_TRANSFORM_POOL,
                 registry.TRINO_TRANSIT_HEAVY_POOL,
                 registry.TRINO_WEATHER_HEAVY_POOL,
+                registry.TRINO_WEATHER_LEGACY_HEAVY_POOL,
                 registry.TRINO_WEATHER_RECOVERY_HEAVY_POOL,
                 registry.TRINO_HEAVY_POOL,
                 registry.SERVING_D1_PUBLISH_POOL,

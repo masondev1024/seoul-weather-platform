@@ -112,18 +112,23 @@ def find_secret_candidates(repo_root: Path, paths: Iterable[str]) -> list[Secret
     return findings
 
 
-def repository_candidate_paths(repo_root: Path) -> list[str]:
+def repository_candidate_paths(
+    repo_root: Path,
+    *,
+    include_untracked: bool = True,
+) -> list[str]:
     root = repo_root.resolve()
+    command = [
+        "git",
+        "-C",
+        str(repo_root),
+        "ls-files",
+        "--cached",
+    ]
+    if include_untracked:
+        command.extend(("--others", "--exclude-standard"))
     result = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repo_root),
-            "ls-files",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-        ],
+        command,
         check=True,
         capture_output=True,
         text=True,

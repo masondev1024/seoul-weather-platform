@@ -34,7 +34,11 @@ upstream slot 점유를 먼저 확인한다.
 pool 이름만 보고 동시성 문제라고 추측하지 않는다. 실제 Airflow metadata에서
 `start_date/end_date`를 비교한다.
 
-- 모든 Weather Trino mutation은 1-slot `trino_weather_heavy`를 사용한다.
+- 활성 개인 runtime은 shared guard로 forecast/transform을 1-slot
+  `trino_weather_heavy`에 매핑하고 maintenance는 같은 pool을 직접 사용한다.
+- `trino_weather_legacy_heavy`는 shared guard를 명시적으로 끈 rollback에서만 쓰는
+  호환성 pool이다. 그 모드에서는 single-lane OOM 보호를 보장하지 않으므로 개인 운영에서
+  사용하지 않는다.
 - long-running task 하나가 slot을 점유하면 뒤의 task는 OOM 없이 기다릴 수 있다.
 - 그러나 waiting은 freshness SLO를 넘길 수 있으므로, maintenance에는 서비스보다 작은
   priority와 짧은 execution bound가 필요하다.
@@ -85,6 +89,20 @@ import하는 두 테스트가 `MappedAnnotationError`로 시작조차 못 했다
   production image의 test target을 CI에 추가하는 것이 올바른 후속 조치다.
 - 이번에는 실제 runtime에서 forecast DAG의 guard off/on pool 해석과 전체 DAG import error
   0을 확인했다.
+
+### 7. main 직접 push의 CI 실패는 promotion 정책 위반 신호다
+
+이 저장소의 `Promotion Source / required` job은 `main`에 push된 commit이 정확히 하나의
+merged PR에서 왔다는 GitHub 증거를 요구한다. 따라서 관리자가 protection을 bypass해
+직접 `main`에 push하면 source와 무관하게 이 job 및 aggregate required check는 실패한다.
+
+- 이 gate를 direct push를 통과시키도록 느슨하게 바꾸지 않는다. public repository의
+  변경은 원칙적으로 branch에서 검증한 뒤 PR로 `main`에 반영한다.
+- 긴급 직접 반영은 명시적인 운영 승인과 local/runtime 증거를 남기는 예외 경로다. CI의
+  빨간 상태를 product 또는 data-quality 실패로 오해하지 않되, 표준 promotion 증거도
+  얻지 못했다는 사실은 남긴다.
+- CI에서 발견된 repository provenance나 Airflow test의 실제 실패는 promotion failure와
+  분리해서 고친다. aggregate job 하나만 보고 모든 실패를 정책 탓으로 처리하면 안 된다.
 
 ## 이번에 추가한 재발 방지 테스트
 

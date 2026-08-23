@@ -489,7 +489,12 @@ def rendered_manifest(repo_root: Path, manifest_path: Path) -> bytes:
         for record in records
         if isinstance(record.get("target_path"), str)
     }
-    for relative_path in sorted(repository_candidate_paths(root)):
+    # A checked-in manifest must be reproducible in a clean CI checkout. The
+    # repository policy still scans untracked files for secrets, but personal
+    # scratch files must never become dangling provenance records.
+    for relative_path in sorted(
+        repository_candidate_paths(root, include_untracked=False)
+    ):
         target = _normalized(relative_path)
         if target == MANIFEST_SELF_PATH or target in recorded_targets:
             continue

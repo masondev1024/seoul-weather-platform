@@ -44,6 +44,20 @@ def test_repository_candidates_exclude_deleted_tracked_paths(tmp_path: Path) -> 
     assert repository_candidate_paths(tmp_path) == ["retained.txt"]
 
 
+def test_repository_candidates_can_exclude_untracked_paths(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    tracked = tmp_path / "tracked.txt"
+    untracked = tmp_path / "scratch.txt"
+    tracked.write_text("tracked\n", encoding="utf-8")
+    untracked.write_text("scratch\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "tracked.txt"], check=True)
+
+    assert set(repository_candidate_paths(tmp_path)) == {"tracked.txt", "scratch.txt"}
+    assert repository_candidate_paths(tmp_path, include_untracked=False) == [
+        "tracked.txt"
+    ]
+
+
 def test_secret_scanner_redacts_but_does_not_return_secret_value(tmp_path: Path) -> None:
     secret_file = tmp_path / "config.txt"
     secret_file.write_text("MARKETPLACE_API_KEY=ask_" + "a" * 32 + "\n", encoding="utf-8")
