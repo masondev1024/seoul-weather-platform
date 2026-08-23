@@ -75,6 +75,25 @@ Airflow 관련 state change 전에는 반드시 사용자에게 먼저 보고하
 - 사용자 변경과 unrelated dirty state를 되돌리지 않는다.
 - 이슈와 PR 본문에는 근본 원인, 변경 동작, 관측 가능한 결과, 데이터·비용 영향, rollback 범위를 기록한다.
 
+### `main` promotion은 PR-only
+
+이 public repository에서 merged pull request만이 `main` commit의 정상적인 source다.
+`Promotion Source / required` GitHub Actions job이 그 증거를 검증한다.
+
+- 기능 변경은 `feat/` branch에서 관련 local check를 실행한 뒤 `dev`를 대상으로 PR을 생성한다.
+- `main` promotion은 검증된 `dev`를 `main`으로 올리는 별도 PR에서만 한다. required check가 통과된 뒤에만 merge한다.
+- documentation, provenance, CI, 긴급해 보이는 fix를 포함해 `main`에 직접 commit/push하지 않는다. 빠른 반영을 위해 branch protection이나 required check를 bypass하지 않는다.
+- fix와 provenance manifest 갱신은 같은 feature PR에 포함해 CI가 `main`으로 갈 정확한 snapshot을 검증하게 한다.
+
+#### 명시적 긴급 예외
+
+direct `main` push는 사용자가 `Promotion Source / required`와 aggregate `CI / required`가
+merged-PR evidence 없이 의도적으로 실패한다는 사실을 들은 뒤 **명시적으로 승인한 경우에만** 허용한다.
+
+- `docs/lessonrun.md`에 근거, runtime evidence, 후속 계획을 기록한다.
+- 별도의 job 실패가 없다면 그 CI 결과를 code/data-quality regression으로 표현하지 않는다.
+- 긴급 bypass는 상시 workflow가 아니며, 다음 변경부터 즉시 branch-and-PR 경로로 복귀한다.
+
 ## 검증
 
 - 동작 코드는 가능하면 test-first로 변경하고 RED → GREEN을 확인한다.
