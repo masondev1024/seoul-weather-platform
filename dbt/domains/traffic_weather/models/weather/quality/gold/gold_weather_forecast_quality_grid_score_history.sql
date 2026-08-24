@@ -1,0 +1,100 @@
+{{ config(
+    materialized='incremental',
+    incremental_strategy='merge',
+    unique_key=['evaluation_run_id', 'grid_id', 'valid_at', 'variable', 'forecast_horizon'],
+    on_schema_change='fail',
+    full_refresh=false,
+    views_enabled=false,
+    on_table_exists='drop',
+    properties={
+        "partitioning": "ARRAY['day(valid_at)']"
+    },
+    tags=['ask_seoul_weather_quality_candidate']
+) }}
+
+-- depends_on: {{ source('weather_quality_control', 'quality_publication_manifest') }}
+
+{% if execute %}
+  {% do weather_quality_validate_runtime_contract() %}
+  {% set evaluation_run_id = weather_quality_run_id() %}
+{% else %}
+  {% set evaluation_run_id = "'parse_only'" %}
+{% endif %}
+
+select
+    evaluation_run_id,
+    evaluation_as_of,
+    evaluation_date_kst,
+    grid_id,
+    nx,
+    ny,
+    valid_at,
+    variable,
+    forecast_horizon,
+    lower_hours_before_valid,
+    upper_hours_before_valid,
+    1 as expected_count,
+    case when match_state = 'matched' then 1 else 0 end as matched_count,
+    case when match_state = 'missing_vintage' then 1 else 0 end as missing_vintage_count,
+    case when match_state = 'missing_truth' then 1 else 0 end as missing_truth_count,
+    case when match_state = 'invalid_forecast' then 1 else 0 end as invalid_forecast_count,
+    case when match_state = 'invalid_truth' then 1 else 0 end as invalid_truth_count,
+    case when match_state = 'incompatible_contract' then 1 else 0 end as incompatible_contract_count,
+    match_state,
+    forecast_issued_at,
+    forecast_value_kind,
+    truth_value_kind,
+    forecast_unit,
+    truth_unit,
+    forecast_raw_value,
+    truth_raw_value,
+    forecast_value_num,
+    truth_value_num,
+    forecast_value_category,
+    truth_value_category,
+    truth_value_bool,
+    temperature_forecast_value,
+    temperature_observed_value,
+    temperature_error,
+    temperature_absolute_error,
+    temperature_squared_error,
+    forecast_probability,
+    observed_occurrence,
+    brier_component,
+    predicted_occurrence,
+    true_positive,
+    false_positive,
+    true_negative,
+    false_negative,
+    categorical_forecast,
+    categorical_observed,
+    categorical_match,
+    forecast_value_status,
+    truth_status,
+    forecast_source_revision,
+    truth_source_revision,
+    truth_revision,
+    forecast_source_id,
+    truth_source_id,
+    truth_source,
+    truth_quality,
+    forecast_request_id,
+    forecast_raw_object_key,
+    truth_raw_object_key,
+    truth_payload_sha256,
+    forecast_load_date,
+    forecast_collected_at,
+    truth_collected_at,
+    truth_as_of,
+    forecast_source_run_id,
+    truth_source_run_id,
+    forecast_collection_dag_id,
+    truth_manifest_key,
+    forecast_manifest_event_at_utc,
+    truth_policy_version,
+    vintage_policy_version,
+    evidence_policy_version,
+    pop_policy_version,
+    current_timestamp as history_loaded_at
+from {{ ref('silver_weather_forecast_observation_match') }}
+where evaluation_run_id = {{ evaluation_run_id }}

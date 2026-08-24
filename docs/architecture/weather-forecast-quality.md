@@ -1,5 +1,21 @@
 # Forecast quality evidence architecture
 
+## Implementation status (2026-08-23)
+
+The internal R2/Iceberg implementation now exists as a paused-by-default daily
+DAG and a one-KST-date manual backfill DAG. It evaluates the bounded seven-day
+repair window with `observation-truth-policy/v2-internal`,
+`forecast-vintage-cutoff/v1`, `metric-evidence-gate/v1`, and
+`pop-threshold-0.5/v1`. The checked-in Compose schedule remains empty, so no
+quality DAG has been unpaused, triggered, or allowed to write R2/Iceberg.
+
+The detailed executable design and rollout plan are
+[`2026-08-22-weather-forecast-quality-gold-design.md`](../superpowers/specs/2026-08-22-weather-forecast-quality-gold-design.md)
+and
+[`2026-08-23-weather-forecast-quality-gold.md`](../superpowers/plans/2026-08-23-weather-forecast-quality-gold.md).
+The operational activation and rollback steps are in
+[`weather-forecast-quality-runbook.md`](../operations/weather-forecast-quality-runbook.md).
+
 ## What this slice proves
 
 The repository can already compare the latest short-range forecast issue with the previous issue. That is revision analysis, not forecast accuracy. This slice adds a separate, deterministic contract for comparing forecast vintages with observation truth without claiming that synthetic fixtures describe current Seoul weather performance.
@@ -46,7 +62,13 @@ The canonical universe is the 80 unique `seoul_bbox` rows in `dags/domains/weath
 
 The three-hour tolerance matches the short-range issue cadence. If the requested window is empty, the output records a gap. It never substitutes D-2 for D-3 or D-1 for D-2.
 
-`observation-truth-policy/v1` requires an explicit `evaluation_as_of`. Revisions or collections after that instant are invisible to the run. The latest visible revision is selected per truth source, grid, variable, and observation time; conflicting values at the selected revision fail closed. Final truth is eligible. Provisional truth is degraded through `observed_at + 6h`, then excluded as stale until a final revision is visible. A later run can select a later revision and produces a different evidence revision.
+`observation-truth-policy/v2-internal` requires an explicit `evaluation_as_of`.
+Revisions or collections after that instant are invisible to the run. The latest
+visible revision is selected per truth source, grid, variable, and observation
+time; conflicting values at the selected revision fail closed. The KMA endpoint
+does not provide a provider-final revision timestamp, so every eligible
+near-real-time observation remains explicitly `provisional`: it may support
+internal analysis but makes the cohort `degraded`, never a final public claim.
 
 These policies prevent future data leakage in model evaluation and make backtests reproducible.
 
@@ -59,7 +81,10 @@ Metric families remain separate:
 - Thresholded precipitation occurrence: TP, FP, TN, FN, precision, recall, F1, accuracy, and positive prevalence. This diagnostic must not replace the probability score.
 - Categorical precipitation occurrence: the same confusion-matrix family is available as a first-class `occurrence`/`none` contract, independent of POP thresholding.
 
-`pop-calibration/v1` emits ten bins: `[0.0,0.1)`, ..., `[0.9,1.0]`. Empty bins stay visible with zero count and null means. This avoids the common error of hiding unsupported probability ranges.
+`pop-threshold-0.5/v1` fixes the POP occurrence threshold at 0.5 while the
+ten-bin calibration output remains separate. Empty bins stay visible with zero
+count and null means. This avoids the common error of hiding unsupported
+probability ranges.
 
 `metric-evidence-gate/v1` requires at least 30 matches and at least 80% matched coverage per cohort. Both boundaries are inclusive. Below either gate, the cohort is `insufficient_evidence`; provisional truth makes an otherwise passing cohort `degraded`. A zero-match cohort remains a schema-valid diagnostic with empty metrics and explicit exclusion counts; it can never be presented as a scored result. Counts, denominator, coverage, gate version, truth revision, evaluation time, limitations, and per-metric unit/direction metadata travel with every emitted metric.
 

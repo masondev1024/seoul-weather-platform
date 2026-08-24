@@ -17,7 +17,11 @@ SOURCES_PATH = PROJECT_ROOT / "models" / "weather" / "sources.yml"
 WARN_ENV = "ASK_SEOUL_REPORT_WEATHER_FRESHNESS_WARN_MINUTES"
 ERROR_ENV = "ASK_SEOUL_REPORT_WEATHER_FRESHNESS_ERROR_MINUTES"
 DBT_EXECUTABLE = os.environ.get("DBT_EXECUTABLE") or shutil.which("dbt")
-EXPECTED_TABLES = {"kma_vilage_fcst", "collection_run_manifest"}
+EXPECTED_TABLES = {
+    "kma_vilage_fcst",
+    "kma_ultra_srt_ncst",
+    "collection_run_manifest",
+}
 
 
 def test_weather_freshness_declares_airflow_watchdog_environment_contract():
