@@ -19,6 +19,7 @@ AIRFLOW_LOCAL_SERVICES = (
 )
 EXPECTED_KMA_DAG_SCHEDULE = "20 2,5,8,11,14,17,20,23 * * *"
 EXPECTED_SERVING_SNAPSHOT_DAG_SCHEDULE = "0 * * * *"
+EXPECTED_DISABLED_QUALITY_DAG_SCHEDULE = ""
 EXPECTED_ENV_FILE = "${ASK_SEOUL_PROD_ENV_FILE:-.env.prod}"
 EXPECTED_DISABLED_OBSERVATION_ENVIRONMENT = {
     "AIRFLOW__CORE__DAG_IGNORE_FILE_SYNTAX": "glob",
@@ -30,6 +31,7 @@ EXPECTED_DISABLED_OBSERVATION_ENVIRONMENT = {
         "/opt/airflow/logs/_weather_control/kma_api_budget.sqlite3"
     ),
     "ASK_SEOUL_KMA_DAILY_ATTEMPT_LIMIT": "7500",
+    "ASK_SEOUL_WEATHER_QUALITY_DAG_SCHEDULE": EXPECTED_DISABLED_QUALITY_DAG_SCHEDULE,
 }
 
 
@@ -251,6 +253,10 @@ def test_repository_keeps_the_local_runtime_budget_and_schedules() -> None:
         assert environment["ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE"] == (
             EXPECTED_SERVING_SNAPSHOT_DAG_SCHEDULE
         )
+        assert (
+            environment["ASK_SEOUL_WEATHER_QUALITY_DAG_SCHEDULE"]
+            == EXPECTED_DISABLED_QUALITY_DAG_SCHEDULE
+        )
         assert {
             name: environment[name]
             for name in EXPECTED_DISABLED_OBSERVATION_ENVIRONMENT
@@ -313,6 +319,10 @@ def test_validator_accepts_a_conservative_memory_and_lineage_contract(
         (
             'ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE: ""',
             'ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE: "45 * * * *"',
+        ),
+        (
+            'ASK_SEOUL_WEATHER_QUALITY_DAG_SCHEDULE: ""',
+            'ASK_SEOUL_WEATHER_QUALITY_DAG_SCHEDULE: "5 3 * * *"',
         ),
         ('KMA_NUM_OF_ROWS: "2000"', 'KMA_NUM_OF_ROWS: "1000"'),
         ("seoul-weather-platform-mac-net", "elt-infra-prod-net"),

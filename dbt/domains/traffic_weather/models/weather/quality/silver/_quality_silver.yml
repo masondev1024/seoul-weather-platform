@@ -1,0 +1,428 @@
+version: 2
+
+models:
+  - name: silver_weather_quality_forecast_vintage
+    description: >
+      Bounded, publishable KMA forecast vintages at canonical coverage-grid grain
+      for weather forecast quality evaluation.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - grid_id
+              - valid_at
+              - variable
+              - issued_at
+              - source_revision
+    columns:
+      - name: grid_id
+        description: Canonical 80-grid KMA coverage identifier from dim_weather_coverage_grid.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_weather_coverage_grid')
+                field: grid_id
+      - name: nx
+        description: KMA grid X coordinate.
+        tests:
+          - not_null
+      - name: ny
+        description: KMA grid Y coordinate.
+        tests:
+          - not_null
+      - name: valid_at
+        description: KST forecast target timestamp derived from fcst_date and fcst_time.
+        tests:
+          - not_null
+      - name: issued_at
+        description: KST forecast issue timestamp derived from base_date and base_time.
+        tests:
+          - not_null
+      - name: variable
+        description: Canonical quality variable.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - temperature_air_2m
+                  - precipitation_occurrence
+                  - precipitation_occurrence_category
+      - name: value_kind
+        description: Normalized value representation class.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - continuous
+                  - probability
+                  - categorical
+      - name: unit
+        description: Unit for the normalized value.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - degC
+                  - "1"
+                  - category
+      - name: raw_value
+        description: KMA forecast value exactly as retained from Bronze after trimming blanks to null.
+      - name: raw_value_num
+        description: Numeric parse of raw_value when possible.
+      - name: value_num
+        description: Normalized numeric value for TMP and valid POP; null for categorical or invalid values.
+      - name: value_category
+        description: Normalized dry/wet category for valid PTY; null otherwise.
+        tests:
+          - accepted_values:
+              arguments:
+                values:
+                  - dry
+                  - wet
+              config:
+                where: "value_category is not null"
+      - name: value_status
+        description: Explicit validity status of the raw forecast value under the quality contract.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - valid
+                  - invalid
+      - name: source_variable
+        description: Original KMA category code.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - TMP
+                  - POP
+                  - PTY
+      - name: source_revision
+        description: Raw payload hash used as the forecast-vintage source revision.
+        tests:
+          - not_null
+      - name: request_id
+        description: Bronze API request lineage identifier.
+      - name: source_id
+        description: Bronze source identifier.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - kma_vilage_fcst
+      - name: request_params_json
+        description: Secret-free KMA request parameter JSON from Bronze.
+      - name: bronze_place_id
+        description: Bronze collector place identifier retained for lineage only, not used as canonical grid identity.
+      - name: raw_object_key
+        description: R2 raw object lineage key.
+        tests:
+          - not_null
+      - name: load_date
+        description: Bronze load partition date.
+        tests:
+          - not_null
+      - name: collected_at
+        description: Bronze collection timestamp.
+        tests:
+          - not_null
+      - name: dag_run_id
+        description: Airflow collection DAG run lineage.
+        tests:
+          - not_null
+      - name: collection_dag_id
+        description: Collection DAG identifier from latest manifest state.
+      - name: manifest_expected_rows
+        description: Expected row count recorded by latest manifest state.
+      - name: manifest_actual_rows
+        description: Actual row count recorded by latest manifest state.
+      - name: manifest_expected_raw_objects
+        description: Expected raw object count recorded by latest manifest state.
+      - name: manifest_actual_raw_objects
+        description: Actual raw object count recorded by latest manifest state.
+      - name: manifest_event_at_utc
+        description: Latest manifest event timestamp used for publishability.
+  - name: silver_kma_observation_truth
+    description: >
+      Provisional KMA ultra-short observation truth selected from complete
+      revision-scoped Bronze observation runs for bounded forecast-quality
+      evaluation windows.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - grid_id
+              - observed_at
+              - variable
+              - truth_revision
+    columns:
+      - name: grid_id
+        description: Canonical 80-grid KMA coverage identifier.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_weather_coverage_grid')
+                field: grid_id
+      - name: nx
+        description: KMA grid X coordinate.
+        tests:
+          - not_null
+      - name: ny
+        description: KMA grid Y coordinate.
+        tests:
+          - not_null
+      - name: observed_at
+        description: UTC observation timestamp for the KST observation slot.
+        tests:
+          - not_null
+      - name: variable
+        description: Canonical quality truth variable.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - temperature_air_2m
+                  - precipitation_occurrence
+                  - precipitation_occurrence_category
+      - name: value_kind
+        description: Normalized value representation class.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - continuous
+                  - binary
+                  - categorical
+      - name: unit
+        description: Unit for the normalized truth value.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - degC
+                  - "1"
+                  - category
+      - name: raw_value
+        description: Source value or paired PTY/RN1 raw values retained for audit.
+      - name: value_num
+        description: Numeric truth value for temperature; null for binary/categorical precipitation rows.
+      - name: value_bool
+        description: Binary precipitation-occurrence truth; null for non-binary rows or invalid pairs.
+      - name: value_category
+        description: Categorical precipitation truth.
+        tests:
+          - accepted_values:
+              arguments:
+                values:
+                  - dry
+                  - wet
+              config:
+                where: "value_category is not null"
+      - name: truth_status
+        description: Explicit truth usability state; invalid rows remain visible but fail closed.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - provisional
+                  - invalid_truth
+      - name: source_variable
+        description: Source KMA category or paired source category set.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - T1H
+                  - PTY+RN1
+      - name: source_revision
+        description: Source revision identity retained from Bronze observation rows.
+        tests:
+          - not_null
+      - name: truth_revision
+        description: Revision identity used in truth grain and later evidence audits.
+        tests:
+          - not_null
+      - name: source_id
+        description: Bronze observation source identifier retained for lineage.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - kma_ultra_srt_ncst
+      - name: truth_source
+        description: Observation truth source identifier.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - kma_ultra_srt_ncst
+      - name: truth_quality
+        description: Near-real-time truth maturity; remains provisional until later reconciliation sources promote it.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - provisional
+      - name: collected_at
+        description: Bronze observation collection timestamp.
+        tests:
+          - not_null
+      - name: truth_as_of
+        description: Timestamp at which this provisional truth revision became visible.
+        tests:
+          - not_null
+      - name: dag_run_id
+        description: Airflow observation DAG run lineage.
+        tests:
+          - not_null
+      - name: manifest_key
+        description: Raw observation landing manifest key retained from Bronze row lineage.
+        tests:
+          - not_null
+      - name: raw_object_key
+        description: Raw object lineage key or paired raw object keys for PTY/RN1 truth.
+        tests:
+          - not_null
+      - name: payload_sha256
+        description: Raw payload hash or paired hashes for PTY/RN1 truth.
+        tests:
+          - not_null
+      - name: representative_idempotency_key
+        description: Deterministic representative Bronze idempotency key for run-level audit.
+      - name: representative_request_id
+        description: Deterministic representative API request id for run-level audit.
+      - name: representative_raw_object_key
+        description: Deterministic representative raw object key for run-level audit.
+      - name: representative_payload_sha256
+        description: Deterministic representative payload hash for run-level audit.
+      - name: representative_source_revision
+        description: Deterministic representative source revision for run-level audit.
+  - name: silver_weather_forecast_observation_match
+    description: >
+      Expected forecast-quality population matched to selected D-1/D-2/D-3 forecast
+      vintages and provisional observation truth. The model emits every expected
+      grid-hour-variable-horizon row with exactly one explicit match state.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - evaluation_run_id
+              - grid_id
+              - valid_at
+              - variable
+              - forecast_horizon
+    columns:
+      - name: evaluation_run_id
+        description: Runtime quality evaluation run identifier.
+        tests:
+          - not_null
+      - name: evaluation_as_of
+        description: Runtime timestamp that bounds eligible truth and forecast evidence.
+        tests:
+          - not_null
+      - name: evaluation_date_kst
+        description: KST date of the valid forecast hour.
+        tests:
+          - not_null
+      - name: grid_id
+        description: Canonical 80-grid KMA coverage identifier.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_weather_coverage_grid')
+                field: grid_id
+      - name: nx
+        description: KMA grid X coordinate.
+        tests:
+          - not_null
+      - name: ny
+        description: KMA grid Y coordinate.
+        tests:
+          - not_null
+      - name: valid_at
+        description: KST forecast target hour in the approved quality evaluation window.
+        tests:
+          - not_null
+      - name: variable
+        description: Canonical quality variable.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - temperature_air_2m
+                  - precipitation_occurrence
+                  - precipitation_occurrence_category
+      - name: forecast_horizon
+        description: Forecast vintage horizon selected by inclusive D-1/D-2/D-3 issue window.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - D-1
+                  - D-2
+                  - D-3
+      - name: match_state
+        description: Explicit result for the expected row; unmatched and invalid rows remain visible.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - matched
+                  - missing_vintage
+                  - missing_truth
+                  - invalid_forecast
+                  - invalid_truth
+                  - incompatible_contract
+      - name: forecast_value_kind
+        description: Selected forecast value representation.
+      - name: truth_value_kind
+        description: Selected truth value representation.
+      - name: temperature_error
+        description: Signed TMP forecast error for matched continuous rows.
+      - name: temperature_absolute_error
+        description: Absolute TMP forecast error for matched continuous rows.
+      - name: temperature_squared_error
+        description: Squared TMP forecast error for matched continuous rows.
+      - name: forecast_probability
+        description: Matched POP forecast probability in [0, 1].
+      - name: observed_occurrence
+        description: Matched binary precipitation occurrence truth.
+      - name: brier_component
+        description: Per-row POP Brier score component.
+      - name: predicted_occurrence
+        description: POP thresholded prediction using the >= 0.5 policy.
+      - name: categorical_match
+        description: PTY wet/dry categorical agreement flag for matched categorical rows.
+      - name: truth_policy_version
+        tests:
+          - not_null
+      - name: vintage_policy_version
+        tests:
+          - not_null
+      - name: evidence_policy_version
+        tests:
+          - not_null
+      - name: pop_policy_version
+        tests:
+          - not_null

@@ -12,6 +12,8 @@ asac_seoul:
       http_scheme: "{{ env_var('TRINO_HTTP_SCHEME', 'http') }}"
       threads: 4
       timeout_seconds: 300
+      session_properties:
+        query_max_run_time: "{{ env_var('TRINO_DBT_QUERY_MAX_RUN_TIME', '2h') }}"
     dev:
       type: trino
       method: none
@@ -23,6 +25,8 @@ asac_seoul:
       http_scheme: "{{ env_var('TRINO_HTTP_SCHEME', 'http') }}"
       threads: 4
       timeout_seconds: 300
+      session_properties:
+        query_max_run_time: "{{ env_var('TRINO_DBT_QUERY_MAX_RUN_TIME', '2h') }}"
     ci:
       type: trino
       method: none
@@ -34,3 +38,5 @@ asac_seoul:
       http_scheme: "{{ env_var('TRINO_HTTP_SCHEME', 'http') }}"
       threads: 4
       timeout_seconds: 300
+      session_properties:
+        query_max_run_time: "{{ env_var('TRINO_DBT_QUERY_MAX_RUN_TIME', '2h') }}"

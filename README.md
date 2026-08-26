@@ -4,13 +4,18 @@
 제공하는 공개 데이터 플랫폼이다. 예보와 실황을 같은 시간·격자 기준으로 보관하므로
 “며칠 전에 본 예보가 실제와 얼마나 달랐는가?”를 다시 계산할 수 있다.
 
-## 지금 확인해야 할 상태
+## 현재 상태
 
-- 현재 공개 코드는 **수집·변환·제공 계약과 검사 코드**를 담고 있다.
-- 운영 자격증명과 실제 R2·Iceberg·D1 데이터는 개인 노트북과 개인 Cloudflare 계정에만 둔다.
+- 공개 코드는 **수집·변환·제공 계약과 검사 코드**를 담고 있다.
+- 실제 자격증명과 R2·Iceberg·D1 자료는 개인 노트북과 개인 Cloudflare 계정에만 둔다.
 - 관측용 `weather_ultra_srt_ncst_bronze` DAG는 기본적으로 멈춤 상태이며 schedule도 비어 있다.
 - 코드 검증만으로는 API 호출, Docker 재시작, DAG 실행, R2/Iceberg/D1 쓰기를 하지 않는다.
-- 관측 품질 분석용 Gold는 내부 분석용이다. D1·Worker·현재 제공 제품에는 자동으로 섞지 않는다.
+- 관측 품질 Gold는 내부 분석용이며 D1·Worker·현재 공개 제품에 자동으로 섞지 않는다.
+- 현재 품질 코드와 검증 자료는 로컬에 구현돼 있지만, 공개 설정의 일정은 비어 있다.
+
+예보 품질의 세부 계약은 [예보 품질 설계](docs/architecture/weather-forecast-quality.md),
+실황 원천 계약은 [KMA 실황 계약](docs/architecture/kma-observation-truth.md)에 적었다.
+두 문서의 고정 80개 격자 자료는 계약 검사용 합성 자료이지 서울의 실제 정확도 주장이 아니다.
 
 ## 이 저장소가 맡는 일
 
@@ -24,8 +29,9 @@
 다음 영역은 이 저장소가 소유하지 않는다.
 
 - 개인 Cloudflare 자격증명과 실제 R2·D1 데이터
+- Weather origin의 범용 Marketplace/OAuth 구현
 - NomaDamas `k-skill` 실행 환경
-- Marketplace, OAuth, 사용량 한도, MCP 화면
+- Marketplace UI/OAuth/quota/MCP 화면
 - Traffic·Citydata·Culture·Commerce·Transit 영역
 
 ## 현재 제공 제품
@@ -108,7 +114,7 @@ Airflow 파일을 실제 실행하지 않고 가져올 수 있는지 확인하�
 - `CONTEXT.md` — 저장소에서 쓰는 용어와 경계
 - `README-LOCAL.md` — 개인 노트북에서 시작하는 방법과 메모리 기준
 - `docs/architecture/` — 데이터 흐름과 공개·개인 영역의 경계
-- `docs/operations/` — 배포 승인, 복구, 의존 리소스, 관측 파이프라인 절차
+- `docs/operations/` — 배포 승인, 품질 분석, 복구, 리소스 절차
 - `docs/data-engineering-decision.md` — 선택한 설계와 버린 대안
 - `docs/lessonrun.md` — 실제 장애를 원인·영향·대응 순서로 복기한 기록
 - `docs/superpowers/` — 구현 당시의 상세 계획과 계약 원문

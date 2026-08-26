@@ -1,5 +1,19 @@
 # 예보 품질 근거 데이터 설계
 
+## 현재 구현 상태
+
+내부 R2/Iceberg 품질 계산 코드와 매일 실행·한 날짜 수동 backfill DAG는 구현되어 있다.
+두 DAG 모두 기본 schedule이 없고 생성 시 멈춤 상태다. 7일 보수 범위는
+`observation-truth-policy/v2-internal`, `forecast-vintage-cutoff/v1`,
+`metric-evidence-gate/v1`, `pop-threshold-0.5/v1` 정책을 사용한다.
+
+공개 Compose 설정은 schedule이 비어 있으므로 품질 DAG가 활성화되거나 R2/Iceberg에
+자료를 쓰지 않았다. 자세한 실행 계약은
+[`품질 Gold 설계`](../superpowers/specs/2026-08-22-weather-forecast-quality-gold-design.md)와
+[`품질 Gold 작업표`](../superpowers/plans/2026-08-23-weather-forecast-quality-gold.md),
+실제 활성화·되돌리기 절차는
+[`품질 운영 절차`](../operations/weather-forecast-quality-runbook.md)를 따른다.
+
 ## 이 설계가 증명하는 것
 
 현재 코드는 최신 단기예보와 바로 전 예보의 차이를 비교할 수 있다. 그것은 예보판이
@@ -72,12 +86,18 @@ D-3: [valid_at - 75시간, valid_at - 72시간]
 `degraded`다. 표본이 0개인 묶음도 진단용으로만 남기고 점수 결과처럼 보여 주지 않는다.
 표본 수, 분모, 일치율, 기준 버전, 실황 수정본, 평가 시각, 제한 사항, 단위와 방향을
 모든 지표에 함께 싣는다.
+`observation-truth-policy/v2-internal`도 `evaluation_as_of`를 반드시 받는다. 그 시각
+이후의 수정·수집은 보이지 않게 하고, KMA가 최종 수정 시각을 주지 않으므로 가까운
+실시간 자료는 `provisional`로 남긴다. 내부 분석에는 쓸 수 있지만 최종 공개 근거로
+부르지 않는다.
 
 AI 응답은 “서울 날씨 정확도”처럼 범위 없는 말을 하지 못하게 한다. 반드시 묶음과
 지표를 함께 말해야 한다. POP를 0.5로 잘라 계산한 정확도가 높아도 Brier 점수와
 보정 구간이 나쁘면 확률 예보 품질은 낮을 수 있다.
 
 ## 고정 시험 자료
+고정 시험 자료는 계약과 계산 순서를 검증하기 위한 손검산용 정답지다. 실제 서울
+성능 측정값이나 운영 품질 보증으로 해석하지 않는다.
 
 ```bash
 python -m weather_quality.cli \
