@@ -36,6 +36,15 @@ Airflow 관련 state change 전에는 반드시 사용자에게 먼저 보고하
 
 사용자가 기존 로컬 파이프라인을 멈출 수 있도록 사전 보고한 뒤 승인받기 전까지는 repository/secretless test와 read-only inspection만 수행한다.
 
+자동 복구 제어면도 같은 경계를 따른다.
+
+- recovery planner/coordinator는 기본 dry-run, schedule 없음, 생성 시 pause 상태로 둔다.
+- startup wrapper는 `--start`와 별도 `WEATHER_STARTUP_AUTOSTART=enabled`가 모두 있어야
+  Compose core stack만 시작한다. DAG trigger/unpause/backfill과 데이터 write는 소유하지 않는다.
+- planner 결과를 실제 replay/recollect executor로 승격하려면 active-run 대조, durable
+  lease/idempotency, API·Trino budget, rollback/last-known-good serving gate를 검증하고
+  별도 승인을 받는다.
+
 ## 보안
 
 - `.env*`, token, key, password, KMA `serviceKey`, Cloudflare credential을 출력·문서화·커밋하지 않는다.
@@ -49,6 +58,25 @@ Airflow 관련 state change 전에는 반드시 사용자에게 먼저 보고하
 - 사용자 승인 없이 stage, commit, push, PR 생성, destructive git 작업을 하지 않는다.
 - `git add .`, `git add -A`를 사용하지 않고 경로 지정 stage만 사용한다.
 - 사용자 변경과 unrelated dirty state를 되돌리지 않는다.
+
+### `main` promotion은 PR-only
+
+이 public repository에서 merged pull request만이 `main` commit의 정상적인 source다.
+`Promotion Source / required` GitHub Actions job이 그 증거를 검증한다.
+
+- documentation, provenance, CI, 긴급해 보이는 fix를 포함해 `main`에 직접 commit/push하지 않는다.
+- 기능 변경은 `feat/` branch에서 관련 local check를 실행한 뒤 `dev`를 대상으로 PR을 생성한다.
+- `main` promotion은 검증된 `dev`를 `main`으로 올리는 별도 PR에서만 한다. required check가 통과된 뒤에만 merge한다.
+- 빠른 반영을 위해 branch protection이나 required check를 bypass하지 않는다. fix와 provenance manifest 갱신은 같은 feature PR에 포함한다.
+
+#### 명시적 긴급 예외
+
+direct `main` push는 사용자가 `Promotion Source / required`와 aggregate `CI / required`가
+merged-PR evidence 없이 의도적으로 실패한다는 사실을 들은 뒤 **명시적으로 승인한 경우에만** 허용한다.
+
+- `docs/lessonrun.md`에 근거, runtime evidence, 후속 계획을 기록한다.
+- 별도의 job 실패가 없다면 그 CI 결과를 code/data-quality regression으로 표현하지 않는다.
+- 긴급 bypass는 상시 workflow가 아니며, 다음 변경부터 즉시 branch-and-PR 경로로 복귀한다.
 
 ## 구현과 검증
 

@@ -1,5 +1,8 @@
 # `main` CI 성공 기반 Weather 자동 배포 설계
 
+> 사람용 안내: `main` 병합과 CI 성공을 배포 근거로 삼는 설계 원문이다. 실행에 필요한
+> 영문 식별자·상태 값·명령어는 보존하고, 판단과 이유는 한국어로 읽으면 된다.
+
 ## 1. 결정과 적용 범위
 
 Weather Platform의 운영 배포 증거는 같은 저장소의 exact `dev → main` PR merge로 단일화한다. `main` merge 자체로 배포하지 않고, 그 merge commit의 `CI` workflow가 성공한 직후 별도 `Deploy Main` workflow가 같은 SHA와 PR 증거를 다시 검증해 자동 배포한다. `guarded_private`는 단일 소유자 private 저장소의 사고 방지용 제한 경계이고, public/internal 전환 또는 추가 writer가 생기면 guarded 배포를 중단한다. `protected`는 native protection readback을 더한 강한 경계다.

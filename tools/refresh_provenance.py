@@ -194,6 +194,25 @@ LOCAL_DBT_SOURCES = frozenset(
 #: exclusion 파일을 제거했으므로 그 항목은 넣지 않는다.
 LOCAL_AIRFLOW_SOURCES = frozenset(
     {
+        # Read-only recovery control plane.  Planning is repository-owned and
+        # intentionally separate from the fixed upstream Weather entrypoints.
+        "dags/common/recovery/admission.py",
+        "dags/common/recovery/airflow_snapshot.py",
+        "dags/common/recovery/__init__.py",
+        "dags/common/recovery/dispatch.py",
+        "dags/common/recovery/lease.py",
+        "dags/common/recovery/postgres.py",
+        "dags/common/tests/test_recovery_admission.py",
+        "dags/common/tests/test_recovery_airflow_snapshot.py",
+        "dags/common/tests/test_recovery_dispatch.py",
+        "dags/common/tests/test_recovery_lease.py",
+        "dags/common/tests/test_recovery_postgres.py",
+        "dags/common/recovery/planner.py",
+        "dags/common/tests/test_recovery_planner.py",
+        "dags/domains/weather/weather_recovery_candidates.py",
+        "dags/domains/weather/weather_recovery_coordinator.py",
+        "dags/domains/weather/tests/test_weather_recovery_candidates.py",
+        "dags/domains/weather/tests/test_weather_recovery_coordinator.py",
         # This repository's hourly observation implementation. Every new DAG,
         # runtime module, and focused contract test is explicit so inherited
         # Airflow code can never be silently reclassified as local authorship.

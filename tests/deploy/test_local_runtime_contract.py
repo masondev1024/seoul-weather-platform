@@ -21,6 +21,7 @@ EXPECTED_KMA_DAG_SCHEDULE = "20 2,5,8,11,14,17,20,23 * * *"
 EXPECTED_SERVING_SNAPSHOT_DAG_SCHEDULE = "0 * * * *"
 EXPECTED_ENV_FILE = "${ASK_SEOUL_PROD_ENV_FILE:-.env.prod}"
 EXPECTED_DISABLED_OBSERVATION_ENVIRONMENT = {
+    "AIRFLOW__CORE__DAG_IGNORE_FILE_SYNTAX": "glob",
     "AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME": "7200",
     "ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED": "false",
     "ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE": "",
@@ -111,6 +112,15 @@ def _write_valid_contract(repo_root: Path) -> None:
         "    env_file:\n"
         f'      - "{EXPECTED_ENV_FILE}"\n'
         "    mem_limit: 5g\n"
+        "    healthcheck:\n"
+        "      test:\n"
+        "        - CMD-SHELL\n"
+        "        - \"curl --fail --silent --show-error --max-time 2 "
+        "http://localhost:8080/v1/info >/dev/null\"\n"
+        "      interval: 15s\n"
+        "      timeout: 3s\n"
+        "      retries: 10\n"
+        "      start_period: 30s\n"
         "    environment:\n"
         '      TRINO_TASK_CONCURRENCY: "2"\n'
         '      TRINO_QUERY_MAX_MEMORY_PER_NODE: "800MB"\n'
@@ -246,6 +256,23 @@ def test_repository_keeps_the_local_runtime_budget_and_schedules() -> None:
             for name in EXPECTED_DISABLED_OBSERVATION_ENVIRONMENT
         } == EXPECTED_DISABLED_OBSERVATION_ENVIRONMENT
         assert environment["KMA_NUM_OF_ROWS"] == "2000"
+
+
+def test_local_trino_healthcheck_is_http_liveness_not_a_queued_sql_query() -> None:
+    compose = _load_local_compose(REPO_ROOT / "docker-compose.local.yml")
+    healthcheck = compose["services"]["trino"].get("healthcheck")
+
+    assert healthcheck == {
+        "test": [
+            "CMD-SHELL",
+            "curl --fail --silent --show-error --max-time 2 "
+            "http://localhost:8080/v1/info >/dev/null",
+        ],
+        "interval": "15s",
+        "timeout": "3s",
+        "retries": 10,
+        "start_period": "30s",
+    }
 
 
 def test_validator_accepts_a_conservative_memory_and_lineage_contract(

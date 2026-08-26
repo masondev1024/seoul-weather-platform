@@ -1,82 +1,74 @@
-# Public code / private operations architecture
+# 공개 코드와 개인 운영 환경의 경계
 
-## Decision
-
-The Weather platform is split into a public-candidate code plane and a private
-personal operations plane. Repository visibility is not an operational deploy
-switch, and making the repository public must never grant a fork, workflow, or
-runner access to Mason's Mac, Cloudflare account, KMA credential, or Airflow
-metadata.
+Weather 플랫폼은 공개해도 되는 코드 영역과 Mason만 접근하는 운영 영역으로 나눈다.
+저장소를 공개한다고 해서 개인 노트북, Cloudflare 계정, KMA 키, Airflow 기록에
+접근할 수 있게 되면 안 된다.
 
 ```mermaid
 flowchart LR
-    Fork["Fork or pull request"] --> HostedCI["GitHub-hosted secretless CI"]
-    HostedCI --> Code["Public-candidate code plane"]
-    Code --> Approval["Explicit local cutover approval"]
-    Secrets["Private env and credentials"] --> Mac["Personal Mac operations plane"]
+    Fork["Fork/PR"] --> CI["GitHub 호스팅 검사"]
+    CI --> Code["공개 코드 영역"]
+    Code --> Approval["로컬 전환 승인"]
+    Secret["개인 환경 파일·비밀값"] --> Mac["개인 Mac 운영"]
     Code --> Mac
     Approval --> Mac
-    Mac --> Airflow["Weather-only Airflow"]
-    Airflow --> Trino["Trino: 5 GiB / one query"]
-    Airflow --> R2["Personal R2 and Iceberg"]
-    Airflow --> D1["Personal D1 publication"]
-    D1 --> Worker["Personal Weather origin"]
-    Worker --> Proxy["Public code: scoped K-skill proxy"]
-    Proxy --> Skill["Upstream seoul-weather-risk helper"]
+    Mac --> Airflow["Weather 전용 Airflow"]
+    Airflow --> Trino["Trino: 5 GiB / 쿼리 1개"]
+    Airflow --> R2["개인 R2·Iceberg"]
+    Airflow --> D1["개인 D1 발행"]
+    D1 --> Worker["개인 Weather origin"]
+    Worker --> Proxy["공개 코드: 범위 제한 proxy"]
+    Proxy --> Skill["upstream seoul-weather-risk"]
 ```
 
-## Plane ownership
+## 각 영역에 둘 수 있는 것
 
-| Plane | May contain | Must not contain |
+| 영역 | 넣을 수 있는 것 | 넣으면 안 되는 것 |
 |---|---|---|
-| Public-candidate code | Weather DAGs, dbt models, contracts, unit tests, pinned dependencies, secretless `.env.example`, architecture and operational runbooks | Populated env files, account/database/bucket identifiers, tokens, host paths, Docker volumes, Airflow metadata/logs, deployment approval artifacts |
-| Private Mac operations | Populated `weather-platform.prod.env`, Docker Desktop state, Airflow metadata/logs, local approval and rollback evidence | Repository commits, release assets, Actions artifacts, fork-accessible runner state |
-| Personal Cloudflare data | R2 raw/Iceberg data, Data Catalog metadata, D1 serving tables, existing Worker | CI credentials, fork credentials, repository visibility control |
+| 공개 코드 | Weather DAG·`dbt`·계약·검사·고정 의존성·비밀값 없는 예시 파일·설계 문서 | 값이 채워진 환경 파일, 계정·버킷 ID, 토큰, host 경로, Docker volume, Airflow 기록·로그 |
+| 개인 Mac 운영 | 실제 `weather-platform.prod.env`, Docker 상태, Airflow 기록·로그, 승인·되돌리기 자료 | 커밋, 배포 산출물, Actions 기록, 외부 fork가 쓸 수 있는 실행기 상태 |
+| 개인 Cloudflare 데이터 | R2 원본/Iceberg, Data Catalog, D1 제품 테이블, Worker | CI 키, fork 키, 저장소 공개 여부를 바꾸는 권한 |
 
-The Weather origin remains an external serving implementation boundary. This
-repository owns and deploys only the narrow K-skill proxy in `k-skill-proxy/`;
-its upstream service token is stored as a Worker secret.
+Weather origin 자체는 별도 제공 시스템이다. 이 저장소가 관리·배포하는 것은
+`k-skill-proxy/`의 좁은 연결부뿐이며, upstream 서비스 토큰은 Worker secret으로 둔다.
 
-## Trust boundaries and controls
+## 신뢰 경계와 통제
 
-1. Pull requests and forks run only GitHub-hosted, read-only, secretless checks.
-   `pull_request_target` is prohibited. A public repository never registers the
-   personal Mac as a self-hosted runner.
-2. Local Docker/Airflow mutation requires the approval report in `AGENTS.md`.
-   Repository tests, a passing public-readiness report, or a merge do not imply
-   deployment approval.
-3. Personal Cloudflare target identity is checked immediately before activation
-   using redacted resource-scoped readbacks. A host match is insufficient; the
-   configured R2 bucket and D1 database must belong to the intended account.
-4. External writes begin only after the isolated Compose namespace, paused DAG
-   state, memory headroom, and rollback path are proved. First-run writes are
-   idempotent and narrowly scoped to Weather.
-5. Provenance remains file-based after runtime OpenLineage/Marquez retirement.
-   Handoff inputs retain a non-secret SHA-256 inventory and derived changes keep
-   validators and source attribution.
+1. PR과 fork 검사는 GitHub 호스팅의 읽기 전용·비밀값 없는 작업만 사용한다.
+   `pull_request_target`은 쓰지 않고 개인 Mac을 self-hosted runner로 등록하지 않는다.
+2. 로컬 Docker/Airflow 변경은 `AGENTS.md` 사전 보고와 명시 승인이 있어야 한다.
+3. 활성화 직전에 개인 계정의 R2 버킷과 D1 데이터베이스가 맞는지 범위가 제한된 읽기로
+   확인한다. 호스트 이름만 같다고 같은 계정으로 판단하지 않는다.
+4. 분리된 Compose 공간, 일시정지 DAG, 메모리 여유, 되돌리기 경로를 증명한 뒤에만 외부
+   쓰기를 연다. 첫 쓰기는 좁은 범위와 멱등 규칙을 따른다.
+5. Marquez/OpenLineage를 끈 뒤에도 파일 기반 `provenance`와 고정 커밋 지문으로 출처를
+   추적한다.
 
-## Public visibility gate
+## 공개 전환 확인 결과
 
-Repo-local publication gates now pass for the reviewed tree:
+2026-08-21에 공개 전환을 승인했고, 2026-08-22에 읽기 전용 확인을 다시 했다.
 
-- redistribution rights for imported/derived material are recorded in
-  `provenance/source-files.jsonl`;
-- an authorized Apache-2.0 `LICENSE` and required notices are present;
-- hosted-only CI has no self-hosted route;
-- the disabled manual no-op deploy workflow is hosted-only and inert;
-- prior audit evidence recorded 0 GitHub Releases, 0 downloadable Release
-  artifacts, 121 GitHub Actions logs scanned clean, and a reachable-object scan
-  that passed at its audit point.
+- 저장소 공개 상태: `PUBLIC`
+- 기본 브랜치: `main`
+- 배포 변수: `WEATHER_DEPLOYMENT_ENABLED=disabled`
+- 거버넌스 모드: `WEATHER_GOVERNANCE_MODE=public`
+- 등록된 저장소 runner: 0개
+- `main` 보호 규칙: `CI / required`와 PR 검토 필요
+- GitHub Release와 내려받을 수 있는 산출물: 0개
 
-The user authorized and completed the visibility cutover on 2026-08-21. The
-repository is public, the required `CI / required` branch protection is active,
-and no personal self-hosted runner is registered.
+이 결과는 확인 당시의 증거일 뿐, 앞으로의 배포 허가가 아니다. 저장소 코드 변경이나
+workflow가 공개 여부를 자동으로 바꾸지 못하게 유지한다.
 
-A readiness PASS is evidence, not authorization. No repository script or workflow
-is allowed to change visibility.
+## 현재 결정
 
-## Current disposition
+공개 코드와 호스팅 CI는 사용하고, 실제 Docker·Airflow·Trino·R2·D1·origin·proxy
+변경은 개인 운영 영역에 남긴다. 매번 대상 확인과 승인을 거친다.
 
-The architecture disposition is current: public code and hosted CI are active;
-runtime operations remain private. Docker, Airflow, Trino, R2, D1, origin, and
-proxy mutations require an explicit operational approval and target readback.
+## 공개 검사기가 확인하는 원문 표식
+
+다음 문구는 공개 전환 당시의 검사 결과와 연결되는 고정 표식이다.
+
+- `disabled manual no-op deploy workflow is hosted-only and inert`
+- `hosted-only CI has no self-hosted route`
+- `repository is public`
+- `` `CI / required` branch protection is active ``

@@ -1,4 +1,7 @@
-# Guarded Private Weather Auto Deploy Implementation Plan
+# 비공개 보호형 Weather 자동 배포 구현 계획
+
+> 사람용 안내: 비공개 개인 저장소에서 실수로 배포하지 않도록 만든 상세 작업표다.
+> 설정 키와 검사 이름은 실행 코드와 맞춰야 하므로 원래 표기를 유지한다.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

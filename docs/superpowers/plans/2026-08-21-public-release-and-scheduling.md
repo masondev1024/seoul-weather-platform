@@ -1,4 +1,7 @@
-# Public Release and Scheduling Implementation Plan
+# 공개 전환과 일정 복원 구현 계획
+
+> 사람용 안내: 공개 저장소 전환과 Weather 일정 복원을 진행한 상세 작업표다. 제품명,
+> 도구명, 설정 키와 명령어는 실행 계약을 위해 원래 표기를 유지한다.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

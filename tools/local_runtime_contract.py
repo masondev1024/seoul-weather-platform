@@ -34,6 +34,7 @@ EXPECTED_TRINO_ENVIRONMENT = {
     "TRINO_QUERY_MAX_TOTAL_MEMORY": "1200MB",
 }
 EXPECTED_AIRFLOW_ENVIRONMENT = {
+    "AIRFLOW__CORE__DAG_IGNORE_FILE_SYNTAX": "glob",
     "AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME": "7200",
     "ASK_SEOUL_KMA_DAG_SCHEDULE": "20 2,5,8,11,14,17,20,23 * * *",
     "ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED": "false",
@@ -52,6 +53,17 @@ EXPECTED_TRINO_MOUNTS = {
     "./trino/resource-groups.properties:/etc/trino/resource-groups.properties:ro",
     "./trino/resource-groups.json:/etc/trino/resource-groups.json:ro",
     "trino_cache:/data/trino",
+}
+EXPECTED_TRINO_HEALTHCHECK = {
+    "test": [
+        "CMD-SHELL",
+        "curl --fail --silent --show-error --max-time 2 "
+        "http://localhost:8080/v1/info >/dev/null",
+    ],
+    "interval": "15s",
+    "timeout": "3s",
+    "retries": 10,
+    "start_period": "30s",
 }
 _MEMORY_PATTERN = re.compile(r"^(\d+)(MB|GB|M|G)$", re.IGNORECASE)
 
@@ -206,6 +218,8 @@ def validate_local_runtime_contract(repo_root: Path) -> LocalRuntimeContractProo
             raise _invalid()
 
         trino = _mapping(services.get("trino"))
+        if trino.get("healthcheck") != EXPECTED_TRINO_HEALTHCHECK:
+            raise _invalid()
         container_mib = _memory_mib(trino.get("mem_limit"))
         if container_mib != 5 * 1024:
             raise _invalid()

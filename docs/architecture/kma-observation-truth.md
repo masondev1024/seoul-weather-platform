@@ -1,115 +1,97 @@
-# KMA observation-truth source contract
+# KMA 실황 원천 데이터 계약
 
-## Current status
+## 현재 상태
 
-The repository implements and tests the KMA `getUltraSrtNcst` source adapter,
-versioned fixture/schema, physical-attempt budget, bounded retry/circuit policy,
-immutable 80-grid Raw landing, dedicated Iceberg Bronze table, and the
-paused-by-default `weather_ultra_srt_ncst_bronze` Airflow DAG. It also retains the
-one-request credential-safe smoke command and forecast-quality `ObservationTruth`
-mapping.
+저장소에는 KMA `getUltraSrtNcst` 응답을 읽고 검사하는 코드와 고정 자료가 들어 있다.
+요청 횟수 제한, 제한된 재시도, 80개 격자 원본 보관, Iceberg Bronze 테이블,
+일시정지 상태로 만드는 `weather_ultra_srt_ncst_bronze` DAG까지 구현·검사했다.
 
-This remains **not deployed and not activated**. The public Compose defaults keep
-the shared rollout guard false and the observation schedule empty. No live API
-request, R2/Iceberg write, DAG unpause, dbt quality model, D1 write, or Worker
-publication was performed while implementing this increment.
+아직 운영에 반영하거나 활성화하지 않았다. 기본 Compose는 공유 보호 장치를 끄고 실황
+schedule을 비워 둔다. 이 문서의 구현 과정에서 실제 API 호출, R2/Iceberg 쓰기, DAG
+활성화, 품질 모델 실행, D1 쓰기, Worker 공개는 하지 않았다.
 
-## Source decision
+## 원천을 이렇게 정한 이유
 
-Primary operational truth is the Korea Meteorological Administration's
-`VilageFcstInfoService_2.0/getUltraSrtNcst` endpoint:
+주 운영 원천은 기상청 `VilageFcstInfoService_2.0/getUltraSrtNcst`다.
 
-- official catalog: <https://www.data.go.kr/data/15084084/openapi.do?recommendDataYn=Y>
-- official KMA API Hub reference: <https://apihub.kma.go.kr/apiList.do?seqApi=10>
-- source ID: `kma_ultra_srt_ncst`
-- spatial grain: the same KMA 5 km grid used by the short-range forecast
-- development quota documented by the catalog: 10,000 requests/day
-- public-data license: Korea Open Government License Type 1 (attribution)
+- 공식 안내: <https://www.data.go.kr/data/15084084/openapi.do?recommendDataYn=Y>
+- KMA API Hub: <https://apihub.kma.go.kr/apiList.do?seqApi=10>
+- 원천 ID: `kma_ultra_srt_ncst`
+- 공간 단위: 단기예보와 같은 KMA 5 km 격자
+- 개발용 문서에 적힌 한도: 하루 10,000회
+- 공공데이터 이용 조건: 출처 표시가 필요한 공공누리 1유형
 
-This source avoids pretending that a few station observations represent all 80
-Seoul grid cells. ASOS remains a future independent audit and historical source;
-using it at grid grain requires a separately versioned station metadata,
-interpolation, and uncertainty contract. KMA's monthly historical ultra-short
-observation files are a better candidate for same-grid backfill and will be
-evaluated separately.
+몇 개의 관측소 값을 서울 전체 80개 격자의 실황처럼 포장하지 않기 위해 이 원천을
+사용한다. ASOS는 향후 독립 검증과 과거 자료용으로 따로 검토한다. 관측소와 격자를
+연결하려면 별도의 관측소 정보·보간·불확실성 계약이 필요하다.
 
-## Source and truth semantics
+## 응답과 실황 의미
 
-The source response must contain exactly one row for each versioned category:
+응답에는 각 범주가 정확히 한 번씩 있어야 한다.
 
-| category | source meaning | normalized unit | quality use now |
+| 범주 | 뜻 | 표준 단위 | 현재 품질 분석 용도 |
 |---|---|---|---|
-| `T1H` | air temperature | `degC` | `temperature_air_2m` |
-| `RN1` | one-hour precipitation | `mm` | precipitation occurrence |
-| `PTY` | precipitation type | `code` | precipitation occurrence |
-| `REH` | relative humidity | `percent` | retained |
-| `UUU` | east-west wind component | `m/s` | retained |
-| `VVV` | north-south wind component | `m/s` | retained |
-| `VEC` | wind direction | `degree` | retained |
-| `WSD` | wind speed | `m/s` | retained |
+| `T1H` | 기온 | `degC` | `temperature_air_2m` |
+| `RN1` | 한 시간 강수량 | `mm` | 강수 발생 여부 |
+| `PTY` | 강수 형태 | `code` | 강수 발생 여부 |
+| `REH` | 상대 습도 | `percent` | 보관 |
+| `UUU` | 동서 바람 성분 | `m/s` | 보관 |
+| `VVV` | 남북 바람 성분 | `m/s` | 보관 |
+| `VEC` | 바람 방향 | `degree` | 보관 |
+| `WSD` | 바람 속도 | `m/s` | 보관 |
 
-`precipitation_occurrence` is true when `PTY != 0` or `RN1 > 0`. Both inputs
-must be present and valid; missing input never becomes a dry observation.
+`PTY != 0`이거나 `RN1 > 0`이면 `precipitation_occurrence=true`로 계산한다. 두 값이
+모두 있어야 하며, 하나라도 없거나 틀리면 마른 날씨로 바꾸지 않는다.
 
-The response `baseDate + baseTime` is interpreted in `Asia/Seoul` and normalized
-to UTC as `observed_at`. The API does not expose a provider revision timestamp,
-so the fetch time becomes both `truth_as_of` and `collected_at`. Revision identity
-is `kma_ultra_srt_ncst:<payload_sha256>`.
+응답의 `baseDate + baseTime`은 `Asia/Seoul` 시간으로 해석한 뒤 UTC 시각
+`observed_at`으로 저장한다. API가 제공자 수정 시각을 주지 않으므로 가져온 시각을
+`truth_as_of`와 `collected_at`으로 함께 기록한다. 수정 번호는
+`kma_ultra_srt_ncst:<payload_sha256>`로 만든다.
 
-Near-real-time rows enter the quality kernel as `provisional`, not `final`,
-because the provider can revise observations. A later historical/reconciliation
-adapter may emit a final revision. This distinction prevents an AI consumer from
-presenting a fresh operational observation as immutable ground truth.
+실시간에 가까운 값은 `final`이 아닌 `provisional`로 품질 계산에 넣는다. 제공자가
+나중에 값을 고칠 수 있기 때문이다. 그래서 이 값이 포함된 묶음은
+`evidence_state=degraded`로 표시하고, AI가 변하지 않는 정답처럼 말하지 못하게 한다.
+향후 과거 자료를 대조하는 별도 어댑터가 최종 수정본을 만들 수 있다.
 
-## Validation and failure behavior
+## 검사와 실패 처리
 
-The adapter fails closed on:
+다음 경우에는 안전하게 실패시키고 저장하지 않는다.
 
-- invalid UTF-8, JSON, response envelope, result code, or row count;
-- response date/time/grid that differs from the requested context;
-- missing, duplicate, or unversioned categories;
-- provider sentinels, non-finite numbers, invalid PTY codes, or invalid physical
-  domains for precipitation, humidity, wind direction, and wind speed;
-- collection timestamps before the observed slot;
-- malformed grid identity or payload hash.
+- UTF-8, JSON, 응답 봉투, 결과 코드, 행 수가 잘못됨
+- 응답 날짜·시각·격자가 요청 내용과 다름
+- 범주 누락·중복·수정 번호 없음
+- 제공자 결측 표시, 무한대·비수치, 잘못된 PTY, 물리 범위 오류
+- 수집 시각이 관측 시각보다 빠름
+- 격자 식별자나 payload hash 형식 오류
 
-The smoke makes one request and performs no retry. The scheduled runtime uses its
-own bounded policy: it retries only transport failures and HTTP 500/502/503/504,
-honors a valid numeric `Retry-After`, and applies bounded jittered backoff. HTTP
-429 or provider result code 23 opens a cycle-wide circuit; authentication,
-permission, schema, context, and daily-exhaustion failures are not retried. Every
-physical request attempt is reserved in the shared ledger immediately before
-network I/O.
+시험용 명령은 한 번만 요청하고 재시도하지 않는다. 실제 DAG는 네트워크 오류와 HTTP
+500/502/503/504만 제한해서 다시 시도하며, 숫자로 된 `Retry-After`를 따른다. HTTP
+429 또는 결과 코드 23이 나오면 해당 주기의 회로를 닫아 추가 호출을 막는다. 인증·권한·
+스키마·요청 문맥·일일 한도 오류는 재시도하지 않는다. 모든 실제 요청은 네트워크로
+나가기 직전에 공유 시도 기록에서 한 칸을 예약한다.
 
-## Quota, completeness, and recovery design
-
-Nominal daily requests are:
+## 호출량과 80개 격자 완전성
 
 ```text
-observation: 80 grids × 24 hourly slots = 1,920
-short range: 80 grids × 8 issue cycles =   640
-combined nominal                         = 2,560 requests/day
+실황:   80개 격자 × 24개 시간 슬롯 = 1,920회
+단기예보: 80개 격자 × 8개 발표 주기 =   640회
+합계:                              2,560회/일
 ```
 
-That is 25.6% of the documented 10,000-request development quota before retry,
-backfill, or manual repair. The 2,560 figure is the logical success-path request
-count, not an upper bound on physical HTTP attempts. The implemented shared
-SQLite ledger defaults to a fail-closed 7,500 physical-attempt ceiling, leaving
-2,500 attempts of provider headroom. Both forecast internal retries and
-observation retries reserve against that same KST-day ledger. A production slot is complete only
-when all 80 grids contain all eight categories: 640 category rows. Partial slots
-remain quarantined and reconcilable; they are not quality truth and do not reach
-Gold or D1.
+2,560회는 재시도 없는 정상 성공 경로의 논리적 수치다. 실제 HTTP 시도는 더 많을 수
+있다. 구현한 SQLite 기록은 하루 실제 시도를 기본 7,500회로 막아 문서상 한도와의
+차이 2,500회를 남긴다. 예보와 실황 재시도 모두 같은 기록을 사용한다.
 
-Recovery is idempotent at source × grid × observed slot × payload revision.
-Repeated equal payloads collapse to the same revision, while a changed payload is
-retained as a new immutable revision. Reconciliation should request only missing
-grids, remain inside the daily budget, and close the slot atomically after the
-80-grid completeness check.
+한 시간 슬롯은 80개 격자에 8개 범주가 모두 있어야 완료로 인정한다(640행). 일부만
+모인 슬롯은 격리해 다시 맞추며 품질 정답이나 Gold·D1로 보내지 않는다.
 
-## Credential-safe smoke
+복구 식별자는 원천 × 격자 × 관측 시각 × payload 수정본이다. 같은 payload를 다시
+받으면 같은 수정본으로 합쳐지고, 내용이 바뀌면 새 불변 수정본으로 남는다. 복구할 때는
+빠진 격자만 요청하고, 하루 한도 안에서 80개 완전성 검사를 통과한 뒤 슬롯을 닫는다.
 
-Fixture validation is network-free:
+## 비밀값 없는 시험
+
+고정 자료로 네트워크 없이 응답 계약을 검사한다.
 
 ```bash
 python -m tools.kma_observation_smoke \
@@ -119,34 +101,24 @@ python -m tools.kma_observation_smoke \
   --fixture contracts/weather-observation/fixtures/kma-ultra-srt-ncst-v1.json
 ```
 
-For a live request, provide `KMA_SERVICE_KEY` in the process environment and omit
-`--fixture`. The command prints only source/grid/slot, HTTP and business status,
-category names/count, a latency bucket, the full payload SHA-256, and validation
-status. It never prints the key, full secret-bearing URL, raw response, or
-observation values, and it writes no file.
+실제 요청을 시험할 때만 프로세스 환경에 `KMA_SERVICE_KEY`를 넣고 `--fixture`를 빼며,
+별도 승인을 먼저 받는다. 출력에는 원천·격자·슬롯, HTTP/업무 상태, 범주 수, 지연 구간,
+payload SHA-256, 검사 결과만 남긴다. 키, 비밀 URL, 원문 응답, 관측값을 출력하거나
+파일을 만들지 않는다.
 
-## Lakehouse activation gate
+## 레이크하우스 반영 문턱
 
-Implemented but still inert:
+구현은 끝났지만 아직 멈춤 상태다.
 
-1. hourly paused-by-default DAG with a 40-minute deadline and `max_active_runs=1`;
-2. shared one-slot KMA API pool and 7,500/day physical-attempt ledger;
-3. immutable per-grid Raw objects, durable missing-grid resume, and exact
-   80-grid/640-category manifest gate;
-4. dedicated `bronze_kma_ultra_srt_ncst` table partitioned by
-   `day(observed_at)`, bounded novel-revision append/no-op semantics, and exact
-   revision-scoped verification;
-5. shared one-slot Weather Trino pool so observation load/verify cannot overlap
-   the existing heavy Weather transforms when the rollout guard is enabled.
+1. 40분 제한과 동시 실행 1개인 실황 DAG
+2. 한 자리 KMA API 대기열과 하루 실제 시도 7,500회 기록
+3. 격자별 불변 원본, 누락 격자 재개, 80개/640행 완전성 문턱
+4. `day(observed_at)`로 나눈 `bronze_kma_ultra_srt_ncst` Bronze 테이블
+5. 관측 적재·검사가 기존 Weather 무거운 변환과 겹치지 않는 한 자리 Trino 대기열
 
-Still later milestones, not part of activation:
+다음 단계는 Silver 실황 수정본, 제한된 예보 비교, 호출 지연·늦은 수정·Trino 메모리·
+근거 상태 관측, 충분한 표본을 확인한 뒤의 D1/Worker 공개다.
 
-1. Silver truth revisions and bounded incremental forecast-vs-truth evaluation;
-2. scan-byte, source-latency, late-revision, Trino peak-memory, and evidence-state
-   production telemetry/alerts;
-3. D1/Worker publication after sample, coverage, and evidence maturity gates.
-
-Trino filesystem cache helps repeated reads of recent Iceberg objects, but does
-not reduce KMA API calls and never replaces partition pruning. The evaluation
-design must keep `day(valid_at)`/`day(observed_at)` predicates and bounded repair
-windows so a local 5 GiB Trino process does not rescan full history.
+Trino 파일 캐시는 최근 Iceberg 파일을 다시 읽을 때 R2 전송량을 줄일 수 있지만,
+날짜 파티션 조건과 제한된 복구 범위를 대신하지 않는다. 전체 이력을 다시 읽지 않도록
+`day(valid_at)`·`day(observed_at)` 조건을 항상 함께 둔다.

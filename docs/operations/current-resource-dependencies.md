@@ -1,34 +1,35 @@
 # 개인 Weather 운영 리소스 의존성
 
-## 상태
+이 문서는 비밀값을 저장하지 않는다. 아래 리소스는 Mason 개인 계정에 있고, 공개
+저장소와 분리된 개인 운영 영역에서만 사용한다.
 
-이 문서는 secret 값을 저장하지 않는다. Cloud resource는 Mason의 개인 계정에 있지만 public repository와 분리된 private operations plane이다.
+| 리소스 | 역할 | 현재 상태 | 중단 시 영향 |
+|---|---|---|---|
+| 개인 R2·Data Catalog | KMA 원본과 Iceberg 파일 저장 | 운영 중 | 새 Bronze 적재와 `dbt` 조회 불가 |
+| 로컬 Trino | Bronze·Silver·Gold 조회 | 5 GiB 제한, 파일 캐시 사용 | 변환·시점 저장 중단 |
+| 개인 D1 | 공개 제품 발행 | 운영 중 | origin에 최신 발행본이 안 보임 |
+| 개인 Weather origin | `/skill/v1/...` 응답 | 운영 중 | proxy가 upstream에 연결하지 못함 |
+| 개인 K-Skill proxy | 세 읽기 전용 경로 전달 | 이 저장소에서 관리 | helper가 개인 origin을 조회하지 못함 |
+| NomaDamas hosted proxy | 기본 K-Skill 경로 | 조직 origin을 가리킬 수 있음 | 기본 조회가 503 또는 오래된 결과 |
 
-| 논리 리소스 | 역할 | 현재 상태 | owner/사용 승인 | 종료 시 영향 |
-|---|---|---|---|---|
-| Personal R2 raw/Data Catalog | KMA raw·Iceberg 저장 | 운영 중 | Mason | 신규 Bronze와 dbt query 불가 |
-| Local Trino | Bronze·Silver·Gold query | 5 GiB limit, FS cache 적용 | Mason의 로컬 노트북 | transform·snapshot 중단 |
-| Personal D1 | public product publication | 운영 중 | Mason Cloudflare | origin 최신 발행본 미제공 |
-| Personal Weather origin | `/skill/v1/...` 제공 | 운영 중 | Mason Cloudflare | proxy upstream 실패 |
-| Personal K-Skill proxy | 공개 3-route forwarding | 이 저장소에서 관리 | Mason Cloudflare | 기본 helper의 개인 origin 조회 실패 |
-| NomaDamas hosted proxy | 기본 K-Skill route | 조직 origin stale 관측 | NomaDamas | 기본 설정 query가 503 |
+## Airflow 변경 승인
 
-## Airflow 배포 승인 gate
+새 저장소의 코드를 실제 Airflow에 올리거나 DAG를 가동하기 전에는 사용자에게 다음을
+먼저 보고한다.
 
-현재 로컬 Airflow 파이프라인이 별도 compose project에서 실행 중인 것이 read-only inspection으로 관찰됐다. 새 저장소의 Airflow 코드를 배포하거나 DAG를 가동하기 전에는 반드시 사용자에게 먼저 다음을 보고한다.
+1. 멈추거나 비워야 할 기존 DAG와 실행 중인 작업
+2. 바꿀 컨테이너와 연결할 파일
+3. 변경 전·후 health, DAG 읽기, 최신성 검사 순서
+4. 실패했을 때 되돌릴 방법
 
-1. 중지·drain해야 할 기존 로컬 DAG와 run
-2. 변경할 container와 mount
-3. 배포 전후 health/import/freshness 검증
-4. 실패 시 rollback 경로
-
-사용자의 명시 승인 전에는 기존 파이프라인을 pause·stop·restart하거나 새 DAG를 enable·trigger하지 않는다.
+사용자 승인이 없으면 기존 파이프라인을 일시정지·중지·재시작하거나 새 DAG를 활성화·
+실행하지 않는다.
 
 ## 운영 완료 기준
 
-다음 조건을 함께 확인해야 end-to-end 정상으로 판정한다.
+아래 네 가지를 모두 확인해야 전체 경로가 정상이라고 판단한다.
 
-- Docker health, restart, OOM 상태 정상
-- 최신 Bronze → Silver → Gold run 성공
-- D1 publication/watchdog 성공과 API readback 일치
-- 개인 proxy 경유 K-Skill query 200 및 publication identity 확인
+- Docker health, 재시작 횟수, OOM 상태가 정상이다.
+- 최신 Bronze → Silver → Gold 실행이 성공했다.
+- D1 발행과 감시 작업이 성공하고 API 응답의 제품 ID가 맞다.
+- 개인 proxy를 거친 K-Skill 조회가 200을 반환하고 발행 ID가 일치한다.

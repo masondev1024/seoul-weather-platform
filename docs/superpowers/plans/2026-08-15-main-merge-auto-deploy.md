@@ -1,4 +1,7 @@
-# Main Merge Weather Auto-Deploy Implementation Plan
+# `main` 병합 기반 Weather 자동 배포 구현 계획
+
+> 사람용 안내: `dev → main` 병합을 배포 근거로 삼는 상세 작업표다. 자동 검사에 필요한
+> 영어 식별자와 명령어는 그대로 두고, 사람이 읽는 설명은 아래에서 한국어로 제공한다.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

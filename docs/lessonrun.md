@@ -1,132 +1,142 @@
-# Lesson Run — 2026-08-23 Weather Pipeline Incident
+# Weather 장애 복기 기록
 
 ## 한 줄 결론
 
-"컨테이너가 healthy"는 데이터 제품이 healthy라는 뜻이 아니다. 이번 사례에서는
-container health와 DAG import는 정상이었지만, 단일 Trino slot의 장시간 maintenance,
-Airflow 내부 토큰 만료, R2 DNS 단절이 합쳐져 freshness와 D1 publication까지 영향을
-주었다.
+“컨테이너가 정상”과 “데이터 제품이 정상”은 다르다. 이번에는 컨테이너와 DAG 읽기는
+정상이었지만, Trino 한 자리에서 긴 유지보수가 진행되고, Airflow 내부 토큰이 만료되고,
+R2 DNS가 끊기면서 최신성 기준과 D1 발행까지 영향을 받았다.
 
-## 내가 따라갈 조사 순서
+## 조사 순서
 
 ### 1. 증상과 원인을 분리한다
 
-먼저 최근 24시간의 DAG run과 task instance를 `dag_id`, `task_id`, `state`, `pool`,
-`start_date`, `end_date`로 본다. 실패 task를 바로 고치지 않고 upstream/downstream
-관계를 그린다.
+최근 24시간의 DAG 실행과 작업을 `dag_id`, `task_id`, `state`, `pool`, `start_date`,
+`end_date`로 확인한다. 실패한 작업만 고치려 하지 말고 앞뒤 데이터 흐름을 함께 그린다.
 
 ```text
-maintenance / execution-token / R2 DNS
-               │
-               ▼
-Raw·Bronze·Gold freshness 지연
-               │
-               ├── serving snapshot stale
-               ├── D1 smoke test fails closed
-               └── freshness watchdog alerts
+유지보수 / 실행 토큰 / R2 DNS
+             │
+             ▼
+원본·Bronze·Gold 최신성 지연
+             │
+             ├── 제공 시점 저장본 오래됨
+             ├── D1 검사 안전 중단
+             └── 최신성 감시 알림
 ```
 
-watchdog의 실패가 보이면 "watchdog을 고칠" 것이 아니라, 마지막 성공 publication과
-upstream slot 점유를 먼저 확인한다.
+감시 작업이 실패하면 감시 작업부터 고치지 말고 마지막 정상 발행과 앞 단계 대기열을
+먼저 확인한다.
 
-### 2. 시간 축에서 경쟁을 증명한다
+### 2. 시간 순서로 경쟁을 증명한다
 
-pool 이름만 보고 동시성 문제라고 추측하지 않는다. 실제 Airflow metadata에서
-`start_date/end_date`를 비교한다.
+대기열 이름만 보고 동시성 문제라고 단정하지 않는다. 실제 시작·종료 시각을 비교한다.
 
-- 활성 개인 runtime은 shared guard로 forecast/transform을 1-slot
-  `trino_weather_heavy`에 매핑하고 maintenance는 같은 pool을 직접 사용한다.
-- `trino_weather_legacy_heavy`는 shared guard를 명시적으로 끈 rollback에서만 쓰는
-  호환성 pool이다. 그 모드에서는 single-lane OOM 보호를 보장하지 않으므로 개인 운영에서
-  사용하지 않는다.
-- long-running task 하나가 slot을 점유하면 뒤의 task는 OOM 없이 기다릴 수 있다.
-- 그러나 waiting은 freshness SLO를 넘길 수 있으므로, maintenance에는 서비스보다 작은
-  priority와 짧은 execution bound가 필요하다.
+- 개인 실행은 forecast/transform을 `trino_weather_heavy` 한 자리에 넣고 유지보수도 같은
+  자리를 쓴다.
+- `trino_weather_legacy_heavy`는 보호 장치를 끈 되돌리기 모드에서만 쓰는 호환 이름이다.
+  개인 운영에서는 단일 자리 메모리 보호를 보장하지 않으므로 쓰지 않는다.
+- 작업 하나가 자리를 잡으면 뒤 작업은 메모리 오류 없이 기다릴 수 있지만 최신성 기준을
+  넘길 수 있다. 그래서 유지보수에 낮은 우선순위와 짧은 실행 제한이 필요하다.
 
-여기서 얻은 교훈은 **OOM 방지용 serialization만으로는 product freshness를 보장하지
-않는다**는 것이다. resource isolation에는 queueing policy와 deadline도 필요하다.
+배운 점은 **동시에 하나만 실행하는 것만으로는 최신성을 보장할 수 없다는 것**이다.
+대기 정책과 마감 시간까지 함께 설계해야 한다.
 
-### 3. Airflow 3의 두 JWT를 혼동하지 않는다
+### 3. Airflow의 두 JWT를 구분한다
 
-다음 두 설정은 이름이 비슷하지만 목적이 다르다.
-
-| 설정 | 용도 | 이번 영향 |
+| 설정 | 쓰임 | 이번 영향 |
 |---|---|---|
-| `[api_auth] jwt_expiration_time` | UI/public REST API | 원인 아님 |
-| `[execution_api] jwt_expiration_time` | worker task의 state/XCom/heartbeat | dbt subprocess 완료 후 보고 실패 원인 |
+| `[api_auth] jwt_expiration_time` | 화면·외부 REST API | 원인 아님 |
+| `[execution_api] jwt_expiration_time` | 작업의 상태·XCom·heartbeat 보고 | 긴 `dbt` 뒤 보고 실패 |
 
-장시간 subprocess가 실행되는 동안 Execution API 요청이 없으면 token reissue가 일어나지
-않을 수 있다. 그러므로 dbt phase의 worst-case runtime보다 긴, 그러나 무한대는 아닌
-TTL을 운영 구성에 명시해야 한다.
+긴 프로세스가 끝난 뒤에도 상태를 보고할 수 있도록 실행 API 토큰의 유효 시간을
+예상 최대 실행 시간보다 길게 고정하되, 무한대로 만들지는 않는다.
 
-### 4. retry는 쓰기 의미론 뒤에 둔다
+### 4. 재시도 전에 쓰기 의미를 확인한다
 
-R2 DNS failure는 외부 일시 장애다. 하지만 retry가 안전한 이유는 DNS가 아니라
-**conditional immutable write** 때문이다.
+R2 DNS 오류는 일시적일 수 있다. 그래도 재시도가 안전한 이유는 DNS가 아니라
+**조건부 불변 쓰기**다.
 
-- 같은 key의 다른 payload를 overwrite할 수 있으면 retry하지 않는다.
-- `If-None-Match: *`와 payload checksum이 있으면 같은 raw/checkpoint의 재시도는
-  idempotent하다.
-- permission/validation/completeness 오류는 retryable transport error가 아니다.
+- 같은 키에 다른 payload를 덮어쓸 수 있으면 재시도하지 않는다.
+- `If-None-Match: *`와 checksum이 있으면 같은 원본·마침표 재시도는 멱등이다.
+- 권한·검사·완전성 오류는 네트워크 재시도 대상이 아니다.
 
-따라서 retry policy는 API의 편의 기능이 아니라 data contract의 일부로 테스트한다.
+재시도 정책은 API 편의 설정이 아니라 데이터 계약의 일부로 검사한다.
 
-### 5. fail-closed downstream을 제거하지 않는다
+### 5. 하류의 안전 중단을 없애지 않는다
 
-D1 publish가 `quality_freshness_stale`로 막힌 것은 실패가 아니라 보호다. 이 gate를
-끄면 사용자에게 더 오래된 forecast를 새 데이터처럼 제공하게 된다. 올바른 recovery는
-upstream Bronze/Gold를 정상화한 뒤 새 publication을 만드는 것이다.
+D1 발행이 `quality_freshness_stale`로 막힌 것은 보호 기능이다. 이 문턱을 끄면 오래된
+예보를 새 자료처럼 보여 줄 수 있다. 앞 단계 Bronze/Gold를 정상화하고 새 발행본을
+만드는 것이 올바른 복구다.
 
-### 6. 테스트 runner도 production compatibility contract다
+### 6. 검사 실행 환경도 운영 계약이다
 
-호스트 Python 3.14에 설치된 별도 Airflow/SQLAlchemy 조합에서는 DAG를 subprocess로
-import하는 두 테스트가 `MappedAnnotationError`로 시작조차 못 했다. 이는 변경 코드의
-실패가 아니라 runner dependency가 production Airflow 3.2.2 image와 다르다는 뜻이다.
+호스트 Python 3.14에 설치된 Airflow/SQLAlchemy 조합에서는 DAG를 별도 프로세스로
+읽는 두 검사가 `MappedAnnotationError`로 시작하지 못했다. 변경 코드가 아니라 운영
+Airflow 3.2.2와 검사 환경의 의존성이 다르다는 뜻이다.
 
-- unit test는 host에서 실행하되, Airflow DAG import와 pool 해석은 실제 scheduler image에서
+- 단위 검사는 호스트에서 하되, DAG 읽기와 대기열 해석은 실제 scheduler 이미지에서
   읽기 전용으로 확인한다.
-- local host의 Airflow를 임의로 upgrade/downgrade해 통과시키지 않는다. 재현 가능한
-  production image의 test target을 CI에 추가하는 것이 올바른 후속 조치다.
-- 이번에는 실제 runtime에서 forecast DAG의 guard off/on pool 해석과 전체 DAG import error
-  0을 확인했다.
+- 통과만을 위해 호스트 Airflow를 임의로 올리거나 내리지 않는다.
+- 실제 runtime에서 보호 장치 on/off와 전체 DAG 읽기 오류 0을 확인한다.
 
-### 7. main 직접 push의 CI 실패는 promotion 정책 위반 신호다
+### 7. main 직접 반영 실패와 제품 장애를 나눈다
 
-이 저장소의 `Promotion Source / required` job은 `main`에 push된 commit이 정확히 하나의
-merged PR에서 왔다는 GitHub 증거를 요구한다. 따라서 관리자가 protection을 bypass해
-직접 `main`에 push하면 source와 무관하게 이 job 및 aggregate required check는 실패한다.
+이 저장소의 `Promotion Source / required` 검사는 main 커밋이 정확히 하나의 병합된
+PR에서 왔는지 확인한다. 보호 규칙을 우회해 main에 직접 올리면 제품 코드가 맞아도
+이 검사는 실패한다.
 
-- 이 gate를 direct push를 통과시키도록 느슨하게 바꾸지 않는다. public repository의
-  변경은 원칙적으로 branch에서 검증한 뒤 PR로 `main`에 반영한다.
-- 긴급 직접 반영은 명시적인 운영 승인과 local/runtime 증거를 남기는 예외 경로다. CI의
-  빨간 상태를 product 또는 data-quality 실패로 오해하지 않되, 표준 promotion 증거도
-  얻지 못했다는 사실은 남긴다.
-- CI에서 발견된 repository provenance나 Airflow test의 실제 실패는 promotion failure와
-  분리해서 고친다. aggregate job 하나만 보고 모든 실패를 정책 탓으로 처리하면 안 된다.
+- public 저장소 변경은 branch에서 검사한 뒤 PR로 main에 넣는다.
+- 긴급 예외는 별도 승인과 실행 증거를 남긴다.
+- CI 정책 실패와 실제 데이터·저장소 실패를 같은 원인으로 묶지 않는다.
 
-## 이번에 추가한 재발 방지 테스트
+## 이번에 추가한 회귀 검사
 
-- R2 endpoint transport failure가 1초/2초 bounded retry 후 성공하는지
-- persistent R2 failure가 무한 retry하지 않는지
-- R2 client retry mode, attempt 수, timeout, TCP keepalive가 고정되는지
-- observation landing DAG의 short retry가 40분 run deadline을 바꾸지 않는지
-- maintenance가 default schedule 없이 explicit opt-in일 때만 실행되는지
-- maintenance mutation이 canonical pool, priority 1, 8분 timeout, retry 0을 유지하는지
-- local Compose의 Airflow 서비스 모두가 Execution API JWT TTL을 명시하는지
-- production Airflow image에서 DAG import와 guard-on/off pool 해석이 가능한지
+- R2 전송 오류가 1초·2초 제한 재시도 뒤 성공하는지
+- 지속적인 R2 실패가 무한 재시도하지 않는지
+- R2 재시도 모드·시도 횟수·시간 제한·TCP keepalive가 고정되는지
+- 실황 DAG의 짧은 재시도가 40분 전체 마감을 바꾸지 않는지
+- 유지보수 DAG가 schedule 없이 명시적으로 선택될 때만 실행되는지
+- 유지보수가 같은 대기열, 우선순위 1, 8분 제한, 재시도 0을 지키는지
+- 모든 Airflow 서비스가 실행 API JWT 유효 시간을 명시하는지
+- 운영 Airflow 이미지에서 DAG 읽기와 보호 장치 on/off 해석이 가능한지
 
-## 다음 장애에서의 Stop/Go 기준
+## 다음 장애의 중단·진행 기준
 
 | 상태 | 판단 | 행동 |
 |---|---|---|
-| DAG import error, secret/config validation error | Stop | 배포·trigger 금지, configuration 복구 |
-| R2/KMA의 짧은 transport error, idempotent retry 후 success | Observe | retry 횟수와 cycle duration 기록 |
-| freshness watchdog failure | Stop serving promotion | 마지막 successful publication과 upstream pool/blocker 확인 |
-| maintenance가 heavy slot을 장시간 점유 | Stop maintenance | task log와 Trino query state 보존, serving 회복 우선 |
-| D1 smoke test failure due freshness | Do not bypass | Gold freshness 회복 뒤 정상 export 재시도 |
+| DAG 읽기 오류, 비밀값·설정 검사 오류 | 중단 | 배포·실행 요청 금지, 설정 복구 |
+| 짧은 R2/KMA 전송 오류가 제한 재시도 후 성공 | 관찰 | 재시도 횟수와 주기 시간을 기록 |
+| 최신성 감시 실패 | 발행 중단 | 마지막 정상 발행과 앞 단계 대기 원인 확인 |
+| 유지보수가 무거운 자리를 오래 점유 | 유지보수 중단 | 작업 기록과 Trino 상태를 보존하고 서비스 회복 우선 |
+| 신선도 때문에 D1 검사 실패 | 우회 금지 | Gold 최신성 회복 뒤 정상 발행 재시도 |
+
+## 현재 자동 복구 구현의 범위
+
+노트북을 다시 켰을 때 바로 backfill을 실행하지 않고 다음 판단 경계를 코드로 고정했다.
+
+- 영수증 → 결정적 복구 계획: 원본 재처리 우선, API 작업 1개, 전체 작업 3개,
+  오래된 자료·부분 자료·계약 오류 차단
+- `job_key`별 원자적 작업 소유권: 중복 실행을 막고 만료된 작업을 안전하게 인계
+- Airflow 실행 기록과 KMA/Trino 대기열을 실행 직전에 읽어 충돌이면 `defer`
+- 검증된 원본 manifest만 기존 backfill/recollect 설정으로 변환
+- Trino local 상태 확인을 대기 쿼리에서 `/v1/info` HTTP liveness로 분리
+- startup 사전 점검: Docker·Compose·필수 서비스·메모리 예산을 확인하지만 시작·실행
+  요청·쓰기 작업은 하지 않음
+
+검증 결과는 전체 pytest `1133 passed`, 공통 복구 검사 `111 passed`, Weather 검사
+`497 passed`, CI 회귀 묶음 `947 passed, 1 skipped`, DAG 14개와 `import_errors=0`이다.
+실제 runtime 사전 점검도 `ready=true`, `mutation_performed=false`를 반환했다.
 
 ## 아직 하지 않은 것
 
-이 기록과 코드 수정은 로컬 working tree에만 있다. Docker 재생성, Airflow 재시작,
-DAG unpause/trigger/backfill, R2/Trino/D1 write는 수행하지 않았다. 운영 반영은
-`README.md`의 Airflow 배포 gate와 별도 승인 절차를 따른다.
+Docker 재생성, Airflow 재시작, DAG 활성화·실행 요청·backfill, R2/Trino/D1 쓰기,
+launchd 설치·활성화는 하지 않았다. 따라서 지금 단계의 성공은 “안전하게 계획을 세우고
+실행 직전 차단할 수 있다”는 뜻이지 “백로그 자동 복구가 운영 중”이라는 뜻이 아니다.
+
+## 포트폴리오에 쓸 수 있는 요약
+
+저사양 Mac에서 80개 KMA 격자 날씨 레이크하우스를 운영하던 중 노트북 중단으로 예약
+주기가 빠지고 R2 네트워크 오류, Trino 대기, Airflow 작업 메모리 압박이 겹쳤다. 단순
+재시작은 컨테이너만 살리고 데이터 백로그는 만들지 못했다. 원본을 불변·해시 기반으로
+보관하고, 대기열·재시도·마감·멱등성을 함께 제한했으며, 계획기·작업 소유권·실행 전
+승인 경계를 분리해 다음 단계의 자동 복구 기반을 만들었다.

@@ -1,216 +1,138 @@
-# KMA observation pipeline predeployment plan
+# KMA 실황 파이프라인 배포 전 계획
 
-## Decision state
+상태: **코드와 저장소 검사 완료 / 배포·활성화 전**
 
-`IMPLEMENTED AND REPOSITORY-VERIFIED / NOT DEPLOYED OR ACTIVATED`
+`getUltraSrtNcst` 어댑터, 제한된 HTTP 재시도, 공유 실제 시도 기록, 80개 격자 원본,
+전용 Bronze 테이블, 일시정지 상태의 시간별 DAG가 들어 있다. Compose 기본값은 보호
+장치를 끄고 schedule을 비워 둔다. 이 단계에서는 Docker/Airflow 재생성, DAG 활성화·
+실행, KMA·R2·Iceberg·D1·Worker 변경을 하지 않는다.
 
-The repository now contains the `getUltraSrtNcst` adapter, bounded HTTP policy,
-shared physical-attempt ledger, immutable 80-grid Raw landing, dedicated Bronze
-table, and paused-by-default hourly DAG. Compose examples keep the rollout guard
-false and schedule empty. No Docker/Airflow service was recreated, no DAG was
-unpaused or triggered, and no live KMA, R2, Iceberg, D1, or Worker mutation was
-performed in this implementation phase.
-
-## Proposed data flow
+## 데이터 흐름
 
 ```text
-KMA getUltraSrtNcst (80 grids, one hourly slot)
-  -> immutable per-grid raw response + slot request ledger in personal R2
-  -> exact 80-grid / 640-category manifest gate
-  -> dedicated Iceberg Bronze observation table
-  -> Silver observation revisions (temperature + precipitation occurrence)
-  -> point-in-time D-3/D-2/D-1 quality cohorts
-  -> evidence-gated Gold product
-  -> D1/Worker only when publication gates pass
+KMA getUltraSrtNcst (80개 격자, 한 시간 슬롯)
+  → 격자별 불변 원본 + 슬롯 요청 기록
+  → 80개 격자 / 640개 범주 완전성 검사
+  → 전용 Iceberg Bronze 실황 테이블
+  → 실황 수정본 Silver
+  → D-3/D-2/D-1 시점 품질 묶음
+  → 근거 문턱을 통과한 Gold
+  → 조건을 만족할 때만 D1/Worker
 ```
 
-Forecast and observation remain separate through Bronze. A join happens only in
-the bounded quality evaluation layer on grid, variable, and valid/observed time.
+예보와 실황은 Bronze까지 분리하고, 품질 계산 단계에서만 격자·변수·시각으로 제한해
+조인한다.
 
-## Proposed orchestration
+## DAG와 일정
 
-### DAG inventory
-
-| DAG | Default state | Proposed schedule | Responsibility |
+| DAG | 기본 상태 | 제안 일정 | 역할 |
 |---|---|---|---|
-| `weather_ultra_srt_ncst_bronze` | implemented; `schedule=None`; paused | `45 * * * *`, `Asia/Seoul` after approval | reserve quota, fetch missing grids, land Raw, validate 80-grid manifest, load/verify Bronze |
-| `weather_forecast_quality_transform` | paused | asset-triggered after complete observation Bronze and eligible forecast partitions | build Silver truth revisions and affected quality cohorts |
-| `weather_forecast_quality_backfill` | paused/manual-only | none | quota-aware bounded historical repair by explicit slot range |
+| `weather_ultra_srt_ncst_bronze` | schedule 없음, 일시정지 | 승인 후 `45 * * * *`, `Asia/Seoul` | 호출 한도 예약, 빠진 격자 수집, 원본·완전성·Bronze 확인 |
+| `weather_forecast_quality_transform` | 일시정지 | 완전한 Bronze 뒤 자산 연결 | 실황 수정본과 영향 품질 묶음 생성 |
+| `weather_forecast_quality_backfill` | 수동 전용 | 없음 | 한 날짜씩 제한된 과거 복구 |
 
-Only `weather_ultra_srt_ncst_bronze` is implemented in the current milestone.
-The quality transform and backfill rows describe later independently approved
-milestones; they are not created, scheduled, or activated by the hourly Bronze
-work.
+현재 단계에서 구현·검토 대상은 첫 번째 DAG뿐이다. 나머지는 이후 별도 승인 전까지
+만들거나 예약하거나 활성화하지 않는다.
 
-Minute 45 gives the hourly observation a publication buffer and reduces overlap
-with the existing short-range forecast collection at minute 20 on its eight issue
-hours. The 15-minute normal target then ends around the next hour boundary, while
-the 40-minute hard deadline still leaves 20 minutes before the following scheduled
-cycle. The schedule remains configurable and must be re-evaluated from at least a
-week of source-latency telemetry before unpause.
+분 시각 45는 예보 수집(분 20)과 겹침을 줄이고 다음 시각까지 여유를 둔다. 여섯 작업의
+실행 제한은 1+1+20+6+5+1=34분이며 40분 전체 제한 안에 일정 전환과 대기 6분을 남긴다.
+이 여유를 다 쓰면 해당 주기를 실패로 닫고, 다음 승인된 실행에서 빠진 격자만 요청한다.
 
-The six task execution ceilings are 1 + 1 + 20 + 6 + 5 + 1 = 34 minutes. This
-leaves six minutes inside the 40-minute DAG deadline for scheduling transitions
-and bounded pool wait. Exhausting that slack fails the cycle closed; the durable
-Raw checkpoint lets the next approved run request only missing grids.
+## 한 시간 슬롯 완료 조건
 
-### Atomic slot contract
+- 고정한 서울 80개 격자 목록과 버전이 정확히 같다.
+- 요청한 시각에 80개 격자 모두 KMA 성공 코드 `00`을 받았다.
+- 격자마다 8개 범주가 정확히 한 번씩 있어 모두 640행이다.
+- 원본 payload hash, 요청 기록, 수집 시각, 코드·문맥이 서로 맞다.
+- 중복·무효 값·다른 시각 응답은 실패 또는 격리한다.
 
-A slot is publishable only when:
+부분 슬롯은 Bronze나 품질 Gold로 보내지 않고 빠진 격자만 다시 맞춘다. 완전성 확인과
+마침표 기록은 한 번에 처리해 중간 상태가 공개되지 않게 한다.
 
-- the canonical grid revision is exactly the pinned Seoul 80-grid universe;
-- all 80 grid requests have success code `00` for the requested slot;
-- every grid has exactly the eight versioned categories;
-- payload hashes and raw-object write acknowledgements are present;
-- the request ledger and manifest totals are 80 responses and 640 category rows.
+## 재시도와 호출 한도
 
-Partial slots remain `incomplete` and trigger missing-grid reconciliation. They do
-not produce Bronze completeness, Silver truth, quality metrics, or D1 output.
+- KMA 429는 `Retry-After`와 `(5, 10, 20)`초 제한 backoff를 따르고 주기 회로를 닫는다.
+- HTTP 5xx·연결 오류만 재시도한다. 인증·권한·문맥·스키마·일일 한도 오류는 즉시 중단한다.
+- 실제 시도는 네트워크 호출 직전에 `kma_api_requests` 한 자리 대기열과 공유 일일 기록에
+  예약한다.
+- 하루 실제 시도 기본 상한은 7,500회다. 정상 논리 호출 1,920회에 재시도·복구 여유를
+  더해도 문서상 10,000회 한도를 넘지 않게 한다.
+- 슬롯 복구는 이미 있는 원본이 있으면 API 없이 다시 적재한다.
 
-### Retry and quota policy
+## 저장소와 테이블
 
-- The schema-v1 SQLite ledger reserves every physical request attempt atomically
-  before network I/O. Forecast internal retries and observation retries use the
-  same KST-day ledger.
-- Nominal logical traffic is 2,560 requests/day: 1,920 observation requests
-  (`80 × 24`) plus 640 short-range forecast requests (`80 × 8`). Retries make
-  physical traffic higher, so the enforced default ceiling is 7,500 attempts,
-  below the provider's 10,000/day development quota.
-- Retry only bounded transport timeout, connection reset, HTTP 5xx, and explicitly
-  classified per-second throttle responses with jittered backoff.
-- Do not automatically retry invalid credential, malformed payload, context
-  mismatch, duplicate category, or daily quota exhaustion.
-- Reconciliation requests only missing grids. Never replay all 80 grids because
-  one grid failed.
-- Backfill and any additional KMA collection cannot be enabled from the same
-  quota pool until their worst-case budget is approved.
+### R2 원본
 
-The shared `kma_api_requests` Airflow pool has one slot. If forecast and
-observation schedules or retries overlap, only one KMA landing task can issue
-requests. Within observation, the default one-request-per-second limiter,
-deadline-aware exponential backoff, and cycle-wide throttle circuit bound 429
-amplification. A success does not erase earlier throttle evidence in that cycle.
-
-## Storage and table contracts
-
-### Raw R2
-
-Use a dedicated immutable prefix, for example:
-
-```text
-raw/weather_observation/kma_ultra_srt_ncst/
-  observed_date=YYYY-MM-DD/observed_hour=HH/
-  nx=NN/ny=NN/<payload_sha256>.json
-```
-
-The complete slot manifest is written only after all grid objects are durable.
-Raw objects are audit/recovery evidence and are not the recurring Trino query
-surface.
+요청별 응답을 바꾸지 않고 저장하며, 요청 문맥·payload hash·수집 시각·수정 ID를 함께
+기록한다. 같은 내용 재시도는 같은 수정본으로 합치고 내용이 다르면 새 수정본으로 남긴다.
 
 ### Iceberg Bronze
 
-- Dedicated table; never nullable-append observation columns to forecast Bronze.
-- Identity: source × grid × observed_at × category × source_revision.
-- Merge/idempotency: identical revision is a no-op; conflicting content at an
-  existing identity fails closed.
-- The bounded pre-append lookup and verification both constrain source,
-  observed slot, and the `observed_at` partition. Verification joins the exact
-  incoming 80-grid revision set, so a later Airflow run can verify a storage
-  no-op without duplicating rows.
-- Partition: `day(observed_at)`. Do not partition by 80 grids or hourly slot,
-  which would create small-file and metadata pressure.
-- Compact small Bronze files on a bounded cadence after ingestion, not per grid.
+`bronze_kma_ultra_srt_ncst`는 `day(observed_at)`로 나눈다. 새 수정본만 추가하고,
+같은 수정본은 no-op으로 처리한다. 슬롯의 80개·640행·hash 검사를 통과한 것만 품질
+계산에 노출한다.
 
-### Silver and Gold
+### Silver·Gold
 
-- Silver keeps every visible truth revision, quality state, as-of time, raw hash,
-  and manifest lineage.
-- Quality joins must first constrain `day(valid_at)` and `day(observed_at)`, then
-  apply forecast issue and truth-revision cutoffs.
-- Incremental recomputation covers only affected observed days plus a versioned
-  late-revision repair window.
-- Gold publishes metric family, lead cohort, sample count, denominator, coverage,
-  evidence state, source revision, and evaluation as-of. No universal accuracy
-  field is allowed.
+실황 수정본과 예보 발표본을 별도로 정규화한다. 영향받은 날짜 파티션과 늦게 온 수정본
+범위만 다시 계산하고, 근거 표본·일치율 문턱을 통과한 결과만 분석 제품으로 표시한다.
+D1에는 현재 공개 제품 네 개만 보낸다.
 
-## Local Trino and internet-cost controls
+## 노트북 Trino와 인터넷 사용량 절약
 
-- When the rollout guard is enabled, observation load/verify and all existing
-  heavy Weather DAGs use the same `trino_weather_heavy` one-slot pool. Trino's
-  resource group also has `hardConcurrencyLimit=1`, so scheduler and engine both
-  prevent heavy-query overlap under the 5 GiB envelope.
-- Require partition predicates in every incremental model and test them in dbt.
-- Split temperature, precipitation probability, and categorical aggregation into
-  bounded phases instead of one wide all-history join.
-- Record input rows, scanned bytes, wall time, peak memory, spill, and affected
-  partitions for every run; stop promotion when the 5 GiB local Trino envelope is
-  approached.
-- Keep Trino filesystem cache enabled for repeatedly read recent Iceberg/Parquet
-  objects. Cache is a read optimization only: it does not reduce KMA calls and
-  does not excuse unbounded scans.
-- Read raw JSON once into Bronze; all downstream recomputation reads compact
-  columnar Iceberg data with projection and partition pruning.
-- Reconcile only missing grids and compact per slot/day so the laptop does not
-  repeatedly download thousands of tiny raw objects.
+- Trino 컨테이너 5 GiB, JVM heap 약 2.75 GiB, 무거운 쿼리 한 자리, 대기열 최대 10개
+- 예보·실황 적재·검사와 무거운 변환은 `trino_weather_heavy` 한 자리를 함께 사용
+- 모든 증분 모델에 `day(valid_at)` 또는 `day(observed_at)` 범위 조건을 강제
+- 필요한 날짜 파티션만 읽고, 전체 이력 재계산과 무제한 `full refresh` 금지
+- 파일 시스템 캐시는 최근 Iceberg/Parquet 재읽기를 줄이지만 API 호출이나 파티션 조건을
+  대신하지 않음
+- 원본 JSON을 Bronze에서 한 번만 읽고, 이후에는 압축된 열 형식과 선택 열만 읽음
+- 격자별 호출 수·실제 HTTP 시도 수·재시도 수·읽은 바이트를 따로 기록
 
-## Observability and data-quality gates
+## 관측과 품질 문턱
 
-Required operational signals:
+다음 값을 source별로 기록한다.
 
-- API calls used/remaining by source and purpose;
-- source latency bucket, HTTP/business error class, retry count;
-- grids expected/landed/valid, category rows expected/valid, incomplete slot age;
-- raw/manifest hash mismatch and duplicate revision count;
-- Bronze/Silver freshness, affected partitions, scanned bytes, Trino peak memory;
-- forecast/truth matched coverage, missing D-3/D-2/D-1 vintages, provisional/final
-  truth counts, metric drift, and evidence-state distribution;
-- D1 publication age and last evidence revision.
+- 사용·잔여 API 호출량, 지연 구간, HTTP/업무 오류, 재시도 횟수
+- 예상·수집·검사 완료 격자 수, 범주 행 수, 부분 슬롯 나이
+- 원본/manifest hash 불일치와 중복 수정본 수
+- Bronze/Silver 최신성, 영향 파티션, 읽은 바이트, Trino 최고 메모리
+- 예보·실황 일치율, D-3/D-2/D-1 누락, 임시·최종 실황 수, 지표 변화
+- D1 발행 나이와 마지막 근거 버전
 
-Alerting should distinguish upstream delay, quota exhaustion, invalid credentials,
-schema drift, partial Seoul coverage, Trino resource pressure, and publication
-staleness. Each class has a different operator action.
+알림은 네트워크 지연, 호출 한도, 자격증명, 스키마 변경, 부분 격자, Trino 자원 압박,
+발행 지연을 서로 다른 종류로 보여 줘야 한다.
 
-## Deployment and rollback sequence
+## 배포와 되돌리기 순서
 
-Before any execution, present a fresh read-only report containing the candidate
-commit, dirty-tree state, currently running/queued DAG runs, current Trino memory,
-exact Compose services to recreate, current DAG pause states, and personal R2/D1
-target fingerprints without secret values.
+실행 전에 대상 커밋, 변경 서비스, 현재 실행·대기 작업, Trino 메모리, DAG 일시정지
+상태, 개인 R2/D1 대상 지문을 비밀값 없이 보고한다.
 
-Controlled sequence after a new explicit deployment approval:
+승인 후 순서:
 
-1. capture a fresh read-only runtime inventory and keep the new DAG paused;
-2. initialize the persistent schema-v1 ledger explicitly with
-   `PYTHONPATH=/opt/airflow/dags:/opt/airflow/dags/domains/weather python -m weather_ingest.kma_coordination init-ledger`;
-3. import/read back `kma_api_requests=1` and `trino_weather_heavy=1` pools;
-4. change only the private runtime environment to shared guards `true` and the
-   proposed `45 * * * *` schedule, while keeping the DAG paused;
-5. deploy only the exact Airflow code services, then verify health, DagBag,
-   ledger schema, pools, dbt parse, contracts, and Trino memory with no data write;
-6. after a separate write approval, run one manual single-slot 80-grid canary
-   with D1/Worker publication absent from the DAG;
-7. validate Raw manifest, Bronze 640/80/8 counts and hashes, observed-at partition
-   pruning, scan bytes, retry/resume behavior, and cycle duration;
-8. only after a separate scheduling approval, unpause
-   `weather_ultra_srt_ncst_bronze` and observe at least one full operating window;
-9. implement quality transforms later, and enable D1/Worker only after evidence
-   maturity and a separate publication approval.
+1. 새 DAG를 계속 일시정지한 채 현재 상태를 저장한다.
+2. 공유 기록과 `kma_api_requests=1`, `trino_weather_heavy=1`을 읽기 전용으로 확인한다.
+3. 개인 환경에서만 보호 장치와 제안 일정을 바꾸고 DAG는 계속 멈춘다.
+4. 정확한 Airflow 코드 서비스만 반영하고 health, DAG 읽기, 기록, 대기열, Trino 메모리를
+   데이터 쓰기 없이 확인한다.
+5. 별도 쓰기 승인을 받은 뒤 한 슬롯 80개 격자 canary를 실행한다.
+6. 원본·Bronze 640/80/8 행과 hash, 파티션 읽기, 재시도·재개, 주기 시간을 검증한다.
+7. 별도 일정 승인을 받은 뒤에만 `weather_ultra_srt_ncst_bronze`를 활성화한다.
+8. 품질 변환과 D1/Worker 공개는 근거 성숙도와 별도 발행 승인을 통과한 뒤에 한다.
 
-Rollback pauses only the new DAGs, drains their runs, and restores the prior
-Airflow code artifact. Dedicated raw/table namespaces prevent rollback from
-touching the existing forecast pipeline. Immutable raw evidence is retained; no
-automatic delete or table drop is part of rollback.
+되돌릴 때는 새 DAG만 멈추고 실행을 비운 뒤 이전 코드와 보호 설정을 복원한다. 불변
+원본과 전용 테이블은 보존하며 자동 삭제·테이블 삭제는 하지 않는다.
 
-## Approval checklist
+## 승인 확인표
 
-- [ ] Exact implementation diff and candidate commit reviewed
-- [ ] Exact Airflow services and Compose command reported
-- [ ] Existing running/queued work and drain window reported
-- [ ] Personal KMA/R2/catalog target metadata verified without secrets
-- [ ] Quota ceiling, concurrency, retry matrix, and missing-grid repair tested
-- [ ] 80-grid/640-row atomicity test green
-- [ ] dbt partition-pruning and bounded incremental tests green
-- [ ] Local Trino memory/scan acceptance thresholds agreed
-- [ ] Raw/Bronze write approved separately from D1/Worker publication
-- [ ] Rollback command and preserved data namespaces verified
-- [ ] Explicit user approval recorded before pause/restart/unpause/trigger/write
+- [ ] 구현 변경과 대상 커밋을 검토했다.
+- [ ] 바꿀 Airflow 서비스와 명령을 보고했다.
+- [ ] 기존 실행·대기 작업과 비우는 시간을 보고했다.
+- [ ] 개인 KMA/R2/Data Catalog 대상을 비밀값 없이 확인했다.
+- [ ] 호출 한도·동시성·재시도·빠진 격자 복구를 시험했다.
+- [ ] 80개 격자·640행 원자성 검사가 통과했다.
+- [ ] `dbt` 파티션 읽기와 제한된 증분 검사가 통과했다.
+- [ ] 노트북 Trino 메모리·읽기량 기준에 합의했다.
+- [ ] 원본/Bronze 쓰기와 D1/Worker 발행 승인을 분리했다.
+- [ ] 되돌리기 명령과 보존할 데이터 영역을 확인했다.
+- [ ] 일시정지·재시작·활성화·실행·쓰기에 대한 사용자 승인을 기록했다.

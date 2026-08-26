@@ -1,5 +1,8 @@
 # `guarded_private` Weather 자동 배포 설계
 
+> 사람용 안내: 비공개 저장소의 실수 방지 배포 경계를 설명하는 설계 원문이다. 아래
+> 식별자와 검사 이름은 실행 코드의 계약이므로 그대로 두고, 내용은 한국어로 읽으면 된다.
+
 ## 1. 결정
 
 현재 `masondev1024/seoul-weather-platform`은 private 개인 저장소이고, private branch protection을 사용할 수 없는 상태다. 이 조건에서는 `WEATHER_GOVERNANCE_MODE=guarded_private`에서도 검증된 `dev → main` 병합 commit을 자동 배포할 수 있게 한다.

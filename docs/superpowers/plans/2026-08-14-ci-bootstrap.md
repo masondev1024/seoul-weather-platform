@@ -1,4 +1,7 @@
-# CI·Bootstrap Implementation Plan
+# CI·부트스트랩 구현 계획
+
+> 사람용 안내: 이 파일은 구현 당시의 세부 작업표다. 설명은 한국어로 읽고, 체크박스와
+> 코드 식별자·명령어는 자동 검사와 맞춰야 하므로 원래 표기를 일부 유지한다.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

@@ -1,4 +1,7 @@
-# Public-readiness Implementation Plan
+# 공개 전환 준비 검사 구현 계획
+
+> 사람용 안내: 공개 가능 여부를 검사하던 세부 작업표다. 아래의 경로·상태 값·명령어는
+> 구현 계약이라 그대로 두고, 판단 설명은 한국어로 읽으면 된다.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

@@ -87,7 +87,12 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall dags tools release
       - name: Test Weather Airflow boundary
-        run: python -m pytest dags/common/serving/tests dags/domains/weather/tests tests/repository/test_airflow_boundary.py -q
+        run: >-
+          python -m pytest dags/common/tests dags/common/serving/tests
+          dags/domains/weather/tests tests/repository/test_airflow_boundary.py
+          tests/tools/test_weather_recovery_coordinator_cli.py
+          tests/tools/test_weather_startup_artifacts.py
+          tests/tools/test_weather_startup_preflight.py -q
 
   dagbag-policy:
     name: dagbag-policy

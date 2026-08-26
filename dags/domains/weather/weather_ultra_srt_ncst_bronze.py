@@ -83,9 +83,58 @@ def validate_observation_runtime() -> dict[str, object]:
     return {"shared_guards_enabled": True, "ledger_schema_version": 1}
 
 
-def plan_observation_collection(*, now: datetime | None = None) -> dict[str, object]:
+def _context_observation_time(context: dict[str, object]) -> datetime:
+    """Resolve a deterministic collection time from Airflow task context.
+
+    Airflow's backfill runner can materialize a task context whose
+    ``logical_date`` is not the run's canonical timestamp while a task is
+    retried.  The run id is persisted by the scheduler and therefore is the
+    safest source for scheduled/backfill runs.  Direct callers and unit tests
+    may provide ``logical_date`` without a run id, so those values remain
+    supported.
+    """
+    run_id = context.get("run_id")
+    if isinstance(run_id, str) and "__" in run_id:
+        _, encoded_date = run_id.split("__", 1)
+        try:
+            parsed = datetime.fromisoformat(encoded_date.replace("Z", "+00:00"))
+        except ValueError:
+            parsed = None
+        if parsed is not None and parsed.tzinfo is not None:
+            return parsed
+
+    for value in (
+        context.get("logical_date"),
+        getattr(context.get("dag_run"), "logical_date", None),
+    ):
+        if isinstance(value, datetime) and value.tzinfo is not None:
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if parsed.tzinfo is not None:
+                return parsed
+
+    return datetime.now(timezone.utc)
+
+
+def plan_observation_collection(
+    *, now: datetime | None = None, **context: object
+) -> dict[str, object]:
+    """Plan the KMA slot anchored to the Airflow logical date.
+
+    A backfill must collect the observation slot represented by its logical
+    date, not whatever wall-clock time happens to be when the task is
+    retried.  The explicit ``now`` argument remains available for unit tests
+    and direct callers; Airflow supplies ``logical_date`` through task
+    context during normal execution.
+    """
+    if now is None:
+        now = _context_observation_time(context)
     base_date, base_time = resolve_observation_slot(
-        now=now or datetime.now(timezone.utc)
+        now=now
     )
     grids = load_kma_grids(expected_grid_count=EXPECTED_GRID_COUNT)
     return {
