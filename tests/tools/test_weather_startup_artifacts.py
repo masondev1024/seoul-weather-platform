@@ -14,6 +14,9 @@ PLIST = ROOT / "runtime" / "launchd" / "com.mason.seoul-weather-platform.plist.e
 
 
 def test_startup_wrapper_has_valid_zsh_syntax() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert source.splitlines()[0] == "#!/bin/zsh"
+
     zsh = shutil.which("zsh")
     if zsh is None:
         pytest.skip("zsh is only available on the macOS runtime target")
