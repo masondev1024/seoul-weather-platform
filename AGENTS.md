@@ -49,7 +49,7 @@ Airflow 상태를 바꾸기 전에는 사용자에게 먼저 보고하고 명시
 - Airflow 이미지 build/deploy
 - scheduler, dag-processor, api-server, triggerer 재생성·재시작
 - DAG 활성화·unpause
-- 수동 trigger·backfill·clear·retry·mark-success
+- 수동 트리거(trigger)·backfill·clear·retry·mark-success
 - collection/transform/publication pipeline 가동
 - 기존 로컬 파이프라인 중지·재시작
 - R2/Iceberg/Trino/D1 write 또는 대량 재처리
