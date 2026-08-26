@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import plistlib
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -11,8 +14,12 @@ PLIST = ROOT / "runtime" / "launchd" / "com.mason.seoul-weather-platform.plist.e
 
 
 def test_startup_wrapper_has_valid_zsh_syntax() -> None:
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("zsh is only available on the macOS runtime target")
+
     result = subprocess.run(
-        ["/bin/zsh", "-n", str(SCRIPT)],
+        [zsh, "-n", str(SCRIPT)],
         text=True,
         capture_output=True,
         check=False,
