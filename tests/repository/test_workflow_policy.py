@@ -224,7 +224,10 @@ def test_repository_ci_trigger_permissions_and_hosted_jobs_match_public_contract
 
     assert workflow["name"] == "CI"
     assert workflow["on"] == {
-        "pull_request": {"branches": ["dev", "main"]},
+        "pull_request": {
+            "branches": ["dev", "main"],
+            "types": ["opened", "synchronize", "reopened", "ready_for_review"],
+        },
         "push": {"branches": ["dev", "main"]},
     }
     assert workflow["permissions"] == {
