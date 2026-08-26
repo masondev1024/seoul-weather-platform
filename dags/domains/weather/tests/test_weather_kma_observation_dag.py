@@ -141,6 +141,29 @@ def test_plan_uses_exact_canonical_80_grids_and_eight_categories():
     assert plan["expected_row_count"] == 640
 
 
+def test_backfill_plan_uses_airflow_logical_date_not_wall_clock():
+    module = _module()
+
+    plan = module.plan_observation_collection(
+        logical_date=module.datetime(2026, 8, 23, 14, 45, tzinfo=module.timezone.utc)
+    )
+
+    assert plan["base_date"] == "20260823"
+    assert plan["base_time"] == "2300"
+
+
+def test_backfill_plan_prefers_canonical_run_id_timestamp():
+    module = _module()
+
+    plan = module.plan_observation_collection(
+        run_id="scheduled__2026-08-23T14:45:00+00:00",
+        logical_date=module.datetime(2026, 8, 24, 2, 10, tzinfo=module.timezone.utc),
+    )
+
+    assert plan["base_date"] == "20260823"
+    assert plan["base_time"] == "2300"
+
+
 def test_validate_runtime_fails_closed_until_guards_and_ledger_are_ready(monkeypatch):
     module = _module()
     monkeypatch.setattr(module, "validate_dev_runtime", lambda **_kwargs: None)

@@ -11,6 +11,17 @@ x-local-airflow: &local-airflow
   env_file: !override
     - "${ASK_SEOUL_PROD_ENV_FILE:-.env.prod}"
   environment:
+    # The repository snapshots use glob patterns in .airflowignore.  Airflow
+    # 3.2 can inherit a host-level regexp default, which would silently scan
+    # tests/support modules and create duplicate DAG ids.  Pin the syntax in
+    # the personal runtime instead of relying on a workstation config.
+    AIRFLOW__CORE__DAG_IGNORE_FILE_SYNTAX: "glob"
+    # LocalExecutor runs task processes inside this container. Keep the
+    # scheduler burst below the Mac memory budget; Trino's pool limits alone
+    # do not cap Python/dbt task RSS.
+    AIRFLOW__CORE__PARALLELISM: "8"
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "4"
+    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: "2"
     AIRFLOW__OPENLINEAGE__TRANSPORT: '{"type": "http", "url": "http://marquez-api:5000", "endpoint": "api/v1/lineage"}'
     AIRFLOW__OPENLINEAGE__NAMESPACE: "ask-seoul-prod-airflow"
     AIRFLOW__OPENLINEAGE__SELECTIVE_ENABLE: "true"
@@ -49,6 +60,17 @@ services:
     env_file: !override
       - "${ASK_SEOUL_PROD_ENV_FILE:-.env.prod}"
     mem_limit: 5g
+    # A SQL healthcheck competes for the single Trino lane and becomes
+    # unhealthy during a legitimate long transform.  Local readiness is
+    # checked separately by startup preflight; this probe is process liveness.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "curl --fail --silent --show-error --max-time 2 http://localhost:8080/v1/info >/dev/null"
+      interval: 15s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
     environment:
       TRINO_TASK_CONCURRENCY: "2"
       TRINO_QUERY_MAX_MEMORY_PER_NODE: "800MB"
