@@ -18,6 +18,9 @@ secrets/
 .omc/
 .omx/
 .superpowers/
+.codex/
+AGENTS.md
+CLAUDE.md
 
 # Python
 .pytest_cache/
