@@ -16,6 +16,12 @@ x-local-airflow: &local-airflow
     # tests/support modules and create duplicate DAG ids.  Pin the syntax in
     # the personal runtime instead of relying on a workstation config.
     AIRFLOW__CORE__DAG_IGNORE_FILE_SYNTAX: "glob"
+    # LocalExecutor runs task processes inside this container. Keep the
+    # scheduler burst below the Mac memory budget; Trino's pool limits alone
+    # do not cap Python/dbt task RSS.
+    AIRFLOW__CORE__PARALLELISM: "8"
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "4"
+    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: "2"
     AIRFLOW__OPENLINEAGE__TRANSPORT: '{"type": "http", "url": "http://marquez-api:5000", "endpoint": "api/v1/lineage"}'
     AIRFLOW__OPENLINEAGE__NAMESPACE: "ask-seoul-prod-airflow"
     AIRFLOW__OPENLINEAGE__SELECTIVE_ENABLE: "true"

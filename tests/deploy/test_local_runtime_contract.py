@@ -33,6 +33,11 @@ EXPECTED_DISABLED_OBSERVATION_ENVIRONMENT = {
     "ASK_SEOUL_KMA_DAILY_ATTEMPT_LIMIT": "7500",
     "ASK_SEOUL_WEATHER_QUALITY_DAG_SCHEDULE": EXPECTED_DISABLED_QUALITY_DAG_SCHEDULE,
 }
+EXPECTED_AIRFLOW_CONCURRENCY_ENVIRONMENT = {
+    "AIRFLOW__CORE__PARALLELISM": "8",
+    "AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG": "4",
+    "AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG": "2",
+}
 
 
 class _ComposeLoader(yaml.SafeLoader):
@@ -91,7 +96,11 @@ def _write_valid_contract(repo_root: Path) -> None:
         + "    environment:\n"
         '      AIRFLOW__OPENLINEAGE__DISABLED: "true"\n'
         '      ASK_SEOUL_DBT_OPENLINEAGE_ENABLED: "false"\n'
-        f'      ASK_SEOUL_KMA_DAG_SCHEDULE: "{EXPECTED_KMA_DAG_SCHEDULE}"\n'
+        + "".join(
+            f'      {name}: "{value}"\n'
+            for name, value in EXPECTED_AIRFLOW_CONCURRENCY_ENVIRONMENT.items()
+        )
+        + f'      ASK_SEOUL_KMA_DAG_SCHEDULE: "{EXPECTED_KMA_DAG_SCHEDULE}"\n'
         "      ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE: "
         f'"{EXPECTED_SERVING_SNAPSHOT_DAG_SCHEDULE}"\n'
         + "".join(
@@ -249,6 +258,10 @@ def test_repository_keeps_the_local_runtime_budget_and_schedules() -> None:
     assert trino_environment["TRINO_MEMORY_HEAP_HEADROOM_PER_NODE"] == "1500MB"
     for service_name in AIRFLOW_LOCAL_SERVICES:
         environment = services[service_name]["environment"]
+        assert {
+            name: environment[name]
+            for name in EXPECTED_AIRFLOW_CONCURRENCY_ENVIRONMENT
+        } == EXPECTED_AIRFLOW_CONCURRENCY_ENVIRONMENT
         assert environment["ASK_SEOUL_KMA_DAG_SCHEDULE"] == EXPECTED_KMA_DAG_SCHEDULE
         assert environment["ASK_SEOUL_WEATHER_SERVING_SNAPSHOT_DAG_SCHEDULE"] == (
             EXPECTED_SERVING_SNAPSHOT_DAG_SCHEDULE
