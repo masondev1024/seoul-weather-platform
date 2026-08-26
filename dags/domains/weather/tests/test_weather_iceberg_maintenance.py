@@ -95,7 +95,17 @@ def test_maintained_tables_only_cover_fork_owned_schemas():
     assert "dim_admin_dong" not in names
     # bronze 원천과 대표 gold 상품이 실제로 들어 있다.
     assert MaintainedTable("weather_traffic_bronze", "bronze_kma_vilage_fcst") in MAINTAINED_TABLES
+    assert (
+        MaintainedTable("weather_traffic_bronze", "bronze_kma_ultra_srt_ncst")
+        in MAINTAINED_TABLES
+    )
     assert MaintainedTable("weather", "gold_weather_place_hourly_outlook") in MAINTAINED_TABLES
+    assert MaintainedTable(
+        "weather", "gold_weather_forecast_quality_daily_history"
+    ) in MAINTAINED_TABLES
+    assert MaintainedTable(
+        "weather", "weather_forecast_quality_publication_manifest"
+    ) in MAINTAINED_TABLES
 
 
 def test_resolve_maintained_tables_keeps_canonical_order_and_rejects_unknown():

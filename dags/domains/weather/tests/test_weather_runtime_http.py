@@ -97,3 +97,46 @@ def test_fetch_url_raises_redacted_metadata_on_retriable_exhaustion(monkeypatch)
     request = exc_info.value.problem.request
     assert PLACEHOLDER in request["url"]
     assert "kma-secret-key" not in request["url"]
+
+
+def test_fetch_url_calls_budget_hook_once_before_each_physical_retry(monkeypatch):
+    transport = FakeTransport(
+        [
+            TransportResponse(status=503),
+            TransportResponse(status=200, content=b"ok"),
+        ]
+    )
+    monkeypatch.setenv("KMA_SERVICE_KEY", "kma-key")
+    monkeypatch.setattr(runtime._HTTP, "_transport", transport)
+    monkeypatch.setattr(runtime.time, "sleep", lambda _seconds: None)
+    attempts = []
+
+    result = runtime.fetch_url(
+        "https://example.test/data",
+        "ask-seoul-test/1.0",
+        max_attempts=2,
+        retry_statuses=(503,),
+        before_attempt=attempts.append,
+    )
+
+    assert result == (200, b"ok")
+    assert attempts == [1, 2]
+    assert len(transport.calls) == 2
+
+
+def test_fetch_url_budget_rejection_performs_no_physical_http(monkeypatch):
+    transport = FakeTransport([TransportResponse(status=200, content=b"ok")])
+    monkeypatch.setenv("KMA_SERVICE_KEY", "kma-key")
+    monkeypatch.setattr(runtime._HTTP, "_transport", transport)
+
+    def reject(_attempt):
+        raise RuntimeError("daily budget rejected")
+
+    with pytest.raises(RuntimeError, match="daily budget rejected"):
+        runtime.fetch_url(
+            "https://example.test/data",
+            "ask-seoul-test/1.0",
+            before_attempt=reject,
+        )
+
+    assert transport.calls == []

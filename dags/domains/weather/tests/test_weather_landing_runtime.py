@@ -23,7 +23,9 @@ from weather_ingest.runtime import (  # noqa: E402
 
 class FakeS3Client:
     def __init__(self) -> None:
-        self.objects: dict[tuple[str, str], tuple[bytes, str]] = {}
+        self.objects: dict[
+            tuple[str, str], tuple[bytes, str, dict[str, str]]
+        ] = {}
         self.put_conditions: list[str | None] = []
 
     def put_object(
@@ -34,6 +36,8 @@ class FakeS3Client:
         Body: bytes,
         ContentType: str,
         IfNoneMatch: str | None = None,
+        Metadata: dict[str, str] | None = None,
+        ContentMD5: str | None = None,
     ) -> None:
         self.put_conditions.append(IfNoneMatch)
         if IfNoneMatch == "*" and (Bucket, Key) in self.objects:
@@ -46,17 +50,18 @@ class FakeS3Client:
                 },
                 "PutObject",
             )
-        self.objects[(Bucket, Key)] = (Body, ContentType)
+        self.objects[(Bucket, Key)] = (Body, ContentType, dict(Metadata or {}))
 
     def get_object(self, *, Bucket: str, Key: str):
-        payload, _ = self.objects[(Bucket, Key)]
+        payload, _, _ = self.objects[(Bucket, Key)]
         return {"Body": SimpleNamespace(read=lambda: payload)}
 
-    def head_object(self, *, Bucket: str, Key: str) -> None:
+    def head_object(self, *, Bucket: str, Key: str):
         if (Bucket, Key) not in self.objects:
             error = RuntimeError("missing")
             error.response = {"Error": {"Code": "404"}}
             raise error
+        return {"Metadata": dict(self.objects[(Bucket, Key)][2])}
 
 
 def test_kma_adapter_delegates_auth_and_retry_policy_to_domain_http_runtime():
@@ -145,6 +150,46 @@ def test_kma_adapter_preserves_delay_between_successful_api_requests():
     assert sleeps == [4.0]
 
 
+def test_kma_adapter_maps_internal_retries_to_distinct_physical_attempts():
+    reserved = []
+
+    def fetch(_url, _user_agent, **options):
+        options["before_attempt"](1)
+        options["before_attempt"](2)
+        return 200, b"{}"
+
+    adapter = KmaHttpAdapter(
+        fetch,
+        before_attempt=reserved.append,
+        dag_run_id="scheduled__forecast",
+        request_id=lambda: "logical-request",
+    )
+
+    adapter.fetch_page(
+        base_date="20260714",
+        base_time="0800",
+        nx=60,
+        ny=127,
+        page_no=1,
+        num_of_rows=1000,
+    )
+
+    assert [attempt.source_id for attempt in reserved] == [
+        "kma_vilage_fcst",
+        "kma_vilage_fcst",
+    ]
+    assert [attempt.dag_run_id for attempt in reserved] == [
+        "scheduled__forecast",
+        "scheduled__forecast",
+    ]
+    assert [attempt.observed_slot for attempt in reserved] == [
+        "20260714T0800",
+        "20260714T0800",
+    ]
+    assert [attempt.attempt_ordinal for attempt in reserved] == [1, 2]
+    assert len({attempt.reservation_id for attempt in reserved}) == 2
+
+
 def test_r2_store_preserves_content_type_and_missing_object_semantics():
     client = FakeS3Client()
     store = R2RawObjectStore(client, bucket="seoul-dev")
@@ -218,6 +263,7 @@ def test_r2_store_retries_conditional_conflict_then_reuses_matching_raw_object()
                 self.objects[(kwargs["Bucket"], kwargs["Key"])] = (
                     kwargs["Body"],
                     kwargs["ContentType"],
+                    dict(kwargs.get("Metadata") or {}),
                 )
                 raise ClientError(
                     {
@@ -250,6 +296,61 @@ def test_r2_store_does_not_hide_permission_or_transport_failures():
 
     with pytest.raises(RuntimeError, match="denied"):
         R2RawObjectStore(DeniedClient(), bucket="seoul-dev").exists("raw/page.json")
+
+
+def test_r2_store_retries_a_transient_endpoint_failure_before_writing():
+    from botocore.exceptions import EndpointConnectionError
+
+    class EndpointFailureThenSuccessClient(FakeS3Client):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def put_object(self, **kwargs) -> None:
+            self.calls += 1
+            if self.calls == 1:
+                raise EndpointConnectionError(endpoint_url="https://r2.invalid")
+            super().put_object(**kwargs)
+
+    sleeps: list[float] = []
+    client = EndpointFailureThenSuccessClient()
+    store = R2RawObjectStore(client, bucket="seoul-dev", sleep=sleeps.append)
+
+    assert store.write_bytes_if_absent("raw/page.json", b"payload", "application/json")
+    assert client.calls == 2
+    assert sleeps == [1.0]
+
+
+def test_r2_store_fails_after_a_bounded_number_of_endpoint_retries():
+    from botocore.exceptions import EndpointConnectionError
+
+    class EndpointFailureClient(FakeS3Client):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def put_object(self, **_kwargs) -> None:
+            self.calls += 1
+            raise EndpointConnectionError(endpoint_url="https://r2.invalid")
+
+    sleeps: list[float] = []
+    client = EndpointFailureClient()
+    store = R2RawObjectStore(client, bucket="seoul-dev", sleep=sleeps.append)
+
+    with pytest.raises(EndpointConnectionError):
+        store.write_bytes_if_absent("raw/page.json", b"payload", "application/json")
+
+    assert client.calls == 3
+    assert sleeps == [1.0, 2.0]
+
+
+def test_r2_client_uses_an_explicit_bounded_standard_retry_policy():
+    config = runtime._r2_client_config()
+
+    assert config.retries == {"mode": "standard", "total_max_attempts": 3}
+    assert config.connect_timeout == 3
+    assert config.read_timeout == 30
+    assert config.tcp_keepalive is True
 
 
 def test_runtime_factory_lazily_composes_domain_landing(monkeypatch):
@@ -290,6 +391,69 @@ def test_runtime_factory_lazily_composes_domain_landing(monkeypatch):
     assert (
         captured["landing"]["checkpoint_prefix"] == "ops/control/checkpoints/weather"
     )
+
+
+def test_runtime_factory_injects_shared_ledger_only_when_rollout_is_enabled(
+    monkeypatch,
+):
+    sentinel_ledger = object()
+    sentinel_hook = object()
+    captured = {}
+    monkeypatch.setattr(runtime, "shared_guards_enabled", lambda: True)
+    monkeypatch.setattr(
+        runtime.SqliteAttemptLedger,
+        "from_environment",
+        lambda: sentinel_ledger,
+    )
+    monkeypatch.setattr(
+        runtime,
+        "PhysicalAttemptBudgetHook",
+        lambda ledger, clock: (
+            sentinel_hook
+            if ledger is sentinel_ledger and callable(clock)
+            else None
+        ),
+    )
+    monkeypatch.setattr(runtime, "_build_s3_client", lambda: object())
+    monkeypatch.setattr(
+        runtime,
+        "r2_env",
+        lambda name: {"R2_BUCKET_NAME": "seoul-dev"}[name],
+    )
+    monkeypatch.setattr(
+        runtime,
+        "KmaLanding",
+        lambda **dependencies: captured.setdefault("landing", dependencies),
+    )
+
+    runtime.build_weather_landing()
+
+    assert captured["landing"]["source"]._before_attempt is sentinel_hook
+
+
+def test_runtime_factory_does_not_open_ledger_when_rollout_is_disabled(monkeypatch):
+    monkeypatch.setattr(runtime, "shared_guards_enabled", lambda: False)
+    monkeypatch.setattr(
+        runtime.SqliteAttemptLedger,
+        "from_environment",
+        lambda: pytest.fail("disabled runtime must not open the shared ledger"),
+    )
+    monkeypatch.setattr(runtime, "_build_s3_client", lambda: object())
+    monkeypatch.setattr(
+        runtime,
+        "r2_env",
+        lambda name: {"R2_BUCKET_NAME": "seoul-dev"}[name],
+    )
+    captured = {}
+    monkeypatch.setattr(
+        runtime,
+        "KmaLanding",
+        lambda **dependencies: captured.setdefault("landing", dependencies),
+    )
+
+    runtime.build_weather_landing()
+
+    assert captured["landing"]["source"]._before_attempt is None
 
 
 def test_manifest_factory_keeps_trino_wiring_out_of_the_dag(monkeypatch):

@@ -21,6 +21,7 @@ from weather_ingest.errors import (
     WeatherSourceSchemaError,
 )
 from weather_ingest.raw_contract import normalize_kma_checkpoint_raw_object
+from weather_ingest.raw_spool import RawPayloadSpool
 
 
 _RAW_OBJECT_KEY = re.compile(
@@ -221,6 +222,7 @@ class KmaLanding:
         clock: Callable[[], datetime],
         request_id: Callable[[], str],
         checkpoint_prefix: str | None = None,
+        raw_spool: RawPayloadSpool | None = None,
     ) -> None:
         self._source = source
         self._raw_store = raw_store
@@ -231,6 +233,7 @@ class KmaLanding:
         ).rstrip("/")
         self._clock = clock
         self._request_id = request_id
+        self._raw_spool = raw_spool
 
     @staticmethod
     def _safe_key_segment(value: str) -> str:
@@ -423,6 +426,7 @@ class KmaLanding:
         )
 
     def _write_raw_payload(self, key: str, payload: bytes) -> None:
+        payload_hash = hashlib.sha256(payload).hexdigest()
         try:
             write_immutable_raw_object(
                 self._raw_store,
@@ -432,6 +436,25 @@ class KmaLanding:
             )
         except RawObjectWriteConflictError as exc:
             raise RawObjectIntegrityError(str(exc)) from exc
+        self._spool_payload_best_effort(key, payload, payload_hash)
+
+    def _spool_payload_best_effort(
+        self,
+        raw_object_key: str,
+        payload: bytes,
+        expected_hash: str,
+    ) -> None:
+        if self._raw_spool is None:
+            return
+        try:
+            self._raw_spool.write_verified(
+                raw_object_key, payload, expected_hash
+            )
+        except OSError as exc:
+            print(
+                "Weather raw spool write unavailable; Bronze will use R2: "
+                f"error_type={type(exc).__name__}"
+            )
 
     def collect(
         self,
@@ -515,10 +538,18 @@ class KmaLanding:
         )
 
     def _checkpoint_object_is_trustworthy(self, item: KmaRawObject) -> bool:
+        # R2 remains the canonical raw provenance boundary. A matching local
+        # spool is never enough to reuse a checkpoint if the canonical object
+        # disappeared or diverged.
         if not self._raw_store.exists(item.raw_object_key):
             return False
         payload = self._raw_store.read_bytes(item.raw_object_key)
-        return hashlib.sha256(payload).hexdigest() == item.payload_hash
+        if hashlib.sha256(payload).hexdigest() != item.payload_hash:
+            return False
+        self._spool_payload_best_effort(
+            item.raw_object_key, payload, item.payload_hash
+        )
+        return True
 
     def _fetch_page(
         self,

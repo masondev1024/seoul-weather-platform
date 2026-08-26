@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/masondev1024/seoul-weather-platform/contracts/weather-observation/schema/kma-ultra-srt-ncst-v1.schema.json",
+  "title": "KMA getUltraSrtNcst response fixture v1",
+  "type": "object",
+  "required": ["response"],
+  "properties": {
+    "response": {
+      "type": "object",
+      "required": ["header", "body"],
+      "properties": {
+        "header": {
+          "type": "object",
+          "required": ["resultCode", "resultMsg"],
+          "properties": {
+            "resultCode": {"const": "00"},
+            "resultMsg": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": true
+        },
+        "body": {
+          "type": "object",
+          "required": ["items", "totalCount"],
+          "properties": {
+            "items": {
+              "type": "object",
+              "required": ["item"],
+              "properties": {
+                "item": {
+                  "type": "array",
+                  "minItems": 8,
+                  "maxItems": 8,
+                  "allOf": [
+                    {"contains": {"type": "object", "required": ["category"], "properties": {"category": {"const": "PTY"}}}, "minContains": 1, "maxContains": 1},
+                    {"contains": {"type": "object", "required": ["category"], "properties": {"category": {"const": "REH"}}}, "minContains": 1, "maxContains": 1},
+                    {"contains": {"type": "object", "required": ["category"], "properties": {"category": {"const": "RN1"}}}, "minContains": 1, "maxContains": 1},
+                    {"contains": {"type": "object", "required": ["category"], "properties": {"category": {"const": "T1H"}}}, "minContains": 1, "maxContains": 1},
+                    {"contains": {"type": "object", "required": ["category"], "properties": {"category": {"const": "UUU"}}}, "minContains": 1, "maxContains": 1},
+                    {"contains": {"type": "object", "required": ["category"], "properties": {"category": {"const": "VEC"}}}, "minContains": 1, "maxContains": 1},
+                    {"contains": {"type": "object", "required": ["category"], "properties": {"category": {"const": "VVV"}}}, "minContains": 1, "maxContains": 1},
+                    {"contains": {"type": "object", "required": ["category"], "properties": {"category": {"const": "WSD"}}}, "minContains": 1, "maxContains": 1}
+                  ],
+                  "items": {
+                    "type": "object",
+                    "required": ["baseDate", "baseTime", "category", "nx", "ny", "obsrValue"],
+                    "properties": {
+                      "baseDate": {"type": "string", "pattern": "^[0-9]{8}$"},
+                      "baseTime": {"type": "string", "pattern": "^(?:[01][0-9]|2[0-3])00$"},
+                      "category": {"enum": ["PTY", "REH", "RN1", "T1H", "UUU", "VEC", "VVV", "WSD"]},
+                      "nx": {"type": "integer", "minimum": 1},
+                      "ny": {"type": "integer", "minimum": 1},
+                      "obsrValue": {"type": ["string", "number"]}
+                    },
+                    "additionalProperties": true
+                  }
+                }
+              },
+              "additionalProperties": true
+            },
+            "totalCount": {"const": 8}
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

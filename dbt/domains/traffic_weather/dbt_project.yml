@@ -35,6 +35,8 @@ models:
           +tags: ["ask_seoul_weather_transform_grid_mart"]
         gold:
           +tags: ["ask_seoul_weather_transform_serving_gold"]
+      quality:
+        +tags: ["ask_seoul_weather_quality_candidate"]
   asac_axes:
     +schema: "{{ env_var('ASAC_AXES_SCHEMA', 'common') }}"
     +tags: ["ask_seoul_weather_transform_asac_axes"]
@@ -79,3 +81,5 @@ data_tests:
   asac_seoul:
     weather:
       +group: weather
+      quality:
+        +tags: ["ask_seoul_weather_quality_contract"]

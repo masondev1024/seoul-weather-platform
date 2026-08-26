@@ -60,11 +60,16 @@ MEDALLION_SCHEMA = "weather"
 MAINTAINED_TABLES: tuple[MaintainedTable, ...] = (
     # Bronze: 매 수집 사이클 append.
     MaintainedTable(BRONZE_SCHEMA, "bronze_kma_vilage_fcst"),
+    MaintainedTable(BRONZE_SCHEMA, "bronze_kma_ultra_srt_ncst"),
     MaintainedTable(BRONZE_SCHEMA, "bronze_collection_run_manifest"),
     # Silver: incremental.
     MaintainedTable(MEDALLION_SCHEMA, "silver_kma_vilage_fcst"),
     MaintainedTable(MEDALLION_SCHEMA, "silver_weather_forecast_by_admin_dong_serving"),
     MaintainedTable(MEDALLION_SCHEMA, "silver_weather_forecast_by_coverage_grid_serving"),
+    # Internal forecast-quality Silver: bounded daily repair writes.
+    MaintainedTable(MEDALLION_SCHEMA, "silver_weather_quality_forecast_vintage"),
+    MaintainedTable(MEDALLION_SCHEMA, "silver_kma_observation_truth"),
+    MaintainedTable(MEDALLION_SCHEMA, "silver_weather_forecast_observation_match"),
     # 차원(weather 전용): 참조 refresh 로 하루 1회 재작성.
     MaintainedTable(MEDALLION_SCHEMA, "dim_weather_place"),
     MaintainedTable(MEDALLION_SCHEMA, "dim_weather_coverage_grid"),
@@ -82,6 +87,12 @@ MAINTAINED_TABLES: tuple[MaintainedTable, ...] = (
     MaintainedTable(MEDALLION_SCHEMA, "gold_weather_grid_current_outlook"),
     MaintainedTable(MEDALLION_SCHEMA, "gold_weather_grid_hourly_outlook"),
     MaintainedTable(MEDALLION_SCHEMA, "gold_weather_grid_precipitation_window"),
+    # Internal forecast-quality histories and publication metadata. Views are
+    # virtual and intentionally excluded; this never touches D1-serving data.
+    MaintainedTable(MEDALLION_SCHEMA, "gold_weather_forecast_quality_grid_score_history"),
+    MaintainedTable(MEDALLION_SCHEMA, "gold_weather_forecast_quality_hourly_history"),
+    MaintainedTable(MEDALLION_SCHEMA, "gold_weather_forecast_quality_daily_history"),
+    MaintainedTable(MEDALLION_SCHEMA, "weather_forecast_quality_publication_manifest"),
 )
 
 

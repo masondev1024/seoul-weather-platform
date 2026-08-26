@@ -1,0 +1,8 @@
+{
+  "name": "seoul-weather-k-skill-proxy",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

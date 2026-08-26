@@ -9,7 +9,7 @@ The command uses `docker run` with all of the following boundaries:
 - repository `dags/`, `dbt/`, 검증용 `tools/`를 read-only로 mount;
 - `PYTHONDONTWRITEBYTECODE=1`, 격리된 `/tmp`, `AIRFLOW_HOME=/tmp/airflow`;
 - metadata DB migration이나 Airflow CLI 없이 `DagBag` 객체만 직접 load;
-- import error 0개와 Weather DAG ID exact set 10개를 함께 검증.
+- import error 0개와 versioned Weather DAG ID allowlist를 함께 검증.
 
 Print the fully resolved command without starting Docker:
 

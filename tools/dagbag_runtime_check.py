@@ -10,11 +10,14 @@ from typing import Any
 EXPECTED_DAG_IDS = frozenset(
     {
         "common_admin_dong_bronze",
+        "weather_forecast_quality_backfill",
+        "weather_forecast_quality_daily",
         "weather_iceberg_maintenance",
         "weather_reference_data_refresh",
         "weather_serving_export",
         "weather_serving_freshness_watchdog",
         "weather_serving_snapshot_refresh",
+        "weather_ultra_srt_ncst_bronze",
         "weather_vilage_fcst_bronze",
         "weather_vilage_fcst_bronze_backfill",
         "weather_vilage_fcst_collection_slot_reconciliation",

@@ -18,6 +18,22 @@
 - public-readiness PASS도 visibility 변경 승인이 아니다. 별도 사용자 승인이 필요하다.
 - stage·commit·push·PR은 실행 시점의 사용자 승인 뒤에만 수행한다.
 
+## 2026-08-21 Mac cutover architecture decision
+
+- Architecture source: `docs/architecture/public-private-operations-boundary.md`.
+- Current evidence/status: `docs/operations/public-release-readiness.md`.
+- The repository is the public-candidate **code plane**. Populated env files,
+  personal Cloudflare/KMA credentials, Docker volumes, Airflow metadata/logs, and
+  deployment approval evidence are the private **Mac operations plane**.
+- The personal Mac must never be registered as a runner for a public repository.
+  Fork and pull-request checks remain GitHub-hosted, read-only, and secretless.
+- Before visibility changes, the legacy self-hosted `dagbag-runtime` and
+  `deploy-main` route must be disabled or moved to a separately private operations
+  repository and verified by GitHub readback.
+- The current implementation phase adds only architecture, a secretless
+  Weather-only example, and fail-closed evidence. Tasks below remain the future
+  scanner/governance implementation plan and do not authorize publication.
+
 ---
 
 ### Task 1: readiness report model과 현재 license blocker
