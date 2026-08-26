@@ -14,6 +14,7 @@ EXPECTED_DAG_IDS = frozenset(
         "weather_forecast_quality_daily",
         "weather_iceberg_maintenance",
         "weather_reference_data_refresh",
+        "weather_recovery_coordinator",
         "weather_serving_export",
         "weather_serving_freshness_watchdog",
         "weather_serving_snapshot_refresh",
