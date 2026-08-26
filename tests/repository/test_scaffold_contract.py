@@ -36,6 +36,9 @@ def test_gitignore_blocks_local_harness_secrets_and_generated_outputs() -> None:
         ".env.*",
         ".omc/",
         ".omx/",
+        ".codex/",
+        "AGENTS.md",
+        "CLAUDE.md",
         ".pytest_cache/",
         "**/__pycache__/",
         "**/dbt_packages/",
@@ -96,7 +99,9 @@ def test_source_inventory_matches_the_reviewed_extraction_counts() -> None:
 
 
 def test_repository_rules_require_user_report_before_airflow_state_change() -> None:
-    rules = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    rules = (
+        REPO_ROOT / "docs" / "operations" / "airflow-deployment-approval.md"
+    ).read_text(encoding="utf-8")
 
     assert "AIRFLOW_DEPLOYMENT_APPROVAL_REQUIRED" in rules
     assert "기존 로컬 파이프라인" in rules

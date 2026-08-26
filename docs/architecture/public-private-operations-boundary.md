@@ -42,7 +42,8 @@ its upstream service token is stored as a Worker secret.
 1. Pull requests and forks run only GitHub-hosted, read-only, secretless checks.
    `pull_request_target` is prohibited. A public repository never registers the
    personal Mac as a self-hosted runner.
-2. Local Docker/Airflow mutation requires the approval report in `AGENTS.md`.
+2. Local Docker/Airflow mutation requires the approval report described in
+   `docs/operations/airflow-deployment-approval.md`.
    Repository tests, a passing public-readiness report, or a merge do not imply
    deployment approval.
 3. Personal Cloudflare target identity is checked immediately before activation
