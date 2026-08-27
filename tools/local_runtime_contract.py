@@ -40,8 +40,8 @@ EXPECTED_AIRFLOW_ENVIRONMENT = {
     "AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG": "2",
     "AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME": "7200",
     "ASK_SEOUL_KMA_DAG_SCHEDULE": "20 2,5,8,11,14,17,20,23 * * *",
-    "ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED": "false",
-    "ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE": "",
+    "ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED": "true",
+    "ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE": "45 * * * *",
     "ASK_SEOUL_KMA_CONTROL_ROOT": "/opt/airflow/logs/_weather_control",
     "ASK_SEOUL_KMA_ATTEMPT_LEDGER_PATH": (
         "/opt/airflow/logs/_weather_control/kma_api_budget.sqlite3"
@@ -264,7 +264,7 @@ def validate_local_runtime_contract(repo_root: Path) -> LocalRuntimeContractProo
         global_group = _mapping(root_groups[0])
         hard_concurrency = global_group.get("hardConcurrencyLimit")
         max_queued = global_group.get("maxQueued")
-        if hard_concurrency != 1 or max_queued != 10:
+        if hard_concurrency != 2 or max_queued != 10:
             raise _invalid()
 
         ignore_lines = {

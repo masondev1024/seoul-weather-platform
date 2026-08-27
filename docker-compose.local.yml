@@ -38,10 +38,11 @@ x-local-airflow: &local-airflow
     # it reports XCom/task state.
     AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "7200"
     ASK_SEOUL_KMA_DAG_SCHEDULE: "20 2,5,8,11,14,17,20,23 * * *"
-    # Hourly observation is checked in but remains inert until the separately
-    # approved ledger bootstrap, pool validation, canary, and unpause sequence.
-    ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED: "false"
-    ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE: ""
+    # Hourly observation rollout is approved for the personal runtime. The
+    # persistent ledger and shared pools are initialized before the DAG is
+    # unpaused, so forecast/observation requests remain serialized.
+    ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED: "true"
+    ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE: "45 * * * *"
     ASK_SEOUL_KMA_CONTROL_ROOT: "/opt/airflow/logs/_weather_control"
     ASK_SEOUL_KMA_ATTEMPT_LEDGER_PATH: "/opt/airflow/logs/_weather_control/kma_api_budget.sqlite3"
     ASK_SEOUL_KMA_DAILY_ATTEMPT_LIMIT: "7500"
@@ -76,6 +77,9 @@ services:
       TRINO_QUERY_MAX_MEMORY_PER_NODE: "800MB"
       TRINO_MEMORY_HEAP_HEADROOM_PER_NODE: "1500MB"
       TRINO_QUERY_MAX_MEMORY: "800MB"
+      # Silver contract test의 관측 피크(약 987MiB)에서 spill 없이 마칠 수
+      # 있도록 1.2GiB로 둔다. 두 branch 동시 실행 시에도 Trino 5GiB 상한과
+      # Airflow 두 슬롯 lane 안에서만 실행된다.
       TRINO_QUERY_MAX_TOTAL_MEMORY: "1200MB"
     depends_on:
       trino-cache-init:
