@@ -556,6 +556,9 @@ def build_kma_bronze_dag(
             task_id="load_kma_bronze",
             python_callable=load_kma_bronze,
             pool=TRINO_HEAVY_POOL,
+            # Bronze table publication is an exclusive writer in the shared
+            # Weather lane; never overlap it with a transform branch.
+            pool_slots=2,
             retries=3,
             retry_delay=timedelta(minutes=1),
             retry_exponential_backoff=True,
@@ -569,6 +572,7 @@ def build_kma_bronze_dag(
             task_id="verify_kma_bronze_runtime",
             python_callable=verify_kma_bronze_runtime,
             pool=TRINO_HEAVY_POOL,
+            pool_slots=2,
             retries=3,
             retry_delay=timedelta(minutes=1),
             retry_exponential_backoff=True,
@@ -645,6 +649,7 @@ def build_kma_bronze_backfill_dag():
             task_id="load_kma_bronze",
             python_callable=load_kma_bronze,
             pool=TRINO_HEAVY_POOL,
+            pool_slots=2,
             retries=3,
             retry_delay=timedelta(minutes=1),
             retry_exponential_backoff=True,
@@ -658,6 +663,7 @@ def build_kma_bronze_backfill_dag():
             task_id="verify_kma_bronze_runtime",
             python_callable=verify_kma_bronze_runtime,
             pool=TRINO_HEAVY_POOL,
+            pool_slots=2,
             retries=3,
             retry_delay=timedelta(minutes=1),
             retry_exponential_backoff=True,

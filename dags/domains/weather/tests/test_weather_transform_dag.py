@@ -60,6 +60,7 @@ def test_weather_dbt_factory_preserves_phase_contracts():
             )
         else:
             assert task.kwargs["pool"] == module.TRINO_WEATHER_LEGACY_HEAVY_POOL
+            assert task.kwargs["pool_slots"] == 1
         assert task.kwargs["retries"] == 1
         assert task.kwargs["retry_delay"] == module.DBT_RETRY_DELAY
         assert task.kwargs["on_failure_callback"] is module.record_weather_problem
@@ -85,6 +86,7 @@ def test_weather_transform_trino_tasks_do_not_inflate_pool_priority_from_chain()
             )
         else:
             assert task.kwargs["pool"] == module.TRINO_WEATHER_LEGACY_HEAVY_POOL
+            assert task.kwargs["pool_slots"] == 1
         assert task.kwargs["weight_rule"] == "absolute"
 
 
@@ -95,10 +97,10 @@ def test_weather_transform_runs_spatial_seed_and_mart_phases():
     expected_task_order = [
         "resolve_weather_snapshot_run",
         "resolve_weather_serving_as_of_hour",
-        *(
-            task_id
-            for task_id, _dbt_command, _selector, _include_vars in EXPECTED_DBT_PHASES
-        ),
+        "dbt_deps",
+        "dbt_source_freshness",
+        "dbt_run_silver",
+        "dbt_test_silver",
     ]
 
     assert set(expected_task_order) <= set(dag.task_ids)
@@ -116,6 +118,25 @@ def test_weather_transform_runs_spatial_seed_and_mart_phases():
         "dbt_test_coverage_grid_mart",
     ):
         assert dag.task_dict[task_id].kwargs["on_failure_callback"] is module.record_weather_problem
+
+    # Spatial marts fan out only after Silver succeeds; Gold waits for both
+    # branch tests so the publication asset remains fail-closed.
+    assert dag.task_dict["dbt_test_silver"].downstream_task_ids == {
+        "dbt_run_place_mart",
+        "dbt_run_coverage_grid_mart",
+    }
+    assert dag.task_dict["dbt_run_place_mart"].downstream_task_ids == {
+        "dbt_test_place_mart"
+    }
+    assert dag.task_dict["dbt_run_coverage_grid_mart"].downstream_task_ids == {
+        "dbt_test_coverage_grid_mart"
+    }
+    assert dag.task_dict["dbt_test_place_mart"].downstream_task_ids == {
+        "dbt_run_gold"
+    }
+    assert dag.task_dict["dbt_test_coverage_grid_mart"].downstream_task_ids == {
+        "dbt_run_gold"
+    }
 
     # 정적 참조 phase 는 weather_reference_data_refresh 로 빠졌으므로 transform 에는
     # 더 이상 존재하지 않는다.
@@ -151,25 +172,23 @@ def test_weather_transform_runs_spatial_marts_before_full_gold_and_metrics():
     module = load_transform_module()
     dag = module.dag
 
-    terminal_order = (
-        "dbt_run_silver",
-        "dbt_test_silver",
+    assert dag.task_dict["dbt_test_silver"].downstream_task_ids == {
         "dbt_run_place_mart",
-        "dbt_test_place_mart",
         "dbt_run_coverage_grid_mart",
-        "dbt_test_coverage_grid_mart",
-        "dbt_run_gold",
-        "dbt_test_gold",
-        "mark_weather_gold_publication_ready",
-        "publish_dbt_run_metrics",
-    )
-
-    for upstream_task_id, downstream_task_id in zip(
-        terminal_order, terminal_order[1:]
-    ):
-        assert dag.task_dict[upstream_task_id].downstream_task_ids == {
-            downstream_task_id
-        }
+    }
+    assert dag.task_dict["dbt_test_place_mart"].downstream_task_ids == {
+        "dbt_run_gold"
+    }
+    assert dag.task_dict["dbt_test_coverage_grid_mart"].downstream_task_ids == {
+        "dbt_run_gold"
+    }
+    assert dag.task_dict["dbt_run_gold"].downstream_task_ids == {"dbt_test_gold"}
+    assert dag.task_dict["dbt_test_gold"].downstream_task_ids == {
+        "mark_weather_gold_publication_ready"
+    }
+    assert dag.task_dict["mark_weather_gold_publication_ready"].downstream_task_ids == {
+        "publish_dbt_run_metrics"
+    }
     assert (
         dag.task_dict["dbt_run_gold"].kwargs["op_kwargs"]["selector"]
         == "ask_seoul_weather_transform_serving_gold"

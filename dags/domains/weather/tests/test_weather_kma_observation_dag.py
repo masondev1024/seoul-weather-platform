@@ -64,14 +64,14 @@ def test_enabled_landing_uses_shared_api_pool_and_bounded_timeout(monkeypatch):
     assert land.kwargs["retry_exponential_backoff"] is False
 
 
-def test_load_and_verify_share_the_canonical_one_slot_weather_pool():
+def test_load_and_verify_hold_the_exclusive_weather_pool_lock():
     module = _module()
     dag = module.dag
 
     for task_id in ("load_observation_bronze", "verify_observation_bronze"):
         task = dag.task_dict[task_id]
         assert task.kwargs["pool"] == "trino_weather_heavy"
-        assert task.kwargs["pool_slots"] == 1
+        assert task.kwargs["pool_slots"] == 2
         assert task.kwargs["execution_timeout"] <= timedelta(minutes=10)
         assert task.kwargs["retries"] == 0
 

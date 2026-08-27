@@ -15,7 +15,11 @@ from typing import Callable, Protocol, Sequence
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-from common.pools import KMA_API_POOL, TRINO_WEATHER_HEAVY_POOL
+from common.pools import (
+    KMA_API_POOL,
+    TRINO_WEATHER_HEAVY_POOL,
+    TRINO_WEATHER_HEAVY_POOL_SLOTS,
+)
 from weather_ingest.errors import WeatherBronzeConfigurationError
 
 
@@ -150,6 +154,38 @@ def weather_heavy_pool(legacy_pool: str) -> str:
     if shared_guards_enabled():
         return TRINO_WEATHER_HEAVY_POOL
     return legacy_pool
+
+
+def weather_heavy_pool_kwargs(
+    legacy_pool: str,
+    *,
+    pool_slots: int = 1,
+) -> dict[str, str | int]:
+    """Return a guarded Weather Trino pool assignment.
+
+    The active personal runtime owns a two-slot canonical lane.  A normal
+    transform branch consumes one slot; a writer that must not overlap another
+    Weather writer (snapshot/reference refresh/ingest/maintenance) consumes
+    both.  When the shared-guard rollout is deliberately disabled we preserve
+    the historical one-slot fallback so a rollback cannot deadlock on a pool
+    that was never resized.
+    """
+
+    if isinstance(pool_slots, bool) or not isinstance(pool_slots, int):
+        raise KmaCoordinationConfigurationError(
+            "Weather Trino pool_slots must be an integer"
+        )
+    if pool_slots < 1 or pool_slots > TRINO_WEATHER_HEAVY_POOL_SLOTS:
+        raise KmaCoordinationConfigurationError(
+            "Weather Trino pool_slots must be between 1 and "
+            f"{TRINO_WEATHER_HEAVY_POOL_SLOTS}"
+        )
+    selected_pool = weather_heavy_pool(legacy_pool)
+    if selected_pool != TRINO_WEATHER_HEAVY_POOL:
+        # The legacy pool is registered with one slot.  Keep the fallback
+        # schedulable even if a caller requested an exclusive active-lane lock.
+        return {"pool": selected_pool, "pool_slots": 1}
+    return {"pool": selected_pool, "pool_slots": pool_slots}
 
 
 def _configured_daily_attempt_limit() -> int:
@@ -682,6 +718,7 @@ __all__ = [
     "serialize_deadline_anchor",
     "shared_guards_enabled",
     "weather_heavy_pool",
+    "weather_heavy_pool_kwargs",
 ]
 
 

@@ -56,7 +56,7 @@ def test_actions_are_serialized_bounded_and_low_priority_without_retry():
             assert isinstance(task, FakePythonOperator)
             assert task.python_callable is module.run_maintenance_action
             assert task.kwargs["pool"] == module.TRINO_WEATHER_HEAVY_POOL
-            assert task.kwargs["pool_slots"] == 1
+            assert task.kwargs["pool_slots"] == 2
             assert task.kwargs["weight_rule"] == "absolute"
             assert task.kwargs["priority_weight"] == module.MAINTENANCE_PRIORITY_WEIGHT
             assert task.kwargs["execution_timeout"] == module.MAINTENANCE_ACTION_TIMEOUT

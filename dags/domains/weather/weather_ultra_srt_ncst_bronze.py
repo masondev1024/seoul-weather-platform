@@ -271,7 +271,9 @@ with DAG(
         task_id="load_observation_bronze",
         python_callable=load_observation_bronze,
         pool=TRINO_WEATHER_HEAVY_POOL,
-        pool_slots=1,
+        # Observation Bronze publication is a writer and must be exclusive
+        # with the two transform branches on the low-memory local node.
+        pool_slots=2,
         execution_timeout=timedelta(minutes=6),
         retries=0,
     )
@@ -279,7 +281,7 @@ with DAG(
         task_id="verify_observation_bronze",
         python_callable=verify_observation_bronze,
         pool=TRINO_WEATHER_HEAVY_POOL,
-        pool_slots=1,
+        pool_slots=2,
         execution_timeout=timedelta(minutes=5),
         retries=0,
     )
