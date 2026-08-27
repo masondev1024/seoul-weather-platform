@@ -113,6 +113,11 @@ MAC_CUTOVER_ADAPTATION_VALIDATORS = {
         "PYTHONPATH=dags python -m pytest "
         "dags/domains/weather/tests/test_weather_transform_dag.py -q"
     ),
+    "dags/domains/weather/weather_w2_canonical_transform.py": (
+        "PYTHONPATH=dags python -m pytest "
+        "dags/domains/weather/tests/test_weather_w2_canonical_transform_dag.py "
+        "dags/domains/weather/tests/test_weather_w2_canonical_transform_execution.py -q"
+    ),
     "dbt/domains/traffic_weather/models/weather/transform/silver/silver_kma_vilage_fcst.sql": (
         "python -m pytest "
         "dbt/domains/traffic_weather/tests/weather/test_incremental_materialization_contract.py -q"
@@ -151,6 +156,11 @@ MAC_MEMORY_ADAPTATIONS = frozenset(
         "silver_weather_forecast_by_admin_dong_serving.sql",
         "dbt/domains/traffic_weather/tests/weather/"
         "test_weather_serving_working_set_contract.py",
+    }
+)
+MAC_CONCURRENCY_ADAPTATIONS = frozenset(
+    {
+        "dags/domains/weather/weather_w2_canonical_transform.py",
     }
 )
 MAC_AVAILABILITY_ADAPTATIONS = frozenset(
@@ -429,6 +439,14 @@ def build_mac_cutover_adaptation_record(
         derivation = (
             "Replace the target-hashing MERGE with atomic table rename and bound "
             "the issue horizon and ranks to the verified serving requirement."
+        )
+    elif target in MAC_CONCURRENCY_ADAPTATIONS:
+        scope = "weather_mac_concurrency_optimization"
+        reason = "Personal Mac Weather runtime adaptation for bounded Trino concurrency."
+        derivation = (
+            "Route the W2 canonical writer through the exclusive two-slot Weather "
+            "lane so it cannot consume a transform branch slot on the low-memory "
+            "local runtime."
         )
     elif target in MAC_AVAILABILITY_ADAPTATIONS:
         scope = "weather_serving_availability"
