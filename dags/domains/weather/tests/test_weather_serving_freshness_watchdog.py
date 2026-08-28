@@ -49,6 +49,7 @@ def test_weather_watchdog_uses_four_place_products_and_measured_grace(monkeypatc
             "dag_id": "weather_serving_freshness_watchdog",
             "target": "prod",
             "exact_domain_contracts": True,
+            "partitioned_domain_scope": True,
             "naive_freshness_timezones": {
                 product_id: "Asia/Seoul" for product_id in products
             },
