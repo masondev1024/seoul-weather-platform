@@ -14,6 +14,12 @@ from deployment.target import (
 from tools.dagbag_runtime_check import EXPECTED_DAG_IDS
 
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+QUALITY_DAG_IDS = frozenset(
+    {"weather_forecast_quality_backfill", "weather_forecast_quality_daily"}
+)
+
+
 def _valid_target() -> dict[str, object]:
     dag_ids = sorted(EXPECTED_DAG_IDS)
     return {
@@ -72,6 +78,19 @@ def _load_with_repo_root(
 def _load_at_path(target_path: Path, payload: dict[str, object], repo_root: Path):
     target_path.write_text(json.dumps(payload), encoding="utf-8")
     return load_deploy_target(target_path, repo_root=repo_root)
+
+
+def test_deploy_target_example_includes_quality_writers_and_stays_never_trigger():
+    target = load_deploy_target(
+        REPOSITORY_ROOT / "runtime" / "deploy-target.example.json",
+        repo_root=REPOSITORY_ROOT,
+    )
+
+    assert target.dag_allowlist == EXPECTED_DAG_IDS
+    assert target.writer_dag_allowlist == EXPECTED_DAG_IDS
+    assert QUALITY_DAG_IDS <= target.dag_allowlist
+    assert QUALITY_DAG_IDS <= target.writer_dag_allowlist
+    assert target.never_trigger is True
 
 
 def _set_filesystem_paths(payload: dict[str, object], root: str) -> None:

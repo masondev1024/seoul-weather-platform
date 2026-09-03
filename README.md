@@ -147,6 +147,7 @@ python dbt/serving_contract/validate_serving_contract.py --source dbt/domains/tr
 - `docs/architecture/platform-boundaries.md` — runtime ownership seam
 - `docs/architecture/weather-forecast-quality.md` — internal forecast-quality Gold architecture
 - `docs/operations/weather-forecast-quality-runbook.md` — Quality Gold shadow/activation/rollback gate
+- `docs/runbooks/WEATHER_FORECAST_QUALITY_RUNBOOK.md` — 예보 품질 Gold 리포트 실행·재처리 기준
 - `docs/architecture/kma-observation-truth.md` — KMA 실황 정답 데이터 계약과 배포 gate
 - `docs/operations/kma-observation-predeployment-plan.md` — 관측 파이프라인 승인 전 배포·복구 설계
 - `docs/operations/current-resource-dependencies.md` — 기존 resource 의존성
