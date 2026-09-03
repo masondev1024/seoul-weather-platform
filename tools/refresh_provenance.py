@@ -22,6 +22,30 @@ LOCAL_DBT_CONFIGS = frozenset(
         "dbt/domains/traffic_weather/models/weather/transform/gold/_serving_gold.yml",
     }
 )
+LOCAL_DBT_SOURCES = frozenset(
+    {
+        "dbt/domains/traffic_weather/macros/weather/weather_quality_contract.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/gold/_quality_gold.yml",
+        "dbt/domains/traffic_weather/models/weather/quality/gold/gold_weather_forecast_quality_daily.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/gold/gold_weather_forecast_quality_daily_history.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/gold/gold_weather_forecast_quality_grid_score.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/gold/gold_weather_forecast_quality_grid_score_history.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/gold/gold_weather_forecast_quality_hourly.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/gold/gold_weather_forecast_quality_hourly_history.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/silver/_quality_silver.yml",
+        "dbt/domains/traffic_weather/models/weather/quality/silver/silver_kma_observation_truth.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/silver/silver_weather_forecast_observation_match.sql",
+        "dbt/domains/traffic_weather/models/weather/quality/silver/silver_weather_quality_forecast_vintage.sql",
+        "dbt/domains/traffic_weather/tests/weather/quality/assert_quality_daily_reconciles.sql",
+        "dbt/domains/traffic_weather/tests/weather/quality/assert_quality_forecast_vintage_unique.sql",
+        "dbt/domains/traffic_weather/tests/weather/quality/assert_quality_grid_score_reconciles.sql",
+        "dbt/domains/traffic_weather/tests/weather/quality/assert_quality_hourly_reconciles.sql",
+        "dbt/domains/traffic_weather/tests/weather/quality/assert_quality_match_unique.sql",
+        "dbt/domains/traffic_weather/tests/weather/quality/assert_quality_observation_truth_complete_hours.sql",
+        "dbt/domains/traffic_weather/tests/weather/quality/assert_quality_observation_truth_unique.sql",
+        "dbt/domains/traffic_weather/tests/weather/test_weather_quality_model_contract.py",
+    }
+)
 #: 이 저장소가 직접 작성한 Airflow 소스. `dags/` 는 기본적으로 고정 스냅샷 전제라
 #: 자동 분류를 막지만, platform-boundaries.md 대로 Weather DAG 코드는 이 저장소가
 #: 소유하므로 새로 쓴 파일이 생긴다. 상류에서 가져온 코드가 조용히 local_authored 로
@@ -40,7 +64,31 @@ LOCAL_AIRFLOW_SOURCES = frozenset(
         "dags/domains/weather/weather_ingest/iceberg_maintenance.py",
         "dags/domains/weather/tests/test_weather_iceberg_maintenance.py",
         "dags/domains/weather/tests/test_weather_iceberg_maintenance_dag.py",
+        "dags/domains/weather/weather_forecast_quality_backfill.py",
+        "dags/domains/weather/weather_forecast_quality_daily.py",
+        "dags/domains/weather/weather_quality_publication.py",
+        "dags/domains/weather/weather_quality_runtime.py",
+        "dags/domains/weather/tests/test_weather_forecast_quality_dags.py",
+        "dags/domains/weather/tests/test_weather_quality_publication.py",
+        "dags/domains/weather/tests/test_weather_quality_runtime.py",
     }
+)
+DERIVED_AIRFLOW_OVERRIDES = frozenset(
+    {
+        "dags/common/assets.py",
+        "dags/common/pools.py",
+        "dags/common/tests/test_pools.py",
+        "dags/domains/weather/tests/test_weather_transform_dag.py",
+        "dags/domains/weather/weather_dbt_runtime.py",
+    }
+)
+_SOURCE_LINEAGE_FIELDS = (
+    "source_repo",
+    "source_ref",
+    "source_commit",
+    "source_path",
+    "source_blob_oid",
+    "source_content_sha256",
 )
 
 
@@ -67,7 +115,9 @@ def build_repository_record(target_path: str, checksum: str) -> dict[str, Any]:
         }
     if target.startswith("dags/") and target not in LOCAL_AIRFLOW_SOURCES:
         raise ValueError(f"Airflow source requires fixed snapshot provenance: {target}")
-    if target.startswith("dbt/") and target not in LOCAL_DBT_CONFIGS:
+    if target.startswith("dbt/") and target not in (
+        LOCAL_DBT_CONFIGS | LOCAL_DBT_SOURCES
+    ):
         raise ValueError(f"dbt source requires fixed snapshot provenance: {target}")
     return {
         "record_type": "local_authored",
@@ -77,6 +127,36 @@ def build_repository_record(target_path: str, checksum: str) -> dict[str, Any]:
         "reason": "Repository-owned implementation, test, or documentation.",
         "license_status": "repository_owned_private",
         "owner": OWNER,
+    }
+
+
+def build_derived_override_record(
+    target_path: str,
+    checksum: str,
+    *,
+    source_record: dict[str, Any],
+) -> dict[str, Any]:
+    target = _normalized(target_path)
+    if source_record.get("record_type") == "derived":
+        derived_from = source_record.get("derived_from")
+    else:
+        derived_from = {
+            field: source_record[field]
+            for field in _SOURCE_LINEAGE_FIELDS
+            if field in source_record
+        }
+    if not isinstance(derived_from, (dict, list)) or not derived_from:
+        raise ValueError(f"missing source lineage for derived Airflow override: {target}")
+    return {
+        "record_type": "derived",
+        "target_path": target,
+        "target_sha256": checksum,
+        "scope": "repository_owned",
+        "reason": "Repository-owned Weather adaptation of a fixed upstream snapshot.",
+        "license_status": "internal_private_snapshot_only",
+        "derived_from": derived_from,
+        "derivation": "Repository-owned Weather quality adaptation; see the reviewed git diff and focused tests.",
+        "validator": "python -m pytest dags/common/tests dags/domains/weather/tests tests/forecast_quality -q",
     }
 
 
@@ -99,7 +179,22 @@ def preserved_source_records(records: list[dict[str, Any]]) -> list[dict[str, An
 def rendered_manifest(repo_root: Path, manifest_path: Path) -> bytes:
     root = repo_root.resolve()
     existing = _read_records(manifest_path)
-    records = preserved_source_records(existing)
+    records: list[dict[str, Any]] = []
+    for record in preserved_source_records(existing):
+        target_path = record.get("target_path")
+        if target_path not in DERIVED_AIRFLOW_OVERRIDES:
+            records.append(record)
+            continue
+        if not isinstance(target_path, str):
+            raise ValueError("derived Airflow override must have a target path")
+        absolute = root / Path(target_path)
+        records.append(
+            build_derived_override_record(
+                target_path,
+                sha256_file(absolute),
+                source_record=record,
+            )
+        )
     recorded_targets = {
         _normalized(record["target_path"])
         for record in records

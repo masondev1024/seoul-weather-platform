@@ -9,6 +9,9 @@ from weather_ingest.iceberg_maintenance import (  # noqa: E402
     FIXED_RETENTION,
     MAINTAINED_TABLES,
     OPERATIONS,
+    QUALITY_FIXED_RETENTION,
+    QUALITY_OPTIMIZE_FILE_SIZE_THRESHOLD,
+    QUALITY_RETAIN_LAST,
     RETAIN_LAST,
     MaintainedTable,
     MaintenancePlanError,
@@ -64,6 +67,33 @@ def test_retention_is_seven_days_retain_one():
     assert RETAIN_LAST == 1
 
 
+def test_quality_tables_use_more_conservative_retention_and_small_file_optimize_threshold():
+    assert QUALITY_FIXED_RETENTION == "30d"
+    assert QUALITY_RETAIN_LAST == 7
+    assert QUALITY_OPTIMIZE_FILE_SIZE_THRESHOLD == "32MB"
+
+    table = MaintainedTable(
+        "weather",
+        "gold_weather_forecast_quality_daily_history",
+        retention_threshold=QUALITY_FIXED_RETENTION,
+        retain_last=QUALITY_RETAIN_LAST,
+        optimize_file_size_threshold=QUALITY_OPTIMIZE_FILE_SIZE_THRESHOLD,
+    )
+
+    assert operation_sql("iceberg", table, "optimize") == (
+        "ALTER TABLE iceberg.weather.gold_weather_forecast_quality_daily_history "
+        "EXECUTE optimize(file_size_threshold => '32MB')"
+    )
+    assert operation_sql("iceberg", table, "expire_snapshots") == (
+        "ALTER TABLE iceberg.weather.gold_weather_forecast_quality_daily_history "
+        "EXECUTE expire_snapshots(retention_threshold => '30d', retain_last => 7)"
+    )
+    assert operation_sql("iceberg", table, "remove_orphan_files") == (
+        "ALTER TABLE iceberg.weather.gold_weather_forecast_quality_daily_history "
+        "EXECUTE remove_orphan_files(retention_threshold => '30d')"
+    )
+
+
 def test_operation_sql_rejects_unknown_operation():
     table = MaintainedTable("weather", "silver_kma_vilage_fcst")
     with pytest.raises(MaintenancePlanError):
@@ -96,6 +126,33 @@ def test_maintained_tables_only_cover_fork_owned_schemas():
     # bronze 원천과 대표 gold 상품이 실제로 들어 있다.
     assert MaintainedTable("weather_traffic_bronze", "bronze_kma_vilage_fcst") in MAINTAINED_TABLES
     assert MaintainedTable("weather", "gold_weather_place_hourly_outlook") in MAINTAINED_TABLES
+
+
+def test_maintained_quality_tables_are_physical_only_and_exclude_views_d1_serving():
+    expected_names = {
+        "silver_kma_observation_truth",
+        "silver_weather_quality_forecast_vintage",
+        "silver_weather_forecast_observation_match",
+        "gold_weather_forecast_quality_grid_score_history",
+        "gold_weather_forecast_quality_hourly_history",
+        "gold_weather_forecast_quality_daily_history",
+        "weather_forecast_quality_publication_manifest",
+    }
+    quality_tables = {t.name: t for t in MAINTAINED_TABLES if t.name in expected_names}
+    assert set(quality_tables) == expected_names
+    assert "gold_weather_forecast_quality_grid_score" not in quality_tables
+    assert "gold_weather_forecast_quality_hourly" not in quality_tables
+    assert "gold_weather_forecast_quality_daily" not in quality_tables
+    assert all("d1" not in table.name for table in MAINTAINED_TABLES)
+    assert all(
+        not table.name.endswith("_serving") for table in quality_tables.values()
+    )
+    assert all(
+        table.retention_threshold == QUALITY_FIXED_RETENTION
+        and table.retain_last == QUALITY_RETAIN_LAST
+        and table.optimize_file_size_threshold == QUALITY_OPTIMIZE_FILE_SIZE_THRESHOLD
+        for table in quality_tables.values()
+    )
 
 
 def test_resolve_maintained_tables_keeps_canonical_order_and_rejects_unknown():

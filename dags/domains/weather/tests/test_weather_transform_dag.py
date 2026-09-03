@@ -74,7 +74,7 @@ def test_weather_transform_failure_callback_uses_current_attempt_artifact_xcom()
 def test_weather_transform_trino_tasks_do_not_inflate_pool_priority_from_chain():
     module = load_transform_module()
 
-    assert module.TRINO_WEATHER_LEGACY_HEAVY_POOL == "trino_weather_legacy_heavy"
+    assert module.TRINO_WEATHER_LEGACY_HEAVY_POOL == "trino_weather_heavy"
     for task_id in module.DBT_PHASE_TASK_IDS:
         task = module.dag.task_dict[task_id]
         if task_id == "dbt_deps":

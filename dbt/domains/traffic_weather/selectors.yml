@@ -34,6 +34,18 @@ selectors:
   - name: ask_seoul_weather_risk_query_availability_unit
     description: Weather risk query availability model에 연결된 deterministic unit fixtures만 선택한다.
     definition: {method: tag, value: ask_seoul_weather_risk_query_availability_unit, indirect_selection: cautious}
+  - name: ask_seoul_weather_quality_candidate
+    description: Weather forecast-quality candidate graph와 그 계약 test만 선택한다.
+    definition:
+      union:
+        - {method: tag, value: ask_seoul_weather_quality_candidate, indirect_selection: cautious}
+        - {method: tag, value: ask_seoul_weather_quality_contract, indirect_selection: empty}
+  - name: ask_seoul_weather_quality_published
+    description: Weather forecast-quality publication manifest graph와 그 계약 test만 선택한다.
+    definition:
+      union:
+        - {method: tag, value: ask_seoul_weather_quality_published, indirect_selection: cautious}
+        - {method: tag, value: ask_seoul_weather_quality_contract, indirect_selection: empty}
   - name: ask_seoul_weather_serving_snapshot_refresh
     description: KST 매시 공개 Weather 장소 상품만 다시 계산하고 직접 serving 계약을 검증한다.
     definition:

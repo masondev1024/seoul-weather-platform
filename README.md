@@ -35,6 +35,8 @@ Weather Platform public product는 4개다.
 
 현재 설치되는 `seoul-weather-risk` K-Skill은 `weather_place_risk_window` 하나만 사용자에게 노출한다. K-Skill runtime의 정본은 이 저장소가 아니라 upstream `NomaDamas/k-skill`이다.
 
+내부 분석 제품인 Weather Forecast-Quality Gold는 기존 공개 제품과 별도다. 저장된 Forecast/Observation Bronze로 D-1/D-2/D-3 예측 정확도를 재현 가능하게 계산하며 D1, Worker, 공개 serving 경로를 바꾸지 않는다. [아키텍처](docs/architecture/forecast-quality-gold.md)와 [운영 runbook](docs/runbooks/WEATHER_FORECAST_QUALITY_RUNBOOK.md)을 따른다.
+
 ## 고정 원본
 
 source snapshot은 working tree가 아니라 다음 commit에서만 가져온다.

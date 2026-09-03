@@ -142,6 +142,13 @@ def test_runtime_check_rejects_missing_or_unexpected_dag_ids() -> None:
     ]
 
 
+def test_runtime_check_inventory_includes_paused_quality_gold_dags() -> None:
+    assert {
+        "weather_forecast_quality_backfill",
+        "weather_forecast_quality_daily",
+    } <= EXPECTED_DAG_IDS
+
+
 def test_powershell_wrapper_has_no_pipeline_control_words() -> None:
     wrapper = (REPOSITORY_ROOT / "tools" / "verify_dagbag.ps1").read_text(encoding="utf-8")
     lowered = wrapper.lower()

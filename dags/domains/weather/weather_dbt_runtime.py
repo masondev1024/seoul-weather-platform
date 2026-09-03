@@ -9,6 +9,7 @@ KST serving anchor; individual DAG modules still own topology and callbacks.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from collections.abc import Callable, Mapping
@@ -29,6 +30,26 @@ SERVING_AS_OF_HOUR_TASK_ID = "resolve_weather_serving_as_of_hour"
 
 KST = ZoneInfo("Asia/Seoul")
 _SERVING_AS_OF_HOUR_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:00:00$")
+
+
+def _validated_extra_mapping(
+    values: Mapping[str, Any] | None,
+    *,
+    allowed_names: set[str] | frozenset[str] | None,
+    label: str,
+) -> dict[str, str]:
+    if not values:
+        return {}
+    if allowed_names is None:
+        raise ValueError(f"weather dbt {label} injection requires an allowlist")
+    validated: dict[str, str] = {}
+    for key, value in values.items():
+        if key not in allowed_names:
+            raise ValueError(f"weather dbt {label} is not allowlisted: {key}")
+        if not isinstance(value, str):
+            raise ValueError(f"weather dbt {label} values must be strings")
+        validated[key] = value
+    return validated
 
 
 def resolve_weather_serving_as_of_hour(
@@ -99,6 +120,11 @@ def run_weather_dbt_phase(
     runner: Callable[..., Any],
     pipeline: str,
     failure_exception: Callable[[bool, str], Exception],
+    extra_project_vars: Mapping[str, Any] | None = None,
+    allowed_extra_project_var_names: set[str] | frozenset[str] | None = None,
+    extra_env: Mapping[str, Any] | None = None,
+    allowed_extra_env_names: set[str] | frozenset[str] | None = None,
+    expected_extra_env_values: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Run one dbt task with a stable serving time boundary and isolated artifacts."""
 
@@ -110,6 +136,23 @@ def run_weather_dbt_phase(
         ti.xcom_pull(task_ids=snapshot_task_id) if snapshot_task_id else None
     )
     serving_as_of_hour = _serving_as_of_hour_from_task(ti, serving_as_of_task_id)
+    validated_extra_vars = _validated_extra_mapping(
+        extra_project_vars,
+        allowed_names=allowed_extra_project_var_names,
+        label="project variable",
+    )
+    validated_extra_env = _validated_extra_mapping(
+        extra_env,
+        allowed_names=allowed_extra_env_names,
+        label="environment variable",
+    )
+    if expected_extra_env_values:
+        for key, expected_value in expected_extra_env_values.items():
+            if validated_extra_env.get(key) != expected_value:
+                raise ValueError(
+                    "weather dbt environment variable has an unsupported value: "
+                    f"{key}"
+                )
     run_results_path = None
     try:
         variables: dict[str, object] = dict(WEATHER_DBT_CONTRACT_VARS)
@@ -117,6 +160,9 @@ def run_weather_dbt_phase(
             variables[WEATHER_SNAPSHOT_VAR] = snapshot_run_id
         if serving_as_of_hour is not None:
             variables[WEATHER_SERVING_AS_OF_HOUR_VAR] = serving_as_of_hour
+        variables.update(validated_extra_vars)
+        environ = os.environ.copy()
+        environ.update(validated_extra_env)
         execution = dbt_executor.execute_dbt_phase(
             dbt_command=dbt_command,
             selector=selector,
@@ -135,6 +181,7 @@ def run_weather_dbt_phase(
             project_dir=dbt_project,
             executable=dbt_bin,
             runner=runner,
+            environ=environ if validated_extra_env else None,
         )
         run_results_path = execution.existing_run_results_path
     finally:

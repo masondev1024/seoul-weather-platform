@@ -31,6 +31,9 @@ DEFAULT_CATALOG = "iceberg"
 # (상류와 동일). 이 두 값은 데이터 파괴 범위를 정하므로 상수로 고정한다.
 FIXED_RETENTION = "7d"
 RETAIN_LAST = 1
+QUALITY_FIXED_RETENTION = "30d"
+QUALITY_RETAIN_LAST = 7
+QUALITY_OPTIMIZE_FILE_SIZE_THRESHOLD = "32MB"
 
 # 반드시 이 순서로 실행한다. optimize 로 작은 파일을 합친 뒤 스냅샷을 만료하고,
 # 그 다음에야 어느 스냅샷도 참조하지 않는 orphan 파일을 지운다. 순서가 바뀌면
@@ -46,6 +49,9 @@ class MaintainedTable:
 
     schema: str
     name: str
+    retention_threshold: str = FIXED_RETENTION
+    retain_last: int = RETAIN_LAST
+    optimize_file_size_threshold: str | None = None
 
     @property
     def label(self) -> str:
@@ -56,6 +62,17 @@ class MaintainedTable:
 # 테이블은 이 fork 소관이 아니므로 제외한다.
 BRONZE_SCHEMA = "weather_traffic_bronze"
 MEDALLION_SCHEMA = "weather"
+
+
+def _quality_table(name: str) -> MaintainedTable:
+    return MaintainedTable(
+        MEDALLION_SCHEMA,
+        name,
+        retention_threshold=QUALITY_FIXED_RETENTION,
+        retain_last=QUALITY_RETAIN_LAST,
+        optimize_file_size_threshold=QUALITY_OPTIMIZE_FILE_SIZE_THRESHOLD,
+    )
+
 
 MAINTAINED_TABLES: tuple[MaintainedTable, ...] = (
     # Bronze: 매 수집 사이클 append.
@@ -82,6 +99,16 @@ MAINTAINED_TABLES: tuple[MaintainedTable, ...] = (
     MaintainedTable(MEDALLION_SCHEMA, "gold_weather_grid_current_outlook"),
     MaintainedTable(MEDALLION_SCHEMA, "gold_weather_grid_hourly_outlook"),
     MaintainedTable(MEDALLION_SCHEMA, "gold_weather_grid_precipitation_window"),
+    # Forecast-quality physical tables only: Silver candidates, Gold history,
+    # and the publication manifest. Published quality views and D1 copies are
+    # deliberately excluded from Iceberg physical-table maintenance ownership.
+    _quality_table("silver_kma_observation_truth"),
+    _quality_table("silver_weather_quality_forecast_vintage"),
+    _quality_table("silver_weather_forecast_observation_match"),
+    _quality_table("gold_weather_forecast_quality_grid_score_history"),
+    _quality_table("gold_weather_forecast_quality_hourly_history"),
+    _quality_table("gold_weather_forecast_quality_daily_history"),
+    _quality_table("weather_forecast_quality_publication_manifest"),
 )
 
 
@@ -100,6 +127,20 @@ def maintenance_catalog(environ: "os._Environ[str] | dict[str, str] | None" = No
 def _safe_identifier(value: str, *, kind: str) -> str:
     if not _IDENTIFIER.match(value):
         raise MaintenancePlanError(f"unsafe maintenance {kind} identifier: {value!r}")
+    return value
+
+
+def _safe_retention(value: str, *, kind: str) -> str:
+    if not re.fullmatch(r"^[1-9][0-9]*[dhm]$", value):
+        raise MaintenancePlanError(f"unsafe maintenance {kind}: {value!r}")
+    return value
+
+
+def _safe_file_size_threshold(value: str) -> str:
+    if not re.fullmatch(r"^[1-9][0-9]*(KB|MB|GB)$", value):
+        raise MaintenancePlanError(
+            f"unsafe maintenance optimize file size threshold: {value!r}"
+        )
     return value
 
 
@@ -139,14 +180,24 @@ def operation_sql(catalog: str, table: MaintainedTable, operation: str) -> str:
         raise MaintenancePlanError(f"unknown maintenance operation: {operation!r}")
     qualified = qualified_name(catalog, table)
     if operation == "optimize":
-        command = "optimize"
+        if table.optimize_file_size_threshold is None:
+            command = "optimize"
+        else:
+            threshold = _safe_file_size_threshold(table.optimize_file_size_threshold)
+            command = f"optimize(file_size_threshold => '{threshold}')"
     elif operation == "expire_snapshots":
+        retention = _safe_retention(table.retention_threshold, kind="retention")
+        if table.retain_last < 1:
+            raise MaintenancePlanError(
+                f"unsafe maintenance retain_last: {table.retain_last!r}"
+            )
         command = (
-            f"expire_snapshots(retention_threshold => '{FIXED_RETENTION}', "
-            f"retain_last => {RETAIN_LAST})"
+            f"expire_snapshots(retention_threshold => '{retention}', "
+            f"retain_last => {table.retain_last})"
         )
     else:  # remove_orphan_files
-        command = f"remove_orphan_files(retention_threshold => '{FIXED_RETENTION}')"
+        retention = _safe_retention(table.retention_threshold, kind="retention")
+        command = f"remove_orphan_files(retention_threshold => '{retention}')"
     return f"ALTER TABLE {qualified} EXECUTE {command}"
 
 
