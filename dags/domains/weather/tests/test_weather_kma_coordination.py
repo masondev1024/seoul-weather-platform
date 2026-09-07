@@ -42,6 +42,12 @@ def test_disabled_rollout_preserves_existing_runtime(monkeypatch, value):
         module.weather_heavy_pool("trino_weather_legacy_heavy")
         == "trino_weather_legacy_heavy"
     )
+    assert module.weather_heavy_pool_kwargs(
+        "trino_weather_legacy_heavy", pool_slots=2
+    ) == {
+        "pool": "trino_weather_legacy_heavy",
+        "pool_slots": 1,
+    }
 
 
 @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
@@ -60,6 +66,18 @@ def test_enabled_rollout_serializes_api_and_weather_work(monkeypatch, value):
         module.weather_heavy_pool("trino_weather_legacy_heavy")
         == "trino_weather_heavy"
     )
+    assert module.weather_heavy_pool_kwargs(
+        "trino_weather_legacy_heavy", pool_slots=1
+    ) == {
+        "pool": "trino_weather_heavy",
+        "pool_slots": 1,
+    }
+    assert module.weather_heavy_pool_kwargs(
+        "trino_weather_legacy_heavy", pool_slots=2
+    ) == {
+        "pool": "trino_weather_heavy",
+        "pool_slots": 2,
+    }
 
 
 def test_invalid_rollout_flag_fails_closed(monkeypatch):

@@ -20,6 +20,8 @@ dag = build_serving_export_dag(
         "weather_place_forecast_change_daily",
     ],
     exact_domain_contracts=True,
+    # Mid-term outlook has an independent publisher; keep this DAG's four-product scope explicit.
+    partitioned_domain_scope=True,
     require_public_projection=True,
     verify_content_parity=True,
     # Only the terminal marker runs after Gold write and contract test success.

@@ -12,6 +12,12 @@ TRINO_TRAFFIC_INGEST_POOL: Final = "trino_traffic_ingest"
 TRINO_TRAFFIC_TRANSFORM_POOL: Final = "trino_traffic_transform"
 TRINO_TRANSIT_HEAVY_POOL: Final = "trino_transit_heavy"
 TRINO_WEATHER_HEAVY_POOL: Final = "trino_weather_heavy"
+# The local Weather lane has two slots so the transform DAG can execute its
+# independent place/grid branches concurrently.  Tasks that replace a shared
+# table (snapshot, reference refresh, ingest, maintenance) request both slots
+# through ``weather_heavy_pool_kwargs(..., pool_slots=2)`` and therefore remain
+# exclusive.
+TRINO_WEATHER_HEAVY_POOL_SLOTS: Final = 2
 # Compatibility fallback for the explicitly disabled shared-guard rollout.
 # The active personal runtime enables the guard and maps Weather transforms to
 # TRINO_WEATHER_HEAVY_POOL; keep the historical pool registered so a deliberate
@@ -62,8 +68,8 @@ TRINO_POOL_SPECS: Final = (
     ),
     AirflowPoolSpec(
         TRINO_WEATHER_HEAVY_POOL,
-        1,
-        "Serialize Weather Trino writes and recovery",
+        TRINO_WEATHER_HEAVY_POOL_SLOTS,
+        "Two-slot Weather Trino lane; exclusive writers request both slots",
         False,
     ),
     AirflowPoolSpec(
@@ -126,6 +132,7 @@ __all__ = [
     "TRINO_TRAFFIC_TRANSFORM_POOL",
     "TRINO_TRANSIT_HEAVY_POOL",
     "TRINO_WEATHER_HEAVY_POOL",
+    "TRINO_WEATHER_HEAVY_POOL_SLOTS",
     "TRINO_WEATHER_LEGACY_HEAVY_POOL",
     "TRINO_WEATHER_RECOVERY_HEAVY_POOL",
     "SERVING_D1_PUBLISH_POOL",

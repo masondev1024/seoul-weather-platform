@@ -39,6 +39,7 @@ from common.runtime_guard import (  # noqa: E402
     validate_dev_runtime,
 )
 from weather_ingest.common.resources import DbtWorkload, TRINO_HEAVY_POOL  # noqa: E402
+from weather_ingest.kma_coordination import weather_heavy_pool_kwargs  # noqa: E402
 from weather_ingest.runtime import build_weather_manifest  # noqa: E402
 from weather_ingest.w2_canonical_runtime import (  # noqa: E402
     AdminDongCrosswalkSnapshotUnavailableError,
@@ -404,7 +405,12 @@ def dbt_task(spec: DbtPhaseSpec) -> PythonOperator:
         "on_failure_callback": record_weather_problem,
     }
     if spec.workload is DbtWorkload.TRINO:
-        operator_kwargs["pool"] = TRINO_HEAVY_POOL
+        # W2 is a separate writer but still competes for the same local Trino
+        # heap.  Keep it behind the exclusive two-slot Weather lock so it
+        # cannot consume one branch slot during the hourly transform.
+        operator_kwargs.update(
+            weather_heavy_pool_kwargs(TRINO_HEAVY_POOL, pool_slots=2)
+        )
     if spec.task_id == DBT_PHASE_TASK_IDS[-1]:
         operator_kwargs["on_success_callback"] = record_weather_gold_product_event
         operator_kwargs["on_failure_callback"] = [

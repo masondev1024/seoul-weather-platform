@@ -3,7 +3,7 @@
     {
       "name": "global",
       "softMemoryLimit": "80%",
-      "hardConcurrencyLimit": 1,
+      "hardConcurrencyLimit": 2,
       "maxQueued": 10,
       "schedulingPolicy": "fair",
       "jmxExport": true

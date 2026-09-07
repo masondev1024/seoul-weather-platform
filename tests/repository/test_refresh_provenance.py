@@ -5,6 +5,7 @@ from tools.refresh_provenance import (
     HOST_TEST_PORTABILITY_ADAPTATIONS,
     KMA_OBSERVATION_ADAPTATIONS,
     MAC_CUTOVER_ADAPTATION_VALIDATORS,
+    MAC_CONCURRENCY_ADAPTATIONS,
     RETIRED_HANDOFF_PATHS,
     build_handoff_overlay_record,
     build_mac_cutover_adaptation_record,
@@ -203,8 +204,37 @@ def test_mac_cutover_adaptation_preserves_the_fixed_upstream_source() -> None:
 
 
 def test_mac_cutover_adaptation_allowlist_is_explicit_and_secret_free() -> None:
-    assert len(MAC_CUTOVER_ADAPTATION_VALIDATORS) == 16
+    assert len(MAC_CUTOVER_ADAPTATION_VALIDATORS) == 17
     assert "weather-platform.prod.env" not in MAC_CUTOVER_ADAPTATION_VALIDATORS
+
+
+def test_w2_canonical_transform_is_recorded_as_a_concurrency_adaptation() -> None:
+    target = "dags/domains/weather/weather_w2_canonical_transform.py"
+    assert target in MAC_CONCURRENCY_ADAPTATIONS
+    source_record = {
+        "record_type": "snapshot_copy",
+        "target_path": target,
+        "target_sha256": "a" * 64,
+        "source_repo": "ASAC-DE-bigkk/ASAC-DAG",
+        "source_commit": "b" * 40,
+        "source_ref": "origin/dev",
+        "source_path": "domains/weather/weather_w2_canonical_transform.py",
+        "source_blob_oid": "c" * 40,
+        "source_content_sha256": "d" * 64,
+        "scope": "airflow_weather_entrypoint",
+        "reason": "Weather canonical transform",
+        "license_status": AUTHORIZED_LICENSE_STATUS,
+    }
+
+    record = build_mac_cutover_adaptation_record(
+        target,
+        target_checksum="e" * 64,
+        source_record=source_record,
+    )
+
+    assert record["scope"] == "weather_mac_concurrency_optimization"
+    assert "exclusive two-slot" in record["derivation"]
+    assert record["validator"] == MAC_CUTOVER_ADAPTATION_VALIDATORS[target]
 
 
 def test_kma_observation_adaptations_preserve_inherited_source_lineage() -> None:

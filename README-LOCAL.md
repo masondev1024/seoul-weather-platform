@@ -73,4 +73,5 @@ canary 검증, 별도 활성화 승인을 거친 뒤 이 DAG만 개별적으로 
 전체 core stack이 Docker 메모리의 80%를 넘으면 DAG를 활성화하지 않는다.
 
 저장소 검증만으로는 Airflow 이미지 build, 서비스 재시작, DAG 활성화·트리거, R2/D1
-write를 허용하지 않는다. `AGENTS.md`의 배포 사전 보고와 사용자 승인을 먼저 거친다.
+write를 허용하지 않는다. `docs/operations/airflow-deployment-approval.md`의 배포
+사전 보고와 운영 승인을 먼저 거친다.
