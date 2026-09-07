@@ -1,21 +1,24 @@
 # Seoul Weather Platform
 
-Forecast-vintage versus observation-truth evaluation is specified in
-[`docs/architecture/weather-forecast-quality.md`](docs/architecture/weather-forecast-quality.md).
-Its checked-in 80-grid fixture is synthetic contract evidence, not a claim about
-current Seoul forecast accuracy.
+기상청 예보를 수집하고 R2·Iceberg에 적재한 뒤, dbt로 변환해 D1과 Weather Risk K-Skill에 연결하는 데이터 플랫폼이다. ASK Seoul 팀 프로젝트에서 분리한 Weather 코드에 복구 계획, 예보 품질 평가와 공간 데이터 제품을 추가했다.
 
-The primary observation-truth adapter is documented in
-[`docs/architecture/kma-observation-truth.md`](docs/architecture/kma-observation-truth.md).
-`getUltraSrtNcst` source parsing, shared physical-attempt budget, bounded retry,
-immutable 80-grid Raw landing, dedicated Iceberg Bronze, and a paused-by-default
-Airflow DAG are implemented locally. The public Compose defaults still set the
-rollout guard to `false` and the schedule to empty, so this code has not started
-collection or written observation data to R2, Iceberg, D1, or the Worker.
+주요 기술: Python, SQL, Airflow, dbt, Trino, Apache Iceberg, Cloudflare R2·D1·Workers, GitHub Actions.
 
-Weather 수집, dbt 변환, D1 publication, Weather Risk K-Skill 연결 코드를 한 저장소에서 관리하는 공개 개인 데이터 플랫폼이다.
+운영 환경은 개인 로컬 노트북과 개인 Cloudflare 계정에서 관리한다. 자격증명, Airflow metadata, Docker volume과 실행 로그는 저장소에 포함하지 않는다.
 
-코드는 public이지만 운영 plane은 개인 로컬 노트북과 개인 Cloudflare 계정에 남는다. 자격증명, Airflow metadata, Docker volume과 실행 로그는 저장소에 포함하지 않는다.
+## 구현 내용과 검증 기록
+
+- **팀 코드의 출처**: [고정 원본](provenance/source-refs.lock.json), [파일별 이관·변경 이력](provenance/source-files.jsonl), [NOTICE](NOTICE)로 이관한 팀 코드와 개인 후속 변경을 구분한다.
+- **장애 복구 계획**: [복구 판단 로직](dags/common/recovery/planner.py)은 수집 결과를 기준으로 Raw 재처리·재수집·보류·차단을 구분하고 작업 수와 복구 기간을 제한한다. [Coordinator DAG](dags/domains/weather/weather_recovery_coordinator.py)는 기본 정지 상태이며, 계획만 생성하고 재처리를 직접 실행하지 않는다.
+- **예보 품질 평가**: [품질 설계](docs/architecture/weather-forecast-quality.md)와 [Gold 구조](docs/architecture/forecast-quality-gold.md)에 예보 시점과 실황 기준, D-1·D-2·D-3 비교, 커버리지와 품질 지표 계산을 정리했다. [리포트 도구](tools/forecast_quality_report.py)와 [운영 절차](docs/runbooks/WEATHER_FORECAST_QUALITY_RUNBOOK.md)에서 결과 확인과 재처리 기준을 확인할 수 있다.
+- **공간 데이터 제품**: [장소·격자 조인](tools/spatial_quality_product.py)은 기존 매핑과 격자별 품질 결과를 연결하고, 지표가 없는 장소를 `NO_METRICS`로 남긴다. [설계](docs/architecture/forecast-quality-spatial-product.md)와 [테스트](tests/forecast_quality/test_spatial_product.py)를 함께 관리한다.
+- **운영 판단과 장애 기록**: [운영 경계](docs/architecture/platform-boundaries.md), [설계 판단과 근거](docs/data-engineering-decision.md), [장애 기록](docs/lessonrun.md)에 의존 관계와 복구 기준을 정리했다.
+
+검증용 80개 격자 fixture는 합성 데이터다. 테스트 통과가 실제 서울 예보 정확도, 현재 배포 상태나 데이터 신선도를 뜻하지는 않는다. 품질 평가 대상인 80개 격자와 K-Skill 호환용 427개 장소도 서로 다른 기준이다.
+
+[기상청 실황 수집 설계](docs/architecture/kma-observation-truth.md)를 바탕으로 `getUltraSrtNcst` 파싱, 호출 횟수 제한, 제한된 재시도, 변경 불가능한 Raw 적재와 전용 Iceberg Bronze를 구현했다.
+
+설정 예제와 로컬 운영 설정은 다르다. `.env.example`은 공유 호출 제한 설정이 `false`이고 관측 수집 스케줄이 비어 있지만, [`docker-compose.local.yml`](docker-compose.local.yml)은 공유 호출 제한을 켜고 매시 45분(`45 * * * *`) 스케줄을 정의한다. DAG의 기본 정지는 최초 생성 시에만 적용되며 기존 DAG의 활성 상태를 바꾸지 않는다. 초기 설계 문서의 비활성 기본값과 현재 로컬 설정을 혼동하지 않아야 한다. 실제 수집·적재, 재처리와 DAG 상태 변경은 아래 Airflow 배포 승인 절차를 별도로 따른다.
 
 ## 현재 경계
 
@@ -82,7 +85,8 @@ Airflow, Docker, 기존 파이프라인을 건드리지 않는 기본 검증:
 python -m tools.repository_policy --repo-root <repository>
 python -m tools.verify_provenance --repo-root <repository>
 python -m tools.refresh_provenance --repo-root <repository> --check
-python -m pytest tests/repository
+python -m tools.workflow_policy --repo-root <repository>
+python -m pytest tests/repository tests/deploy
 ```
 
 개별 확인이 필요하면:
@@ -93,6 +97,7 @@ python -m pytest dbt\serving_contract\tests -q
 python -m pytest dags\common\serving\tests -q
 python -m pytest dags\domains\weather\tests -q
 python -m pytest dbt\domains\traffic_weather\tests\weather -q
+python -m pytest tests\forecast_quality -q
 cd k-skill-proxy && npm test
 ```
 
@@ -156,5 +161,7 @@ python dbt/serving_contract/validate_serving_contract.py --source dbt/domains/tr
 - `docs/lessonrun.md` — 실제 장애를 data flow와 contract 관점에서 복기한 lesson run
 
 ## Git 주의
+
+기능·문서 변경은 `feat/` 브랜치에서 `dev` 대상 PR로 반영하고, 검증된 `dev`를 별도 PR로 `main`에 반영한다. 필수 CI를 통과한 뒤 병합하며 브랜치 보호 규칙을 우회하지 않는다. `dev`는 선형 이력을 유지하므로 동기화 완료 여부는 커밋 번호가 아니라 `git diff origin/main origin/dev`로 파일 내용까지 확인한다.
 
 아직 사용자 승인 전이면 stage, commit, push, PR을 수행하지 않는다. stage가 필요할 때도 `git add .` 또는 `git add -A`를 쓰지 않고 경로 지정 stage만 사용한다.
