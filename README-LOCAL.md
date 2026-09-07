@@ -26,7 +26,7 @@ ASK_SEOUL_PROD_ENV_FILE=.env.example docker compose \
 
 ## 로컬에서 처음 실행
 
-Docker Desktop을 실행한 뒤, 압축을 푼 폴더에서 아래 명령을 실행한다.
+아래 명령은 이미지 빌드와 서비스를 가동하므로 운영 승인을 받은 뒤에만 실행한다. Docker Desktop을 실행한 뒤 저장소 루트에서 진행한다.
 
 ```bash
 export ASK_SEOUL_PROD_ENV_FILE="$PWD/weather-platform.prod.env"
@@ -50,15 +50,17 @@ docker compose \
   ps
 ```
 
-처음에는 새 Airflow 메타데이터 DB가 생성되므로 DAG는 pause 상태로 시작한다. 개인 R2/D1 대상이 맞는지 확인한 뒤 Weather DAG family만 unpause한다. Traffic DAG는 건드리지 않는다.
+새 Airflow 메타데이터 DB에서는 DAG를 정지 상태로 생성한다. 개인 R2/D1 대상과 실행 중인 작업을 확인한 뒤 승인된 Weather DAG만 개별적으로 활성화한다. 기존 메타데이터를 사용하면 이전 활성 상태가 유지될 수 있으며, 다른 도메인의 DAG는 변경하지 않는다.
 
-시간별 실황 DAG `weather_ultra_srt_ncst_bronze`는 다른 기존 Weather DAG와
-달리 코드가 있어도 기본 schedule이 없고, 로컬 override도
-`ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED=false` 및 빈 observation schedule을
-강제한다. 따라서 전체 Weather DAG를 일괄 unpause하지 않는다. 공유 SQLite
-physical-attempt ledger 초기화, `kma_api_requests` 1-slot pool 확인, 수동 80-grid
-canary 검증, 별도 활성화 승인을 거친 뒤 이 DAG만 개별적으로 활성화한다. 정확한
-순서는 `docs/operations/kma-observation-predeployment-plan.md`를 따른다.
+시간별 실황 DAG `weather_ultra_srt_ncst_bronze`의 설정 예제는 공유 호출 제한이
+꺼져 있고 스케줄이 비어 있지만, 현재 `docker-compose.local.yml`은
+`ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED=true`와 매시 45분 스케줄
+`ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE="45 * * * *"`를 정의한다.
+스케줄 정의와 실제 DAG 활성 상태는 다르므로 전체 Weather DAG를 일괄 활성화하지 않는다.
+공유 SQLite 호출 기록 초기화, `kma_api_requests` 1-slot pool 확인, 80개 격자의
+제한된 수집 검증과 별도 승인을 거친다. 초기 활성화 절차는
+`docs/operations/kma-observation-predeployment-plan.md`를 참고하되 현재 설정은
+`docker-compose.local.yml`과 `tools/local_runtime_contract.py`를 기준으로 확인한다.
 
 다른 호스트의 Docker named volume, Trino cache, Postgres 메타데이터, Airflow 로그는 이관하지 않는다. 새 호스트에서는 새 volume으로 시작하며, R2·Iceberg·D1의 운영 데이터는 환경 파일이 가리키는 개인 Cloudflare 저장소를 그대로 사용한다.
 
@@ -68,7 +70,10 @@ canary 검증, 별도 활성화 승인을 거친 뒤 이 DAG만 개별적으로 
 프로젝트명 `seoul-weather-platform-mac`과 네트워크명 `seoul-weather-platform-mac-net`은
 현재 컨테이너와 named volume의 상태 호환성을 위해 유지한다. 이 내부 식별자 변경은 별도의
 상태 마이그레이션으로 진행해야 한다. Trino는 5GiB
-컨테이너, 약 2.75GiB JVM heap, 쿼리 1개 동시 실행, 대기열 10개로 제한한다. 최초
+컨테이너, 쿼리 2개 동시 실행, 대기열 10개로 제한한다. 현재 Weather 작업 풀은
+2개 슬롯이며, 일반 변환 분기는 1개 슬롯을 사용하고 다른 쓰기 작업과 겹치면 안 되는
+작업은 2개 슬롯을 요청한다. 메모리와 동시 실행 수의 현재 기준은
+`docker-compose.local.yml`, `trino/resource-groups.json`, `dags/common/pools.py`다. 최초
 기동 후에는 idle 메모리 3회와 작은 read-only 쿼리를 측정하고, Trino가 5GiB의 65% 또는
 전체 core stack이 Docker 메모리의 80%를 넘으면 DAG를 활성화하지 않는다.
 
