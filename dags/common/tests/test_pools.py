@@ -38,8 +38,8 @@ EXPECTED_POOL_IMPORT_PAYLOAD = {
         "include_deferred": False,
     },
     "trino_weather_heavy": {
-        "slots": 1,
-        "description": "Serialize Weather Trino writes and recovery",
+        "slots": 2,
+        "description": "Two-slot Weather Trino lane; exclusive writers request both slots",
         "include_deferred": False,
     },
     "trino_weather_legacy_heavy": {

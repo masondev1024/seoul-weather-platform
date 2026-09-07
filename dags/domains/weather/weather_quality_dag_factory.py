@@ -28,7 +28,7 @@ from common.assets import WEATHER_FORECAST_QUALITY_READY_ASSET
 from common.errors.airflow import problem_failure_callback
 from common.pools import TRINO_WEATHER_LEGACY_HEAVY_POOL
 from common.runtime_guard import TARGET_CHOICES, default_target, validate_dev_runtime
-from weather_ingest.kma_coordination import weather_heavy_pool
+from weather_ingest.kma_coordination import weather_heavy_pool_kwargs
 import weather_dbt_execution as weather_dbt
 from weather_dbt_runtime import DBT_RETRY_DELAY, DOMAIN, run_weather_dbt_phase
 from weather_quality_publication import publish_quality_success, quality_catalog
@@ -177,6 +177,14 @@ def _quality_dbt_task(
     include_quality_vars: bool,
     record_failure: Any,
 ) -> PythonOperator:
+    pool_kwargs = (
+        weather_heavy_pool_kwargs(
+            TRINO_WEATHER_LEGACY_HEAVY_POOL,
+            pool_slots=2,
+        )
+        if task_id != "dbt_deps"
+        else {}
+    )
     return PythonOperator(
         task_id=task_id,
         python_callable=run_quality_dbt_phase,
@@ -185,11 +193,10 @@ def _quality_dbt_task(
             "selector": selector,
             "include_quality_vars": include_quality_vars,
         },
-        pool=(
-            weather_heavy_pool(TRINO_WEATHER_LEGACY_HEAVY_POOL)
-            if task_id != "dbt_deps"
-            else None
-        ),
+        # Quality publication is intentionally off by default, but if enabled
+        # it must not consume one of the transform branch slots while writing
+        # its own candidate/manifest tables.
+        **pool_kwargs,
         weight_rule="absolute",
         priority_weight=QUALITY_PRIORITY_WEIGHT,
         retries=1,
@@ -260,7 +267,10 @@ def build_quality_dag(*, dag_id: str, backfill: bool) -> DAG:
         publish_manifest = PythonOperator(
             task_id="publish_quality_manifest",
             python_callable=publish_quality_manifest,
-            pool=weather_heavy_pool(TRINO_WEATHER_LEGACY_HEAVY_POOL),
+            **weather_heavy_pool_kwargs(
+                TRINO_WEATHER_LEGACY_HEAVY_POOL,
+                pool_slots=2,
+            ),
             weight_rule="absolute",
             priority_weight=QUALITY_PRIORITY_WEIGHT,
             retries=0,

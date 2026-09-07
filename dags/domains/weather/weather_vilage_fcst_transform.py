@@ -47,7 +47,9 @@ from common.runtime_guard import (  # noqa: E402
     validate_dev_runtime,
 )
 from weather_ingest.common.resources import DbtWorkload  # noqa: E402
-from weather_ingest.kma_coordination import weather_heavy_pool  # noqa: E402
+from weather_ingest.kma_coordination import (  # noqa: E402
+    weather_heavy_pool_kwargs,
+)
 from weather_ingest.runtime import build_weather_manifest  # noqa: E402
 import weather_dbt_execution as weather_dbt  # noqa: E402
 from weather_dbt_runtime import (  # noqa: E402
@@ -76,14 +78,12 @@ WEATHER_SNAPSHOT_VAR = "weather_snapshot_dag_run_id"
 WEATHER_GOLD_PUBLICATION_READY_ASSET_REF = Asset(
     WEATHER_GOLD_PUBLICATION_READY_ASSET
 )
-# Dedicated lane (#512): this DAG's own transform chain used to share
-# trino_weather_heavy with weather_w2_canonical_transform and
-# weather_vilage_fcst_bronze, so a single run (observed ~50min) starved both
-# of the shared pool. #480's atomic swap + snapshot pin already makes the
-# shared admin_dong axis safe to read concurrently, so this DAG no longer
-# needs to serialize behind canonical/bronze — only against itself
-# (max_active_runs=1 plus this pool's own single slot keep its internal
-# step order intact, same as before).
+# The canonical Weather lane has two slots.  The place and 80-grid marts are
+# independent after Silver validation, so each branch takes one slot and can
+# run together.  Writers from other workflows request both slots as an
+# exclusive lock; this prevents a serving snapshot/table rename from racing
+# with a transform branch while still allowing the expensive branches to
+# overlap safely.
 
 
 @dataclass(frozen=True)
@@ -94,6 +94,7 @@ class DbtPhaseSpec:
     include_project_vars: bool = True
     workload: DbtWorkload = DbtWorkload.TRINO
     threads: int | None = 2
+    pool_slots: int = 1
 
 
 DBT_PHASE_SPECS = (
@@ -407,8 +408,11 @@ def dbt_task(spec: DbtPhaseSpec) -> PythonOperator:
         "on_failure_callback": record_weather_problem,
     }
     if spec.workload is DbtWorkload.TRINO:
-        operator_kwargs["pool"] = weather_heavy_pool(
-            TRINO_WEATHER_LEGACY_HEAVY_POOL
+        operator_kwargs.update(
+            weather_heavy_pool_kwargs(
+                TRINO_WEATHER_LEGACY_HEAVY_POOL,
+                pool_slots=spec.pool_slots,
+            )
         )
     return PythonOperator(**operator_kwargs)
 
@@ -509,6 +513,10 @@ with DAG(
     schedule=transform_schedule(),
     catchup=False,
     max_active_runs=1,
+    # The normal path is expected to complete in 10–20 minutes after the
+    # branch/concurrency change.  A 30-minute cap prevents a stuck transform
+    # from accumulating hourly asset-triggered backlog indefinitely.
+    dagrun_timeout=timedelta(minutes=30),
     default_args={"retries": 1, "retry_delay": DBT_RETRY_DELAY},
     params=DEFAULT_PARAMS,
     tags=["ask_seoul", "weather", "transform", "silver", "gold", "dbt"],
@@ -533,7 +541,6 @@ with DAG(
     )
 
     dbt_phase_tasks = {spec.task_id: dbt_task(spec) for spec in DBT_PHASE_SPECS}
-    dbt_tasks_in_order = list(dbt_phase_tasks.values())
 
     publish_dbt_metrics = PythonOperator(
         task_id="publish_dbt_run_metrics",
@@ -548,16 +555,38 @@ with DAG(
         on_failure_callback=record_weather_problem,
     )
 
-    pipeline_tasks = [
+    # Keep snapshot identity/as-of resolution and the Silver contract gate
+    # serial.  Once Silver is validated, the place and coverage-grid marts are
+    # disjoint spatial grains and deliberately fan out.  Gold consumes both
+    # successful branches, preserving the publication gate and exact-once
+    # asset semantics.
+    serial_tasks = (
         validate_runtime,
         resolve_snapshot,
         resolve_serving_as_of_hour,
-        *dbt_tasks_in_order,
-        mark_gold_publication_ready,
-        publish_dbt_metrics,
-    ]
-    for upstream, downstream in zip(pipeline_tasks, pipeline_tasks[1:]):
+        dbt_phase_tasks["dbt_deps"],
+        dbt_phase_tasks["dbt_source_freshness"],
+        dbt_phase_tasks["dbt_run_silver"],
+        dbt_phase_tasks["dbt_test_silver"],
+    )
+    for upstream, downstream in zip(serial_tasks, serial_tasks[1:]):
         upstream >> downstream
+
+    place_run = dbt_phase_tasks["dbt_run_place_mart"]
+    place_test = dbt_phase_tasks["dbt_test_place_mart"]
+    grid_run = dbt_phase_tasks["dbt_run_coverage_grid_mart"]
+    grid_test = dbt_phase_tasks["dbt_test_coverage_grid_mart"]
+    silver_test = dbt_phase_tasks["dbt_test_silver"]
+    gold_run = dbt_phase_tasks["dbt_run_gold"]
+    gold_test = dbt_phase_tasks["dbt_test_gold"]
+
+    silver_test >> place_run
+    silver_test >> grid_run
+    place_run >> place_test
+    grid_run >> grid_test
+    place_test >> gold_run
+    grid_test >> gold_run
+    gold_run >> gold_test >> mark_gold_publication_ready >> publish_dbt_metrics
 
 
 enable_lineage_if_configured(dag)

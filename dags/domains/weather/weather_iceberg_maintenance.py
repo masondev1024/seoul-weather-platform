@@ -153,7 +153,10 @@ def _action_task(schema: str, table_name: str, operation: str, *, isolate_table:
             "operation": operation,
         },
         "pool": TRINO_WEATHER_HEAVY_POOL,
-        "pool_slots": 1,
+        # Compaction/retention can rewrite or remove files.  Hold the whole
+        # two-slot Weather lane so no transform or serving swap can observe a
+        # changing Iceberg table.
+        "pool_slots": 2,
         "weight_rule": "absolute",
         "priority_weight": MAINTENANCE_PRIORITY_WEIGHT,
         "execution_timeout": MAINTENANCE_ACTION_TIMEOUT,

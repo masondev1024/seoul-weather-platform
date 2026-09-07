@@ -39,7 +39,9 @@ from common.runtime_guard import (  # noqa: E402
     default_target,
     validate_dev_runtime,
 )
-from weather_ingest.kma_coordination import weather_heavy_pool  # noqa: E402
+from weather_ingest.kma_coordination import (  # noqa: E402
+    weather_heavy_pool_kwargs,
+)
 import weather_dbt_execution as weather_dbt  # noqa: E402
 from weather_dbt_runtime import (  # noqa: E402
     DBT_RETRY_DELAY,
@@ -134,7 +136,13 @@ def _serving_snapshot_dbt_task(task_id: str, dbt_command: str) -> PythonOperator
             "serving_as_of_task_id": SERVING_AS_OF_HOUR_TASK_ID,
             "threads": 2,
         },
-        pool=weather_heavy_pool(TRINO_WEATHER_LEGACY_HEAVY_POOL),
+        # Snapshot models use intermediate-table rename.  Hold both canonical
+        # Weather slots so they cannot race a transform branch while swapping
+        # the public serving tables.
+        **weather_heavy_pool_kwargs(
+            TRINO_WEATHER_LEGACY_HEAVY_POOL,
+            pool_slots=2,
+        ),
         weight_rule="absolute",
         priority_weight=SERVING_SNAPSHOT_PRIORITY_WEIGHT,
         retries=1,

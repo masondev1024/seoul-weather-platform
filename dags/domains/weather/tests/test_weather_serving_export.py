@@ -48,6 +48,7 @@ def test_weather_serving_export_is_a_thin_common_publisher_wrapper(monkeypatch):
             "weather_place_forecast_change_daily",
         ],
         "exact_domain_contracts": True,
+        "partitioned_domain_scope": True,
         "require_public_projection": True,
         "verify_content_parity": True,
         "schedule": FakeAsset("iceberg://weather/gold/publication-ready"),

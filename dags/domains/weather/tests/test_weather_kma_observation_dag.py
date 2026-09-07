@@ -64,14 +64,14 @@ def test_enabled_landing_uses_shared_api_pool_and_bounded_timeout(monkeypatch):
     assert land.kwargs["retry_exponential_backoff"] is False
 
 
-def test_load_and_verify_share_the_canonical_one_slot_weather_pool():
+def test_load_and_verify_hold_the_exclusive_weather_pool_lock():
     module = _module()
     dag = module.dag
 
     for task_id in ("load_observation_bronze", "verify_observation_bronze"):
         task = dag.task_dict[task_id]
         assert task.kwargs["pool"] == "trino_weather_heavy"
-        assert task.kwargs["pool_slots"] == 1
+        assert task.kwargs["pool_slots"] == 2
         assert task.kwargs["execution_timeout"] <= timedelta(minutes=10)
         assert task.kwargs["retries"] == 0
 
@@ -139,6 +139,29 @@ def test_plan_uses_exact_canonical_80_grids_and_eight_categories():
     assert plan["categories"] == ["PTY", "REH", "RN1", "T1H", "UUU", "VEC", "VVV", "WSD"]
     assert plan["expected_grid_count"] == 80
     assert plan["expected_row_count"] == 640
+
+
+def test_backfill_plan_uses_airflow_logical_date_not_wall_clock():
+    module = _module()
+
+    plan = module.plan_observation_collection(
+        logical_date=module.datetime(2026, 8, 23, 14, 45, tzinfo=module.timezone.utc)
+    )
+
+    assert plan["base_date"] == "20260823"
+    assert plan["base_time"] == "2300"
+
+
+def test_backfill_plan_prefers_canonical_run_id_timestamp():
+    module = _module()
+
+    plan = module.plan_observation_collection(
+        run_id="scheduled__2026-08-23T14:45:00+00:00",
+        logical_date=module.datetime(2026, 8, 24, 2, 10, tzinfo=module.timezone.utc),
+    )
+
+    assert plan["base_date"] == "20260823"
+    assert plan["base_time"] == "2300"
 
 
 def test_validate_runtime_fails_closed_until_guards_and_ledger_are_ready(monkeypatch):

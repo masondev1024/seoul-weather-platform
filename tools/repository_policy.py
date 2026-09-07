@@ -13,13 +13,16 @@ FORBIDDEN_PARTS = frozenset(
         ".omc",
         ".omx",
         ".pytest_cache",
+        ".codex",
         "__pycache__",
         "dbt_packages",
         "logs",
         "target",
     }
 )
-FORBIDDEN_BASENAMES = frozenset({"LessonRun.md", "engineering-decision-log.md"})
+FORBIDDEN_BASENAMES = frozenset(
+    {"AGENTS.md", "CLAUDE.md", "LessonRun.md", "engineering-decision-log.md"}
+)
 
 SECRET_RULES = (
     ("marketplace_api_key", re.compile(r"\bask_[A-Fa-f0-9]{24,}\b")),

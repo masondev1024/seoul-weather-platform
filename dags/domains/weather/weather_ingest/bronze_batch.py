@@ -21,6 +21,12 @@ from weather_ingest.errors import WeatherCompletenessError, WeatherSourceSchemaE
 from weather_ingest.raw_contract import raw_object_page_no
 
 
+# A KMA forecast response can contain thousands of rows per grid.  Keep the
+# validated page material held by one Airflow task bounded even when the
+# landing manifest contains all 80 Seoul grids.
+BRONZE_LOAD_PAGE_BATCH_SIZE = 8
+
+
 @dataclass(frozen=True)
 class BronzeLoadPorts:
     """Runtime boundaries supplied by the Airflow entrypoint."""
@@ -87,10 +93,14 @@ def load_kma_bronze_batch(
         raise WeatherCompletenessError(
             "KMA raw landing result contains duplicate page identity"
         )
-    parsed_pages = []
     grid_summaries = {}
     raw_object_keys = []
-    for raw_object in raw_objects:
+
+    def read_and_parse(
+        raw_object: dict,
+    ) -> tuple[dict, list[dict], datetime, int, int, tuple]:
+        """Read and validate one page without retaining it beyond the caller."""
+
         http_status = raw_object["http_status"]
         if not isinstance(http_status, int) or isinstance(http_status, bool):
             raise WeatherSourceSchemaError(
@@ -118,18 +128,30 @@ def load_kma_bronze_batch(
             nx=int(raw_object["nx"]),
             ny=int(raw_object["ny"]),
         )
-        metadata = dict(metadata)
         page_no = raw_object_page_no(raw_object)
         num_of_rows = int(raw_object.get("num_of_rows") or kma_num_of_rows())
-        metadata["page_no"] = page_no
-        metadata["num_of_rows"] = num_of_rows
-        total_count = int(metadata["total_count"])
         grid_key = (
             raw_object["base_date"],
             raw_object["base_time"],
             int(raw_object["nx"]),
             int(raw_object["ny"]),
         )
+        return (
+            dict(metadata),
+            rows,
+            datetime.fromisoformat(raw_object["collected_at"]),
+            page_no,
+            num_of_rows,
+            grid_key,
+        )
+
+    for raw_object in raw_objects:
+        metadata, rows, collected_at, page_no, num_of_rows, grid_key = read_and_parse(
+            raw_object
+        )
+        metadata["page_no"] = page_no
+        metadata["num_of_rows"] = num_of_rows
+        total_count = int(metadata["total_count"])
         summary = grid_summaries.setdefault(
             grid_key,
             {
@@ -143,18 +165,6 @@ def load_kma_bronze_batch(
         summary["parsed_rows"] = int(summary["parsed_rows"]) + len(rows)
         summary["pages"].add(page_no)
         summary["num_of_rows"] = max(int(summary["num_of_rows"]), num_of_rows)
-        collected_at = datetime.fromisoformat(raw_object["collected_at"])
-        parsed_pages.append(
-            {
-                "raw_object": raw_object,
-                "metadata": metadata,
-                "rows": rows,
-                "collected_at": collected_at,
-                "page_no": page_no,
-                "num_of_rows": num_of_rows,
-                "grid_key": grid_key,
-            }
-        )
         raw_object_keys.append(raw_object["raw_object_key"])
 
     for grid_key, summary in grid_summaries.items():
@@ -175,47 +185,55 @@ def load_kma_bronze_batch(
                 raise WeatherCompletenessError(message)
             print(f"Loading partial pages (allow_partial_pages=true) — {message}")
 
-    batch_inputs = []
-    for page in sorted(
-        parsed_pages,
-        key=lambda item: (
-            item["grid_key"][0],
-            item["grid_key"][1],
-            item["grid_key"][2],
-            item["grid_key"][3],
-            item["page_no"],
-        ),
-    ):
-        raw_object = page["raw_object"]
-        batch_inputs.append(
-            {
-                "metadata": page["metadata"],
-                "rows": page["rows"],
-                "request_id": raw_object["request_id"],
-                "place_id": raw_object["place_id"],
-                "base_date": raw_object["base_date"],
-                "base_time": raw_object["base_time"],
-                "nx": int(raw_object["nx"]),
-                "ny": int(raw_object["ny"]),
-                "raw_object_key": raw_object["raw_object_key"],
-                "raw_hash": raw_object["raw_hash"],
-                "http_status": int(raw_object["http_status"]),
-                "collected_at": page["collected_at"],
-                "page_no": page["page_no"],
-                "num_of_rows": page["num_of_rows"],
-            }
-        )
-
     # Do not open a persistence boundary until every raw object has passed
     # hash, source-contract, and pagination preflight.
     cursor, catalog, schema = ports.open_trino()
     qualified_table = ports.ensure_table(cursor, catalog, schema)
-    inserted = ports.append_batches(
-        schema=schema,
-        row_batches=batch_inputs,
-        dag_run_id=dag_run_id,
-        delete_existing=True,
+    ordered_raw_objects = sorted(
+        raw_objects,
+        key=lambda item: (
+            str(item["base_date"]),
+            str(item["base_time"]),
+            int(item["nx"]),
+            int(item["ny"]),
+            raw_object_page_no(item),
+        ),
     )
+    inserted = 0
+    for offset in range(0, len(ordered_raw_objects), BRONZE_LOAD_PAGE_BATCH_SIZE):
+        row_batches = []
+        for raw_object in ordered_raw_objects[
+            offset : offset + BRONZE_LOAD_PAGE_BATCH_SIZE
+        ]:
+            metadata, rows, collected_at, page_no, num_of_rows, _ = read_and_parse(
+                raw_object
+            )
+            metadata["page_no"] = page_no
+            metadata["num_of_rows"] = num_of_rows
+            row_batches.append(
+                {
+                    "metadata": metadata,
+                    "rows": rows,
+                    "request_id": raw_object["request_id"],
+                    "place_id": raw_object["place_id"],
+                    "base_date": raw_object["base_date"],
+                    "base_time": raw_object["base_time"],
+                    "nx": int(raw_object["nx"]),
+                    "ny": int(raw_object["ny"]),
+                    "raw_object_key": raw_object["raw_object_key"],
+                    "raw_hash": raw_object["raw_hash"],
+                    "http_status": int(raw_object["http_status"]),
+                    "collected_at": collected_at,
+                    "page_no": page_no,
+                    "num_of_rows": num_of_rows,
+                }
+            )
+        inserted += ports.append_batches(
+            schema=schema,
+            row_batches=row_batches,
+            dag_run_id=dag_run_id,
+            delete_existing=offset == 0,
+        )
     expected_rows = sum(
         int(summary["total_count"]) for summary in grid_summaries.values()
     )

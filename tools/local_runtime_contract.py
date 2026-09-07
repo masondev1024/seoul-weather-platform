@@ -34,10 +34,14 @@ EXPECTED_TRINO_ENVIRONMENT = {
     "TRINO_QUERY_MAX_TOTAL_MEMORY": "1200MB",
 }
 EXPECTED_AIRFLOW_ENVIRONMENT = {
+    "AIRFLOW__CORE__DAG_IGNORE_FILE_SYNTAX": "glob",
+    "AIRFLOW__CORE__PARALLELISM": "8",
+    "AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG": "4",
+    "AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG": "2",
     "AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME": "7200",
     "ASK_SEOUL_KMA_DAG_SCHEDULE": "20 2,5,8,11,14,17,20,23 * * *",
-    "ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED": "false",
-    "ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE": "",
+    "ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED": "true",
+    "ASK_SEOUL_KMA_OBSERVATION_DAG_SCHEDULE": "45 * * * *",
     "ASK_SEOUL_KMA_CONTROL_ROOT": "/opt/airflow/logs/_weather_control",
     "ASK_SEOUL_KMA_ATTEMPT_LEDGER_PATH": (
         "/opt/airflow/logs/_weather_control/kma_api_budget.sqlite3"
@@ -53,6 +57,17 @@ EXPECTED_TRINO_MOUNTS = {
     "./trino/resource-groups.properties:/etc/trino/resource-groups.properties:ro",
     "./trino/resource-groups.json:/etc/trino/resource-groups.json:ro",
     "trino_cache:/data/trino",
+}
+EXPECTED_TRINO_HEALTHCHECK = {
+    "test": [
+        "CMD-SHELL",
+        "curl --fail --silent --show-error --max-time 2 "
+        "http://localhost:8080/v1/info >/dev/null",
+    ],
+    "interval": "15s",
+    "timeout": "3s",
+    "retries": 10,
+    "start_period": "30s",
 }
 _MEMORY_PATTERN = re.compile(r"^(\d+)(MB|GB|M|G)$", re.IGNORECASE)
 
@@ -207,6 +222,8 @@ def validate_local_runtime_contract(repo_root: Path) -> LocalRuntimeContractProo
             raise _invalid()
 
         trino = _mapping(services.get("trino"))
+        if trino.get("healthcheck") != EXPECTED_TRINO_HEALTHCHECK:
+            raise _invalid()
         container_mib = _memory_mib(trino.get("mem_limit"))
         if container_mib != 5 * 1024:
             raise _invalid()
@@ -247,7 +264,7 @@ def validate_local_runtime_contract(repo_root: Path) -> LocalRuntimeContractProo
         global_group = _mapping(root_groups[0])
         hard_concurrency = global_group.get("hardConcurrencyLimit")
         max_queued = global_group.get("maxQueued")
-        if hard_concurrency != 1 or max_queued != 10:
+        if hard_concurrency != 2 or max_queued != 10:
             raise _invalid()
 
         ignore_lines = {

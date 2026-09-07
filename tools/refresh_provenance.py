@@ -113,6 +113,11 @@ MAC_CUTOVER_ADAPTATION_VALIDATORS = {
         "PYTHONPATH=dags python -m pytest "
         "dags/domains/weather/tests/test_weather_transform_dag.py -q"
     ),
+    "dags/domains/weather/weather_w2_canonical_transform.py": (
+        "PYTHONPATH=dags python -m pytest "
+        "dags/domains/weather/tests/test_weather_w2_canonical_transform_dag.py "
+        "dags/domains/weather/tests/test_weather_w2_canonical_transform_execution.py -q"
+    ),
     "dbt/domains/traffic_weather/models/weather/transform/silver/silver_kma_vilage_fcst.sql": (
         "python -m pytest "
         "dbt/domains/traffic_weather/tests/weather/test_incremental_materialization_contract.py -q"
@@ -153,6 +158,11 @@ MAC_MEMORY_ADAPTATIONS = frozenset(
         "test_weather_serving_working_set_contract.py",
     }
 )
+MAC_CONCURRENCY_ADAPTATIONS = frozenset(
+    {
+        "dags/domains/weather/weather_w2_canonical_transform.py",
+    }
+)
 MAC_AVAILABILITY_ADAPTATIONS = frozenset(
     {
         "dbt/domains/traffic_weather/models/weather/transform/gold/"
@@ -173,6 +183,7 @@ HOST_TEST_PORTABILITY_ADAPTATIONS = frozenset(
 )
 LOCAL_DBT_SOURCES = frozenset(
     {
+        "dbt/domains/traffic_weather/macros/trino__list_relations_without_caching.sql",
         "dbt/domains/traffic_weather/macros/weather/weather_quality_contract.sql",
         "dbt/domains/traffic_weather/dbt_project.yml",
         "dbt/domains/traffic_weather/profiles.yml",
@@ -214,6 +225,25 @@ LOCAL_DBT_SOURCES = frozenset(
 #: exclusion 파일을 제거했으므로 그 항목은 넣지 않는다.
 LOCAL_AIRFLOW_SOURCES = frozenset(
     {
+        # Read-only recovery control plane.  Planning is repository-owned and
+        # intentionally separate from the fixed upstream Weather entrypoints.
+        "dags/common/recovery/admission.py",
+        "dags/common/recovery/airflow_snapshot.py",
+        "dags/common/recovery/__init__.py",
+        "dags/common/recovery/dispatch.py",
+        "dags/common/recovery/lease.py",
+        "dags/common/recovery/postgres.py",
+        "dags/common/tests/test_recovery_admission.py",
+        "dags/common/tests/test_recovery_airflow_snapshot.py",
+        "dags/common/tests/test_recovery_dispatch.py",
+        "dags/common/tests/test_recovery_lease.py",
+        "dags/common/tests/test_recovery_postgres.py",
+        "dags/common/recovery/planner.py",
+        "dags/common/tests/test_recovery_planner.py",
+        "dags/domains/weather/weather_recovery_candidates.py",
+        "dags/domains/weather/weather_recovery_coordinator.py",
+        "dags/domains/weather/tests/test_weather_recovery_candidates.py",
+        "dags/domains/weather/tests/test_weather_recovery_coordinator.py",
         # This repository's internal-only forecast-quality runtime. Paths are
         # intentionally explicit: a new Airflow source cannot become public
         # provenance without a reviewed allowlist addition and test update.
@@ -409,6 +439,14 @@ def build_mac_cutover_adaptation_record(
         derivation = (
             "Replace the target-hashing MERGE with atomic table rename and bound "
             "the issue horizon and ranks to the verified serving requirement."
+        )
+    elif target in MAC_CONCURRENCY_ADAPTATIONS:
+        scope = "weather_mac_concurrency_optimization"
+        reason = "Personal Mac Weather runtime adaptation for bounded Trino concurrency."
+        derivation = (
+            "Route the W2 canonical writer through the exclusive two-slot Weather "
+            "lane so it cannot consume a transform branch slot on the low-memory "
+            "local runtime."
         )
     elif target in MAC_AVAILABILITY_ADAPTATIONS:
         scope = "weather_serving_availability"

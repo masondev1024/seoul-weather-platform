@@ -28,7 +28,8 @@ def _module():
     )
 
 
-def test_hourly_snapshot_refresh_runs_only_public_weather_serving_selector():
+def test_hourly_snapshot_refresh_runs_only_public_weather_serving_selector(monkeypatch):
+    monkeypatch.setenv("ASK_SEOUL_KMA_SHARED_GUARDS_ENABLED", "true")
     module = _module()
     dag = module.dag
 
@@ -59,7 +60,8 @@ def test_hourly_snapshot_refresh_runs_only_public_weather_serving_selector():
             "serving_as_of_task_id": module.SERVING_AS_OF_HOUR_TASK_ID,
             "threads": 2,
         }
-        assert task.kwargs["pool"] == module.TRINO_WEATHER_LEGACY_HEAVY_POOL
+        assert task.kwargs["pool"] == "trino_weather_heavy"
+        assert task.kwargs["pool_slots"] == 2
         assert task.kwargs["weight_rule"] == "absolute"
         assert task.kwargs["priority_weight"] == module.SERVING_SNAPSHOT_PRIORITY_WEIGHT
         assert task.kwargs["retries"] == 1

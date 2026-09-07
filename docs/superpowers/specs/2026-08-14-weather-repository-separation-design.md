@@ -156,7 +156,7 @@ primary key는 `(product_id, publication_id, place_id)`다. Serving은 이 sidec
 
 ```text
 seoul-weather-platform/
-├─ AGENTS.md
+├─ docs/operations/airflow-deployment-approval.md
 ├─ CONTEXT.md
 ├─ pyproject.toml
 ├─ runtime/
@@ -459,7 +459,7 @@ root local harness의 `.env`, compose override, 개인 기록은 이관하지 �
 
 산출물:
 
-- 기본 tree, `.gitignore`, `AGENTS.md`
+- 기본 tree, `.gitignore`, 운영 변경 승인 기준 문서
 - toolchain lock과 secretless profile
 - provenance schema와 repository safety test
 

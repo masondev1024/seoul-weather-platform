@@ -31,6 +31,8 @@ dag = build_serving_freshness_watchdog_dag(
     dag_id="weather_serving_freshness_watchdog",
     target=default_target(),
     exact_domain_contracts=True,
+    # Mid-term outlook has an independent watchdog; keep this DAG's four-product scope explicit.
+    partitioned_domain_scope=True,
     naive_freshness_timezones=_KST_WALL_CLOCK_PRODUCTS,
     # Across 33 observed refresh-to-export prod cycles, p95 completion was 24.78
     # minutes and the maximum was 28.24. Running at :35 with five minutes of
