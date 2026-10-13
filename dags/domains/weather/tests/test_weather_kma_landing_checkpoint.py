@@ -567,3 +567,42 @@ def test_load_kma_bronze_inserts_pages_after_aggregate_count_matches(monkeypatch
     assert result["expected_rows"] == 1001
     assert result["expected_raw_object_count"] == 2
     assert result["raw_page_count"] == 2
+
+
+def test_retry_interruption_keeps_unconsumed_checkpoint_pages():
+    request = KmaLandingRequest(
+        base_date="20260705", base_time="1700",
+        grids=tuple(KmaGrid(str(nx), nx, 130) for nx in (56, 57, 58)),
+        num_of_rows=1000,
+    )
+    run = RunIdentity("weather_vilage_fcst_bronze", "retry-interruption")
+    store = MemoryRawObjectStore()
+    first = ScriptedKmaSource({
+        (nx, 130, 1): kma_payload(nx=nx) for nx in (56, 57)
+    })
+    with pytest.raises(KeyError):
+        landing_for(first, store).collect(run, request)
+    checkpoint_key = next(key for key in store.objects if "/_checkpoints/" in key)
+    original = json.loads(store.objects[checkpoint_key])["raw_objects"]
+    assert len(original) == 2
+
+    class InterruptedStore(MemoryRawObjectStore):
+        def __init__(self):
+            super().__init__(store.objects)
+            self.checkpoint_writes = 0
+
+        def write_bytes(self, key, payload, content_type):
+            super().write_bytes(key, payload, content_type)
+            if key == checkpoint_key:
+                self.checkpoint_writes += 1
+                if self.checkpoint_writes == 2:
+                    raise RuntimeError("interrupted after the first reused page")
+
+    interrupted = InterruptedStore()
+    with pytest.raises(RuntimeError):
+        landing_for(ScriptedKmaSource({}), interrupted).collect(run, request)
+    assert json.loads(interrupted.objects[checkpoint_key])["raw_objects"] == original
+    resumed = ScriptedKmaSource({(58, 130, 1): kma_payload(nx=58)})
+    batch = landing_for(resumed, MemoryRawObjectStore(interrupted.objects)).collect(run, request)
+    assert resumed.requests == [(58, 130, 1)]
+    assert batch.reused_raw_object_count == 2

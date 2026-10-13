@@ -1,10 +1,14 @@
 # 서울 단기예보 일일 데이터 품질 리포트
 
-수집기를 바꾸거나 새 데이터를 수집하지 않고 기존 Bronze와 실행 manifest를
+로컬 리포트는 수집기를 바꾸거나 새 데이터를 수집하지 않고 기존 Bronze와 실행 manifest를
 읽어 날짜별 JSON·Markdown 리포트를 생성한다. 예보와 실황을 비교하는
 `weather_forecast_quality_daily`와 별개로 수집 데이터의 운영 품질을 기록한다.
 현재 범위는 `kma_vilage_fcst` 단기예보다. 실황·Silver/Gold 전체 이력·D1 발행
 품질을 측정한 것으로 확대 해석하지 않는다.
+
+일일 리포트와 별도로 [hosted 수집 복구](./weather-hosted-collection.md)가 기상청
+단기예보를 R2에 수집한다. 로컬 Bronze 리포트와 GitHub의 raw 완료 근거 리포트는
+검사 깊이와 실행 환경이 다르며 서로의 성공을 대신 증명하지 않는다.
 
 ## 검사와 분모
 
@@ -97,7 +101,8 @@ logs/weather_daily_quality/
 동일 내용은 동일 revision을 사용한다. 평가 시각이나 근거가 달라지면 새 revision을
 남기며 기존 평가를 삭제하지 않는다. 실행 기록은 Git에서 이미 제외된 `logs/`에
 저장하고 출력 파일 권한은 600이다. JSON을 원자적으로 교체하며 Markdown은
-재생성 가능한 표현이다. 기여도 그래프용 Git publication은 현재 구현 범위가 아니다.
+재생성 가능한 표현이다. 로컬 실행기는 Git publication을 수행하지 않는다.
+아래 GitHub workflow가 공개 raw 근거 리포트의 일일 publication을 담당한다.
 공개할 때는 별도 정제·승인·PR 경로를 거쳐야 한다.
 
 상태 확인:
