@@ -474,8 +474,12 @@ class KmaLanding:
             (item.nx, item.ny, item.page_no): item for item in checkpoint_objects
         }
         raw_objects: list[KmaRawObject] = []
+        # Keep trusted references until every saved page has been consumed. A
+        # retry may stop after any checkpoint write; clearing unvisited pages
+        # would lose durable progress and charge the source API again.
+        checkpoint_state = {(item.nx, item.ny, item.page_no): item for item in checkpoint_objects}
         self._save_checkpoint(
-            run, request, raw_objects, landing_load_date=landing_load_date
+            run, request, list(checkpoint_state.values()), landing_load_date=landing_load_date
         )
         api_request_count = 0
         reused_raw_object_count = 0
@@ -495,8 +499,9 @@ class KmaLanding:
                 reused_raw_object_count += 1
             raw_objects.append(first_page)
             grid_objects.append(first_page)
+            checkpoint_state[(first_page.nx, first_page.ny, first_page.page_no)] = first_page
             self._save_checkpoint(
-                run, request, raw_objects, landing_load_date=landing_load_date
+                run, request, list(checkpoint_state.values()), landing_load_date=landing_load_date
             )
             for page_no in range(2, first_page.page_count + 1):
                 raw_object = checkpoint_pages.get((grid.nx, grid.ny, page_no))
@@ -513,8 +518,9 @@ class KmaLanding:
                     reused_raw_object_count += 1
                 raw_objects.append(raw_object)
                 grid_objects.append(raw_object)
+                checkpoint_state[(raw_object.nx, raw_object.ny, raw_object.page_no)] = raw_object
                 self._save_checkpoint(
-                    run, request, raw_objects, landing_load_date=landing_load_date
+                    run, request, list(checkpoint_state.values()), landing_load_date=landing_load_date
                 )
             total_count = max(item.total_count for item in grid_objects)
             parsed_rows = sum(item.row_count for item in grid_objects)
