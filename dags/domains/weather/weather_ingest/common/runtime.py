@@ -152,7 +152,11 @@ def fetch_url(
     retry_base_delay_seconds: float = 1.0,
     retry_429_backoff_seconds: tuple[float, ...] | None = None,
     before_attempt: Callable[[int], object] | None = None,
+    http_client: HttpCore | None = None,
+    sleep: Callable[[float], None] | None = None,
 ) -> tuple[int, bytes]:
+    client = _HTTP if http_client is None else http_client
+    pause = time.sleep if sleep is None else sleep
     retry_codes = set(retry_statuses)
     auth = QueryKey("serviceKey", required_env("KMA_SERVICE_KEY"))
     for attempt in range(1, max_attempts + 1):
@@ -164,7 +168,7 @@ def fetch_url(
         if before_attempt is not None:
             before_attempt(attempt)
         try:
-            response = _HTTP.get(
+            response = client.get(
                 prepared.url,
                 params=prepared.params,
                 headers=prepared.headers,
@@ -201,7 +205,7 @@ def fetch_url(
             f"Source API HTTP {response.status}; retrying in {delay:.1f}s "
             f"(attempt {attempt + 1}/{max_attempts})"
         )
-        time.sleep(delay)
+        pause(delay)
     raise HttpProblemError(
         error_types.HTTP_ERROR,
         method="GET",
