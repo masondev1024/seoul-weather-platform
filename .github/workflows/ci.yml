@@ -30,7 +30,9 @@ jobs:
         with:
           python-version: 3.11.15
       - name: Install repository test dependencies
-        run: python -m pip install jsonschema==4.26.0 PyYAML==6.0.2 pytest==9.0.3
+        run: python -m pip install jsonschema==4.26.0 PyYAML==6.0.2 pytest==9.0.3 boto3==1.43.0
+      - name: Test daily quality reporting without external services
+        run: python -m pytest tests/tools/test_weather_daily_quality*.py -q
       - name: Verify repository contracts
         run: pwsh -File tools/verify_repository.ps1
 

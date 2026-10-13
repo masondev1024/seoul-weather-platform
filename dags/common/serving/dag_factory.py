@@ -319,6 +319,7 @@ def build_serving_freshness_watchdog_dag(
     dbt_project: str | None = None,
     target: str = "dev",
     exact_domain_contracts: bool = False,
+    partitioned_domain_scope: bool = False,
     naive_freshness_timezones: Mapping[str, str] | None = None,
     publication_grace_minutes: int = 0,
     failure_callback: Callable[[dict[str, object]], None] | None = None,
@@ -352,6 +353,7 @@ def build_serving_freshness_watchdog_dag(
             domain,
             expected_product_ids,
             exact_domain_contracts=exact_domain_contracts,
+            partitioned_domain_scope=partitioned_domain_scope,
         )
         loaded_ids = {contract.product_id for contract in contracts}
         missing_ids = sorted(set(expected_product_ids) - loaded_ids)
