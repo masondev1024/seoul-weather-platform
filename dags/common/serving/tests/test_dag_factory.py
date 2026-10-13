@@ -106,6 +106,38 @@ def test_serving_export_factory_serializes_all_publishers_in_shared_d1_pool():
     assert dag_factory.SERVING_D1_PUBLISH_POOL == "serving_d1_publish"
 
 
+@pytest.mark.parametrize("partitioned_scope", [False, True])
+def test_watchdog_factory_forwards_partitioned_scope_to_contract_loader(monkeypatch, partitioned_scope):
+    captured = {}
+
+    class ContractReadStopped(Exception):
+        pass
+
+    def stop_after_contract_scope(manifest_path, domain, product_ids, **options):
+        captured.update(domain=domain, product_ids=tuple(product_ids), **options)
+        raise ContractReadStopped
+
+    monkeypatch.setattr(dag_factory, "validate_watchdog_target", lambda target: target)
+    monkeypatch.setattr(dag_factory, "_load_export_contracts", stop_after_contract_scope)
+    scope_options = {"partitioned_domain_scope": True} if partitioned_scope else {}
+    products = ("weather_place_current_outlook", "weather_place_risk_window")
+    dag = dag_factory.build_serving_freshness_watchdog_dag(
+        domain="weather", product_ids=products, schedule="35 * * * *",
+        dag_id=f"weather_watchdog_scope_{partitioned_scope}", exact_domain_contracts=True,
+        **scope_options,
+    )
+
+    # Execute only the constructed callable's contract-loading boundary; the
+    # sentinel stops before a D1 client or any external read can be created.
+    with pytest.raises(ContractReadStopped):
+        dag.get_task("check_serving_freshness").python_callable()
+
+    assert captured == {
+        "domain": "weather", "product_ids": products,
+        "exact_domain_contracts": True, "partitioned_domain_scope": partitioned_scope,
+    }
+
+
 def test_domain_catalog_retirement_uses_only_disabled_contract_product_ids(tmp_path):
     manifest = {
         "nodes": {
