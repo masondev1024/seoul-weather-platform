@@ -7,7 +7,7 @@ import json
 import os
 import re
 import subprocess
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -69,7 +69,7 @@ def _assert_report_branch(checkout: Path) -> None:
         raise ValueError('unexpected_report_branch')
     for path in _git(checkout, 'ls-files').stdout.splitlines():
         if path not in {'README.md', 'index.html', '.nojekyll'} and not re.fullmatch(
-                r'reports/\d{4}-\d{2}-\d{2}\.(json|md)', path):
+                r'reports/\d{4}-\d{2}-\d{2}(?:/rechecks/\d{8}T\d{12}Z)?\.(json|md)', path):
             raise ValueError('unexpected_report_branch_content')
     if _git(checkout, 'status', '--porcelain').stdout:
         raise ValueError('dirty_report_checkout')
@@ -162,14 +162,16 @@ def _validate_public_report(report: dict, day: str) -> None:
         raise ValueError('public_report_metric_invalid')
 
 
-def publish_report(output: Path, checkout: Path, day: str) -> bool:
+def publish_report(output: Path, checkout: Path, day: str, *, refresh: bool = False) -> bool:
     day = report_day(day)
     _assert_report_branch(checkout)
     destination = checkout / 'reports'
-    if (destination / f'{day}.json').exists():
+    existing = (destination / f'{day}.json').exists()
+    if existing:
         if not (destination / f'{day}.md').is_file():
             raise ValueError('incomplete_existing_report')
-        return False
+        if not refresh:
+            return False
     source_json, source_md = (output / f'{day}.{suffix}' for suffix in ('json', 'md'))
     if any(p.is_symlink() or not p.is_file() or p.stat().st_size > 128 * 1024
            for p in (source_json, source_md)):
@@ -178,16 +180,32 @@ def publish_report(output: Path, checkout: Path, day: str) -> bool:
     _validate_public_report(report, day)
     from tools.weather_daily_quality_cloud import render_markdown
 
-    destination.mkdir(exist_ok=True)
-    (destination / source_json.name).write_text(
-        json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + '\n',
+    if existing:
+        evaluated = datetime.fromisoformat(report['evaluation_as_of']).astimezone(timezone.utc)
+        stem = evaluated.strftime('%Y%m%dT%H%M%S%fZ')
+        relative = f'reports/{day}/rechecks/{stem}'
+        destination = checkout / 'reports' / day / 'rechecks'
+    else:
+        stem, relative = day, f'reports/{day}'
+    target_json, target_md = (destination / f'{stem}.{suffix}' for suffix in ('json','md'))
+    serialized = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + '\n'
+    if target_json.exists():
+        if not target_md.is_file() or target_json.read_text(encoding='utf-8') != serialized:
+            raise ValueError('recheck_conflict')
+        return False
+    destination.mkdir(exist_ok=True,parents=True)
+    target_json.write_text(
+        serialized,
         encoding='utf-8')
     # Rebuild the public projection from validated fields; never copy arbitrary Markdown.
-    (destination / source_md.name).write_text(render_markdown(report), encoding='utf-8')
+    target_md.write_text(render_markdown(report), encoding='utf-8')
     _write_index(checkout)
-    _git(checkout, 'add', f'reports/{day}.json', f'reports/{day}.md',
+    _git(checkout, 'add', f'{relative}.json', f'{relative}.md',
          'README.md', 'index.html', '.nojekyll')
-    _git(checkout, 'commit', '-m', f'docs(weather): record daily collection quality {day}')
+    message = f'docs(weather): record daily collection quality {day}'
+    if existing:
+        message = f'docs(weather): record collection quality recheck {day} at {stem}'
+    _git(checkout, 'commit', '-m', message)
     # A non-fast-forward rejection is a real conflict; never force-push report history.
     _git(checkout, 'push', 'origin', 'HEAD:refs/heads/' + BRANCH)
     return True
@@ -201,6 +219,7 @@ def main(argv: list[str] | None = None) -> int:
     actions.add_argument('--bootstrap', action='store_true')
     parser.add_argument('--checkout', type=Path, required=True)
     parser.add_argument('--output-dir', type=Path)
+    parser.add_argument('--refresh', action='store_true', help='Append a validated new evaluation; preserve the daily report')
     args = parser.parse_args(argv)
     try:
         day = report_day()
@@ -208,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
             if os.environ.get('GITHUB_REPOSITORY') != REPOSITORY:
                 raise ValueError('unexpected_repository')
             prepare_branch(args.checkout, f'https://github.com/{REPOSITORY}.git')
-            already = (args.checkout / f'reports/{day}.json').is_file()
+            already = not args.refresh and (args.checkout / f'reports/{day}.json').is_file()
             with Path(os.environ['GITHUB_OUTPUT']).open('a') as handle:
                 handle.write(f'report_date={day}\nalready_published={str(already).lower()}\n')
         elif args.bootstrap:
@@ -216,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.output_dir is None:
             raise ValueError('output_directory_required')
         else:
-            published = publish_report(args.output_dir, args.checkout, day)
+            published = publish_report(args.output_dir, args.checkout, day, refresh=args.refresh)
             print('daily_quality_publication status=' + ('published' if published else 'already_published'))
         return 0
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
