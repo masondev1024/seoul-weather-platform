@@ -2,8 +2,8 @@ name: Weather Raw Collection
 
 on:
   schedule:
-    # Every hour at :47 reconciles delayed/missed source issues within 24 hours.
-    - cron: '47 * * * *'
+    # Single hourly schedule at :53; refresh the cron after missed scheduled runs.
+    - cron: '53 * * * *'
   workflow_dispatch:
     inputs:
       only_latest:
