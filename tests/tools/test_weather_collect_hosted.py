@@ -370,6 +370,7 @@ def test_valid_shaped_raw_tampering_with_old_hash_blocks_completion():
 
 def test_every_retry_is_reserved_before_physical_http(monkeypatch):
     import tools.weather_collect_hosted as module
+    module._domain_imports()
     from common.http.contract import TransportResponse
     responses = [429, 200]
     client = Client()
@@ -425,3 +426,140 @@ def test_invalid_old_raw_key_clock_is_isolated_from_latest_collection():
     assert result["cycles_blocked"] == 1 and result["cycles_completed"] == 2
     assert result["source_issues_completed"][0] == "2026-10-13T08:00:00+09:00"
     assert json.loads(client.files[key])["object_keys"][0] == bad_raw_key
+
+
+def test_page_failure_identifies_safe_rule_and_request_context():
+    issue = eligible_issues(NOW)[-1]
+    doc = json.loads(payload(issue, 1))
+    doc['response']['body']['items']['item'][0]['fcstValue'] = ''
+    doc['response']['header']['resultMsg'] = 'secret https://private.example'
+    with pytest.raises(HostedCollectionError) as caught:
+        validate_page(json.dumps(doc).encode(), issue=issue, nx=1, ny=127, page_no=1)
+    diagnostic = caught.value.diagnostics
+    assert diagnostic['validation_rule'] == 'required_fcstValue'
+    assert diagnostic['source_issue'] == issue.isoformat()
+    assert diagnostic['nx'] == 1 and diagnostic['ny'] == 127 and diagnostic['page_no'] == 1
+    assert diagnostic['response_total_count'] == 1
+    assert 'secret' not in json.dumps(diagnostic) and 'private.example' not in json.dumps(diagnostic)
+
+
+def test_latest_source_contract_failure_keeps_progress_and_collects_oldest():
+    class InvalidLatest(Source):
+        def fetch_page(self, **args):
+            status, raw = super().fetch_page(**args)
+            if args['base_time'] == '0800' and args['nx'] == 4:
+                doc = json.loads(raw)
+                doc['response']['body']['pageNo'] = 99
+                return status, json.dumps(doc).encode()
+            return status, raw
+    client = Client()
+    result = run(client, InvalidLatest(), only_latest=False)
+    assert result['status'] == 'degraded' and result['cycles_failed'] == 1
+    assert result['cycles_completed'] == 1
+    assert result['source_issues_completed'] == ['2026-10-12T11:00:00+09:00']
+    failure = result['failures'][0]
+    assert failure['validation_rule'] == 'page_number'
+    assert failure['checkpoint_pages'] == 3
+    assert failure['source_issue'] == '2026-10-13T08:00:00+09:00'
+    assert failure['checkpoint_write_acknowledged'] is True
+    recovered = run(client, Source())
+    assert recovered['raw_objects_reused'] == 3
+
+
+def test_deadline_failure_retains_completed_cycle_summary():
+    class StopAfterLatest(Deadline):
+        def check(self, headroom=40):
+            if any(k.endswith('/_manifest.json') for k in client.files):
+                raise HostedCollectionError('run_deadline')
+    client = Client()
+    with pytest.raises(HostedCollectionError) as caught:
+        collect_hosted(client, 'bucket', source=Source(), grids=GRIDS,
+            clock=lambda: NOW, deadline=StopAfterLatest(), only_latest=False)
+    result = caught.value.summary
+    assert result['cycles_completed'] == 1
+    assert result['source_issues_completed'] == ['2026-10-13T08:00:00+09:00']
+    assert result['status'] == 'failed'
+
+
+def test_connection_timeout_retries_each_reserved_physical_attempt(monkeypatch):
+    import tools.weather_collect_hosted as module
+    module._domain_imports()
+    from common.http.contract import TransportResponse
+    from requests.exceptions import ConnectTimeout
+    client = Client()
+    pauses = []
+    deadline = Deadline(sleep=pauses.append)
+    budget = AttemptBudget(client, 'bucket', clock=lambda: NOW, deadline=deadline)
+    attempts = []
+    class Transport:
+        def __init__(self, _deadline):
+            pass
+        def send(self, *args, **kwargs):
+            attempts.append(budget.attempts)
+            if len(attempts) < 3:
+                raise ConnectTimeout('private token and URL')
+            return TransportResponse(status=200, content=payload(eligible_issues(NOW)[-1], 1))
+    monkeypatch.setenv('KMA_SERVICE_KEY', 'test-key')
+    monkeypatch.setattr(module, 'BoundedTransport', Transport)
+    source = module._hosted_source(budget, deadline)
+    assert source.fetch_page(base_date='20261013',base_time='0800',nx=1,ny=127,
+        page_no=1,num_of_rows=1000)[0] == 200
+    assert attempts == [1,2,3] and pauses == [30,60]
+
+
+def test_transport_guard_is_not_retried_as_a_connection_error(monkeypatch):
+    import tools.weather_collect_hosted as module
+    client = Client()
+    deadline = Deadline(sleep=lambda _: pytest.fail('guard must not sleep'))
+    budget = AttemptBudget(client, 'bucket', clock=lambda: NOW, deadline=deadline)
+    class Transport:
+        def __init__(self, _deadline):
+            self.guard_failure = None
+        def send(self, *args, **kwargs):
+            self.guard_failure = HostedCollectionError('source_size_limit')
+            raise self.guard_failure
+    monkeypatch.setenv('KMA_SERVICE_KEY','test-key')
+    monkeypatch.setattr(module,'BoundedTransport',Transport)
+    with pytest.raises(HostedCollectionError,match='source_size_limit'):
+        module._hosted_source(budget,deadline).fetch_page(base_date='20261013',base_time='0800',
+            nx=1,ny=127,page_no=1,num_of_rows=1000)
+    assert budget.attempts == 1
+
+
+def test_network_retries_stop_at_four_and_report_safe_context(monkeypatch):
+    import tools.weather_collect_hosted as module
+    from requests.exceptions import ConnectTimeout
+    module._domain_imports()
+    client, pauses = Client(), []
+    deadline = Deadline(sleep=pauses.append)
+    budget = AttemptBudget(client,'bucket',clock=lambda: NOW,deadline=deadline)
+    class Transport:
+        def __init__(self,_deadline):
+            pass
+        def send(self,*args,**kwargs):
+            raise ConnectTimeout('token=secret https://private.example')
+    monkeypatch.setenv('KMA_SERVICE_KEY','test-key')
+    monkeypatch.setattr(module,'BoundedTransport',Transport)
+    source = module.ValidatedSource(module._hosted_source(budget,deadline),eligible_issues(NOW)[-1])
+    with pytest.raises(HostedCollectionError,match='source_http_failure') as caught:
+        source.fetch_page(base_date='20261013',base_time='0800',nx=1,ny=127,page_no=1,num_of_rows=1000)
+    assert budget.attempts == 4 and pauses == [30,60,120]
+    assert caught.value.diagnostics['source_http_kind'] == 'timeout'
+    assert caught.value.diagnostics['page_no'] == 1
+    assert 'secret' not in json.dumps(caught.value.diagnostics)
+
+
+def test_cli_failure_retains_progress_without_provider_exception_text(monkeypatch,tmp_path,capsys):
+    import tools.weather_collect_hosted as module
+    exc = HostedCollectionError('run_deadline')
+    exc.summary = {'status':'failed','cycles_completed':1,'physical_attempts':80,'failures':[]}
+    monkeypatch.delenv('GITHUB_REPOSITORY',raising=False)
+    monkeypatch.delenv('GITHUB_REF',raising=False)
+    monkeypatch.setattr(module,'_client_from_env',lambda: (Client(),'bucket'))
+    monkeypatch.setattr(module,'collect_hosted',lambda *a,**kw: (_ for _ in ()).throw(exc))
+    file = tmp_path/'summary.json'
+    assert main(['--summary-file',str(file)]) == 2
+    doc = json.loads(file.read_text())
+    assert doc['cycles_completed'] == 1 and doc['physical_attempts'] == 80
+    assert doc['reason_code'] == 'run_deadline'
+    assert json.loads(capsys.readouterr().out) == doc
