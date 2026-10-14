@@ -10,6 +10,10 @@ on:
         description: Collect only the latest available issue for a bounded recovery check
         type: boolean
         default: false
+      source_issue:
+        description: Optional single ISO timestamp within the eligible 24-hour window
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -45,9 +49,11 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.WEATHER_COLLECTION_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.WEATHER_COLLECTION_R2_SECRET_ACCESS_KEY }}
           ONLY_LATEST: ${{ inputs.only_latest }}
+          SOURCE_ISSUE: ${{ inputs.source_issue }}
         run: |
           args=()
           if [ "$ONLY_LATEST" = "true" ]; then args+=(--only-latest); fi
+          if [ -n "$SOURCE_ISSUE" ]; then args+=(--source-issue "$SOURCE_ISSUE"); fi
           python -m tools.weather_collect_hosted "${args[@]}" --summary-file "$RUNNER_TEMP/weather-collection-summary.json"
       - name: Show collection outcome
         if: always()
