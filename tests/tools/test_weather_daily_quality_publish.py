@@ -88,3 +88,22 @@ def test_publication_rejects_private_fields_and_rebuilds_markdown(tmp_path):
     (output / '2026-10-12.md').write_text('private string must never be copied')
     publish_report(output, checkout, '2026-10-12')
     assert 'private string' not in (checkout / 'reports/2026-10-12.md').read_text()
+
+
+def test_explicit_recheck_appends_real_evidence_without_rewriting_daily_report(tmp_path):
+    checkout = tmp_path/'checkout'
+    prepare_branch(checkout,str(bare_repo(tmp_path)))
+    output = sample(tmp_path/'output')
+    assert publish_report(output,checkout,'2026-10-12') is True
+    original = (checkout/'reports/2026-10-12.json').read_bytes()
+    file = output/'2026-10-12.json'
+    report = json.loads(file.read_text())
+    report['evaluation_as_of'] = '2026-10-13T03:00:00+00:00'
+    file.write_text(json.dumps(report))
+    assert publish_report(output,checkout,'2026-10-12',refresh=True) is True
+    assert (checkout/'reports/2026-10-12.json').read_bytes() == original
+    recheck = checkout/'reports/2026-10-12/rechecks/20261013T030000000000Z.json'
+    assert json.loads(recheck.read_text()) == report
+    assert publish_report(output,checkout,'2026-10-12',refresh=True) is False
+    assert git(checkout,'rev-list','--count','HEAD') == '2'
+    assert publish_report(output,checkout,'2026-10-12') is False
