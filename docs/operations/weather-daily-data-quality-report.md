@@ -178,6 +178,12 @@ Actions 실행 성공은 리포트 생성·게시 성공을 뜻한다. 수집 �
 뜻은 아니다. 품질 상태는 리포트와 Actions Summary에서 확인한다.
 
 수동 재시도는 Actions의 `Weather Daily Quality` → `Run workflow`로 수행한다.
+이미 게시한 날짜를 복구 후 다시 측정하려면 `refresh=true`로 실행한다. 기존 일일
+리포트는 보존하고 실제 `evaluation_as_of`를 사용한 새 평가를
+`reports/YYYY-MM-DD/rechecks/YYYYMMDDTHHMMSSffffffZ.{json,md}`에 추가한다.
+동일 평가의 재게시에는 새 커밋을 만들지 않는다. 과거 보고서나 커밋 작성 시각을
+덮어쓰지 않고 새 읽기에서 얻은 품질 상태를 그대로 기록한다. 예약 실행은 기존처럼
+하루의 첫 리포트만 발행하고, refresh는 명시적 수동 재측정에만 적용한다.
 중단은 해당 workflow를 disable하고 필요하면 전용 R2 token을 revoke한다.
 기존 보고서 이력과 로컬 수집 상태에는 영향을 주지 않는다. 잘못된 일일 리포트의
 정정은 별도 검토된 변경으로 처리한다. 자동 실행이 과거 날짜를 재작성하지 않는다.
