@@ -563,3 +563,45 @@ def test_cli_failure_retains_progress_without_provider_exception_text(monkeypatc
     assert doc['cycles_completed'] == 1 and doc['physical_attempts'] == 80
     assert doc['reason_code'] == 'run_deadline'
     assert json.loads(capsys.readouterr().out) == doc
+
+
+def test_explicit_issue_resumes_only_the_eligible_selected_checkpoint():
+    client, source = Client(), Source()
+    issue = eligible_issues(NOW)[-2]
+    result = collect_hosted(client,'bucket',source=source,grids=GRIDS,clock=lambda:NOW,source_issue=issue)
+    assert result['source_issues_completed'] == [issue.isoformat()]
+    assert len(source.calls) == 80 and {c['base_time'] for c in source.calls} == {'0500'}
+    again = Source()
+    before = sum(method=='put' for method,_ in client.calls)
+    result = collect_hosted(client,'bucket',source=again,grids=GRIDS,clock=lambda:NOW,source_issue=issue)
+    assert result['cycles_reused'] == 1 and result['physical_attempts'] == 0
+    assert not again.calls and sum(method=='put' for method,_ in client.calls) == before
+
+
+@pytest.mark.parametrize('issue',[NOW-timedelta(days=2),NOW.replace(hour=11,minute=0),NOW.replace(hour=8,minute=1)])
+def test_explicit_issue_outside_release_window_is_rejected_without_requests_or_writes(issue):
+    client,source = Client(),Source()
+    with pytest.raises(HostedCollectionError,match='source_issue_outside_window'):
+        collect_hosted(client,'bucket',source=source,grids=GRIDS,clock=lambda:NOW,source_issue=issue)
+    assert not source.calls and not client.calls
+
+
+def test_no_data_grid_does_not_block_other_grids_or_create_complete_manifest():
+    class NoData(Source):
+        def fetch_page(self,**args):
+            if args['nx'] in (4,6):
+                self.calls.append(args)
+                return 200,json.dumps({'response':{'header':{'resultCode':'03','resultMsg':'NO_DATA'}}}).encode()
+            return super().fetch_page(**args)
+    client,source = Client(),NoData()
+    result = run(client,source)
+    assert result['status']=='degraded' and result['cycles_completed']==0
+    assert len(source.calls)==80
+    failure = result['failures'][0]
+    assert failure['checkpoint_pages']==78
+    assert {p['nx'] for p in failure['unavailable_source_pages']}=={4,6}
+    assert not any(k.endswith('/_manifest.json') for k in client.files)
+    recovered = Source()
+    result = run(client,recovered)
+    assert result['cycles_completed']==1 and result['raw_objects_reused']==78
+    assert [c['nx'] for c in recovered.calls]==[4,6]

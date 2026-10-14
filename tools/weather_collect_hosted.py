@@ -533,7 +533,8 @@ def _hosted_source(budget: AttemptBudget, deadline: Deadline):
 
 def collect_hosted(client, bucket: str, *, source=None, grids=None,
                    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-                   only_latest: bool = False, deadline: Deadline | None = None) -> dict:
+                   only_latest: bool = False, deadline: Deadline | None = None,
+                   source_issue: datetime | None = None) -> dict:
     _domain_imports()
     from weather_ingest.kma import DEFAULT_GRID_CSV, load_kma_grids
     from weather_ingest.landing import KmaGrid, KmaLanding, KmaLandingRequest, RunIdentity
@@ -546,6 +547,11 @@ def collect_hosted(client, bucket: str, *, source=None, grids=None,
     source = source or _hosted_source(budget, deadline)
     issues = eligible_issues(clock())
     _require(bool(issues), "issue_window_empty")
+    if source_issue is not None:
+        _require(not only_latest, 'issue_selection_conflict')
+        source_issue = _aware(source_issue)
+        _require(source_issue in issues, 'source_issue_outside_window')
+        issues = [source_issue]
     if only_latest:
         issues = issues[-1:]
     pending, reused, reused_issues, blocked_issues = [], 0, [], []
@@ -595,13 +601,24 @@ def collect_hosted(client, bucket: str, *, source=None, grids=None,
               "source_issues_blocked": blocked_issues,
               "blocked_reason_code": "manifest_integrity_failure" if blocked_issues else None}
     for issue, store in selected:
+        unavailable_pages = []
+
+        def defer_no_data(exc):
+            if (isinstance(exc, HostedCollectionError) and str(exc) == 'source_page_contract'
+                    and exc.diagnostics.get('validation_rule') == 'response_business'
+                    and exc.diagnostics.get('source_result_code') == '03'):
+                unavailable_pages.append(exc.diagnostics)
+                return True
+            return False
+
         try:
             deadline.check()
             request = KmaLandingRequest(issue.strftime("%Y%m%d"), issue.strftime("%H%M"),
                                         tuple(KmaGrid(**grid) for grid in grids), 1000)
             landing = KmaLanding(source=ValidatedSource(source, issue), raw_store=store, raw_prefix="raw",
                                  checkpoint_prefix=CHECKPOINT_PREFIX, clock=clock,
-                                 request_id=lambda: uuid.uuid4().hex, raw_spool=None)
+                                 request_id=lambda: uuid.uuid4().hex, raw_spool=None,
+                                 defer_source_failure=defer_no_data)
             batch = landing.collect(RunIdentity(DAG_ID, store.run_id), request)
         except Exception as exc:
             failure = {'source_issue': issue.isoformat(),
@@ -610,6 +627,8 @@ def collect_hosted(client, bucket: str, *, source=None, grids=None,
                        'checkpoint_write_acknowledged': store.checkpoint_write_acknowledged}
             if isinstance(exc, HostedCollectionError):
                 failure.update(exc.diagnostics)
+            if unavailable_pages:
+                failure['unavailable_source_pages'] = unavailable_pages
             result['failures'].append(failure)
             result['cycles_failed'] += 1
             result['physical_attempts'] = budget.attempts
@@ -656,14 +675,22 @@ def _client_from_env():
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--only-latest", action="store_true")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--only-latest", action="store_true")
+    selection.add_argument('--source-issue', help='Resume one issued timestamp inside the existing 24-hour window')
     parser.add_argument("--summary-file", type=Path)
     args = parser.parse_args(argv)
     try:
         _require(os.environ.get("GITHUB_REPOSITORY", REPOSITORY) == REPOSITORY, "repository_scope")
         _require(os.environ.get("GITHUB_REF", "refs/heads/main") == "refs/heads/main", "branch_scope")
+        issue = None
+        if args.source_issue:
+            try:
+                issue = _aware(datetime.fromisoformat(args.source_issue))
+            except (TypeError, ValueError) as exc:
+                raise HostedCollectionError('source_issue_invalid') from exc
         client, bucket = _client_from_env()
-        result = collect_hosted(client, bucket, only_latest=args.only_latest)
+        result = collect_hosted(client, bucket, only_latest=args.only_latest, source_issue=issue)
         serialized = json.dumps(result, sort_keys=True)
         if args.summary_file:
             args.summary_file.parent.mkdir(parents=True, exist_ok=True)
