@@ -49,7 +49,12 @@ def _domain_imports() -> None:
 
 
 class HostedCollectionError(RuntimeError):
-    """Only fixed reason codes cross the hosted command's logging boundary."""
+    """Only fixed codes and constructed, public-safe diagnostics are logged."""
+
+    def __init__(self, code: str, *, diagnostics: dict | None = None) -> None:
+        super().__init__(code)
+        self.diagnostics = diagnostics or {}
+        self.summary = None
 
 
 def _require(condition: bool, code: str) -> None:
@@ -198,21 +203,62 @@ def validate_page(payload: bytes, *, issue: datetime, nx: int, ny: int, page_no:
     from weather_ingest.errors import WeatherSourceBusinessError, WeatherSourceSchemaError
 
     _require(isinstance(payload, bytes) and len(payload) <= RAW_MAX_BYTES, "source_size_limit")
-    doc = _json(payload, "source_page_contract")
+    try:
+        doc = _json(payload, "source_page_contract")
+    except HostedCollectionError as exc:
+        raise _page_failure('invalid_json', {}, issue, nx, ny, page_no) from exc
     try:
         metadata, rows = parse_kma_response(payload)
+    except WeatherSourceBusinessError as exc:
+        raise _page_failure('response_business', doc, issue, nx, ny, page_no) from exc
+    except WeatherSourceSchemaError as exc:
+        rule = 'response_schema'
+        # Map only fixed validator messages to a closed field vocabulary. Never
+        # log the exception itself, provider resultMsg, URLs or response rows.
+        for field in ('baseDate', 'baseTime', 'category', 'fcstDate', 'fcstTime', 'fcstValue', 'nx', 'ny'):
+            if str(exc).endswith(' is missing required field: ' + field):
+                rule = 'required_' + field
+                break
+        raise _page_failure(rule, doc, issue, nx, ny, page_no) from exc
+    try:
         validate_kma_response_context(rows, base_date=issue.strftime("%Y%m%d"),
                                       base_time=issue.strftime("%H%M"), nx=nx, ny=ny)
-    except (WeatherSourceBusinessError, WeatherSourceSchemaError) as exc:
-        raise HostedCollectionError("source_page_contract") from exc
+    except WeatherSourceSchemaError as exc:
+        raise _page_failure('request_context', doc, issue, nx, ny, page_no) from exc
     body = doc["response"]["body"]
-    total = _integer(metadata["total_count"], 1, 2000, "source_page_contract")
+    total = metadata['total_count']
+    if type(total) is not int or not 1 <= total <= 2000:
+        raise _page_failure('total_count', doc, issue, nx, ny, page_no)
     pages = math.ceil(total / 1000)
-    _require(type(body.get("pageNo")) is int and body["pageNo"] == page_no and
-             type(body.get("numOfRows")) is int and body["numOfRows"] == 1000 and
-             1 <= page_no <= pages and
-             len(rows) == min(1000, total - (page_no - 1) * 1000), "source_page_contract")
+    for valid, rule in (
+        (type(body.get('pageNo')) is int and body['pageNo'] == page_no, 'page_number'),
+        (type(body.get('numOfRows')) is int and body['numOfRows'] == 1000, 'page_size'),
+        (1 <= page_no <= pages, 'page_range'),
+        (len(rows) == min(1000, total - (page_no - 1) * 1000), 'row_count'),
+    ):
+        if not valid:
+            raise _page_failure(rule, doc, issue, nx, ny, page_no)
     return {**metadata, "page_no": page_no, "page_count": pages}, rows
+
+
+def _page_failure(rule: str, doc: dict, issue: datetime, nx: int, ny: int, page_no: int) -> HostedCollectionError:
+    response = doc.get('response')
+    response = response if isinstance(response, dict) else {}
+    body, header = response.get('body'), response.get('header')
+    body = body if isinstance(body, dict) else {}
+    header = header if isinstance(header, dict) else {}
+    diagnostic = {'validation_rule': rule, 'source_issue': _aware(issue).isoformat(),
+                  'nx': nx, 'ny': ny, 'page_no': page_no}
+    for source_field, field in (('pageNo', 'response_page_no'), ('numOfRows', 'response_page_size'),
+                                ('totalCount', 'response_total_count')):
+        value = body.get(source_field)
+        diagnostic[field] = value if type(value) is int and 0 <= value <= 10_000_000 else None
+    code = header.get('resultCode')
+    diagnostic['source_result_code'] = code if isinstance(code, str) and re.fullmatch(r'[0-9]{2}', code) else None
+    items = body.get('items')
+    items = items.get('item') if isinstance(items, dict) else None
+    diagnostic['response_row_count'] = len(items) if isinstance(items, list) else (1 if isinstance(items, dict) else None)
+    return HostedCollectionError('source_page_contract', diagnostics=diagnostic)
 
 
 class ValidatedSource:
@@ -220,10 +266,22 @@ class ValidatedSource:
         self._source, self._issue = source, issue
 
     def fetch_page(self, **options) -> tuple[int, bytes]:
+        from common.http.errors import HttpProblemError
+
         _require(options["base_date"] == self._issue.strftime("%Y%m%d") and
                  options["base_time"] == self._issue.strftime("%H%M") and
                  options["num_of_rows"] == 1000 and options["page_no"] in (1, 2), "source_page_contract")
-        status, payload = self._source.fetch_page(**options)
+        try:
+            status, payload = self._source.fetch_page(**options)
+        except HttpProblemError as exc:
+            kinds = {'urn:asac:error:api-timeout': 'timeout',
+                     'urn:asac:error:connection-error': 'connection',
+                     'urn:asac:error:http-error': 'http_status'}
+            diagnostic = {'source_issue': _aware(self._issue).isoformat(),
+                          'nx': options['nx'], 'ny': options['ny'], 'page_no': options['page_no'],
+                          'source_http_kind': kinds.get(exc.problem.type, 'other'),
+                          'source_http_status': exc.status if type(exc.status) is int and 100 <= exc.status <= 599 else None}
+            raise HostedCollectionError('source_http_failure', diagnostics=diagnostic) from exc
         _require(type(status) is int and 200 <= status < 300, "source_http_failure")
         validate_page(payload, issue=self._issue, nx=options["nx"], ny=options["ny"], page_no=options["page_no"])
         return status, payload
@@ -239,6 +297,8 @@ class ScopedStore:
         self._client, self._bucket = client, bucket
         self._issue, self._clock = _aware(issue), clock
         self._deadline = deadline or Deadline()
+        self.checkpoint_pages = 0
+        self.checkpoint_write_acknowledged = False
         self._store = R2RawObjectStore(client, bucket=bucket, sleep=self._deadline.pause)
         self._configured_grids = [dict(item) for item in grids]
         self._grids = {(item["nx"], item["ny"]) for item in grids}
@@ -286,7 +346,9 @@ class ScopedStore:
         response = self._client.get_object(Bucket=self._bucket, Key=key)
         payload = _read_response(response, limits[kind], "storage_size_limit")
         if kind == "checkpoint":
-            self._validate_checkpoint(_json(payload, "checkpoint_invalid"))
+            document = _json(payload, 'checkpoint_invalid')
+            self._validate_checkpoint(document)
+            self.checkpoint_pages = len(document['raw_objects'])
         return payload
 
     def read_sha256(self, key: str) -> str | None:
@@ -345,8 +407,12 @@ class ScopedStore:
         kind = self._kind(key)
         if kind == "checkpoint":
             _require(len(payload) <= CHECKPOINT_MAX_BYTES, "storage_size_limit")
-            self._validate_checkpoint(_json(payload, "checkpoint_invalid"))
+            document = _json(payload, 'checkpoint_invalid')
+            self._validate_checkpoint(document)
+            self.checkpoint_write_acknowledged = False
             self._store.write_bytes(key, payload, content_type)
+            self.checkpoint_pages = len(document['raw_objects'])
+            self.checkpoint_write_acknowledged = True
             return
         _require(kind == "manifest" and len(payload) <= MANIFEST_MAX_BYTES, "storage_scope")
         doc = self.validate_manifest(key, payload)
@@ -413,8 +479,16 @@ class BoundedTransport:
         import requests
         self._session = requests.Session()
         self._deadline = deadline
+        self.guard_failure = None
 
     def send(self, method, url, *, params, headers, timeout):
+        try:
+            return self._send(method, url, params=params, headers=headers, timeout=timeout)
+        except HostedCollectionError as exc:
+            self.guard_failure = exc
+            raise
+
+    def _send(self, method, url, *, params, headers, timeout):
         from common.http.contract import TransportResponse
 
         self._deadline.check()
@@ -432,12 +506,27 @@ class BoundedTransport:
 def _hosted_source(budget: AttemptBudget, deadline: Deadline):
     _domain_imports()
     from common.http import HttpCore
+    from common.http.errors import HttpProblemError
     from weather_ingest.common.runtime import fetch_url
     from weather_ingest.runtime import KmaHttpAdapter
 
-    http = HttpCore(source="weather_kma", transport=BoundedTransport(deadline), timeout=30,
-                    max_attempts=1, rate_limit=None, sleep=deadline.pause)
-    fetch = functools.partial(fetch_url, http_client=http, sleep=deadline.pause)
+    transport = BoundedTransport(deadline)
+
+    class GuardedHttp(HttpCore):
+        def get(self, *args, **kwargs):
+            transport.guard_failure = None
+            try:
+                return super().get(*args, **kwargs)
+            except HttpProblemError:
+                # HttpCore catches Exception from transports. Restore our local
+                # budget/size guard so it cannot turn into a retryable network fault.
+                if transport.guard_failure is not None:
+                    raise transport.guard_failure
+                raise
+
+    http = GuardedHttp(source="weather_kma", transport=transport, timeout=30,
+                       max_attempts=1, rate_limit=None, sleep=deadline.pause)
+    fetch = functools.partial(fetch_url, http_client=http, sleep=deadline.pause, retry_network_errors=True)
     return KmaHttpAdapter(fetch, delay_seconds=1, sleep=deadline.pause,
                           before_attempt=budget.reserve, dag_run_id=DAG_ID)
 
@@ -500,18 +589,42 @@ def collect_hosted(client, bucket: str, *, source=None, grids=None,
         selected.append(pending[-1])
     result = {"schema_version": 1, "status": "degraded" if blocked_issues else "success",
               "cycles_completed": 0, "cycles_reused": reused, "cycles_blocked": len(blocked_issues),
+              "cycles_failed": 0, "failures": [],
               "raw_pages": 0, "raw_objects_reused": 0, "forecast_rows": 0, "physical_attempts": 0,
               "source_issues_completed": [], "source_issues_reused": reused_issues,
               "source_issues_blocked": blocked_issues,
               "blocked_reason_code": "manifest_integrity_failure" if blocked_issues else None}
     for issue, store in selected:
-        deadline.check()
-        request = KmaLandingRequest(issue.strftime("%Y%m%d"), issue.strftime("%H%M"),
-                                    tuple(KmaGrid(**grid) for grid in grids), 1000)
-        landing = KmaLanding(source=ValidatedSource(source, issue), raw_store=store, raw_prefix="raw",
-                             checkpoint_prefix=CHECKPOINT_PREFIX, clock=clock,
-                             request_id=lambda: uuid.uuid4().hex, raw_spool=None)
-        batch = landing.collect(RunIdentity(DAG_ID, store.run_id), request)
+        try:
+            deadline.check()
+            request = KmaLandingRequest(issue.strftime("%Y%m%d"), issue.strftime("%H%M"),
+                                        tuple(KmaGrid(**grid) for grid in grids), 1000)
+            landing = KmaLanding(source=ValidatedSource(source, issue), raw_store=store, raw_prefix="raw",
+                                 checkpoint_prefix=CHECKPOINT_PREFIX, clock=clock,
+                                 request_id=lambda: uuid.uuid4().hex, raw_spool=None)
+            batch = landing.collect(RunIdentity(DAG_ID, store.run_id), request)
+        except Exception as exc:
+            failure = {'source_issue': issue.isoformat(),
+                       'reason_code': str(exc) if isinstance(exc, HostedCollectionError) else 'collection_failed',
+                       'checkpoint_pages': store.checkpoint_pages,
+                       'checkpoint_write_acknowledged': store.checkpoint_write_acknowledged}
+            if isinstance(exc, HostedCollectionError):
+                failure.update(exc.diagnostics)
+            result['failures'].append(failure)
+            result['cycles_failed'] += 1
+            result['physical_attempts'] = budget.attempts
+            result['status'] = 'degraded'
+            if isinstance(exc, HostedCollectionError) and str(exc) == 'source_page_contract':
+                # One invalid source issue must not prevent another selected
+                # issue from making durable progress. Keep the failed checkpoint.
+                continue
+            result['status'] = 'failed'
+            if not isinstance(exc, HostedCollectionError):
+                wrapped = HostedCollectionError('collection_failed')
+                wrapped.summary = result
+                raise wrapped from exc
+            exc.summary = result
+            raise
         result["cycles_completed"] += 1
         result["source_issues_completed"].append(issue.isoformat())
         result["raw_pages"] += len(batch.raw_objects)
@@ -559,7 +672,12 @@ def main(argv=None) -> int:
         return 0 if result["status"] == "success" else 2
     except Exception as exc:
         code = str(exc) if isinstance(exc, HostedCollectionError) else "collection_failed"
-        failure = json.dumps({"status": "failed", "reason_code": code, "error_type": type(exc).__name__}, sort_keys=True)
+        document = {"status": "failed", "reason_code": code, "error_type": type(exc).__name__}
+        if isinstance(exc, HostedCollectionError):
+            document.update(exc.diagnostics)
+            if exc.summary is not None:
+                document.update(exc.summary)
+        failure = json.dumps(document, sort_keys=True)
         if args.summary_file:
             try:
                 args.summary_file.parent.mkdir(parents=True, exist_ok=True)
