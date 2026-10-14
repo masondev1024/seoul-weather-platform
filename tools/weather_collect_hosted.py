@@ -601,13 +601,24 @@ def collect_hosted(client, bucket: str, *, source=None, grids=None,
               "source_issues_blocked": blocked_issues,
               "blocked_reason_code": "manifest_integrity_failure" if blocked_issues else None}
     for issue, store in selected:
+        unavailable_pages = []
+
+        def defer_no_data(exc):
+            if (isinstance(exc, HostedCollectionError) and str(exc) == 'source_page_contract'
+                    and exc.diagnostics.get('validation_rule') == 'response_business'
+                    and exc.diagnostics.get('source_result_code') == '03'):
+                unavailable_pages.append(exc.diagnostics)
+                return True
+            return False
+
         try:
             deadline.check()
             request = KmaLandingRequest(issue.strftime("%Y%m%d"), issue.strftime("%H%M"),
                                         tuple(KmaGrid(**grid) for grid in grids), 1000)
             landing = KmaLanding(source=ValidatedSource(source, issue), raw_store=store, raw_prefix="raw",
                                  checkpoint_prefix=CHECKPOINT_PREFIX, clock=clock,
-                                 request_id=lambda: uuid.uuid4().hex, raw_spool=None)
+                                 request_id=lambda: uuid.uuid4().hex, raw_spool=None,
+                                 defer_source_failure=defer_no_data)
             batch = landing.collect(RunIdentity(DAG_ID, store.run_id), request)
         except Exception as exc:
             failure = {'source_issue': issue.isoformat(),
@@ -616,6 +627,8 @@ def collect_hosted(client, bucket: str, *, source=None, grids=None,
                        'checkpoint_write_acknowledged': store.checkpoint_write_acknowledged}
             if isinstance(exc, HostedCollectionError):
                 failure.update(exc.diagnostics)
+            if unavailable_pages:
+                failure['unavailable_source_pages'] = unavailable_pages
             result['failures'].append(failure)
             result['cycles_failed'] += 1
             result['physical_attempts'] = budget.attempts

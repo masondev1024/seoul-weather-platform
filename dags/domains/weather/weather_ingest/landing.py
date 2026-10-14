@@ -223,6 +223,7 @@ class KmaLanding:
         request_id: Callable[[], str],
         checkpoint_prefix: str | None = None,
         raw_spool: RawPayloadSpool | None = None,
+        defer_source_failure: Callable[[Exception], bool] | None = None,
     ) -> None:
         self._source = source
         self._raw_store = raw_store
@@ -234,6 +235,7 @@ class KmaLanding:
         self._clock = clock
         self._request_id = request_id
         self._raw_spool = raw_spool
+        self._defer_source_failure = defer_source_failure
 
     @staticmethod
     def _safe_key_segment(value: str) -> str:
@@ -483,53 +485,63 @@ class KmaLanding:
         )
         api_request_count = 0
         reused_raw_object_count = 0
+        deferred_source_errors = []
         for grid in request.grids:
-            grid_objects: list[KmaRawObject] = []
-            first_page = checkpoint_pages.get((grid.nx, grid.ny, 1))
-            if first_page is None:
-                first_page = self._fetch_page(
-                    request,
-                    grid,
-                    page_no=1,
-                    landing_load_date=landing_load_date,
-                    run_id=run.run_id,
-                )
-                api_request_count += 1
-            else:
-                reused_raw_object_count += 1
-            raw_objects.append(first_page)
-            grid_objects.append(first_page)
-            checkpoint_state[(first_page.nx, first_page.ny, first_page.page_no)] = first_page
-            self._save_checkpoint(
-                run, request, list(checkpoint_state.values()), landing_load_date=landing_load_date
-            )
-            for page_no in range(2, first_page.page_count + 1):
-                raw_object = checkpoint_pages.get((grid.nx, grid.ny, page_no))
-                if raw_object is None:
-                    raw_object = self._fetch_page(
+            try:
+                grid_objects: list[KmaRawObject] = []
+                first_page = checkpoint_pages.get((grid.nx, grid.ny, 1))
+                if first_page is None:
+                    first_page = self._fetch_page(
                         request,
                         grid,
-                        page_no=page_no,
+                        page_no=1,
                         landing_load_date=landing_load_date,
                         run_id=run.run_id,
                     )
                     api_request_count += 1
                 else:
                     reused_raw_object_count += 1
-                raw_objects.append(raw_object)
-                grid_objects.append(raw_object)
-                checkpoint_state[(raw_object.nx, raw_object.ny, raw_object.page_no)] = raw_object
+                raw_objects.append(first_page)
+                grid_objects.append(first_page)
+                checkpoint_state[(first_page.nx, first_page.ny, first_page.page_no)] = first_page
                 self._save_checkpoint(
                     run, request, list(checkpoint_state.values()), landing_load_date=landing_load_date
                 )
-            total_count = max(item.total_count for item in grid_objects)
-            parsed_rows = sum(item.row_count for item in grid_objects)
-            if parsed_rows < total_count:
-                raise KmaLandingIncompleteError(
-                    "KMA landing incomplete: "
-                    f"nx={grid.nx}, ny={grid.ny}, "
-                    f"total_count={total_count}, parsed_rows={parsed_rows}"
-                )
+                for page_no in range(2, first_page.page_count + 1):
+                    raw_object = checkpoint_pages.get((grid.nx, grid.ny, page_no))
+                    if raw_object is None:
+                        raw_object = self._fetch_page(
+                            request,
+                            grid,
+                            page_no=page_no,
+                            landing_load_date=landing_load_date,
+                            run_id=run.run_id,
+                        )
+                        api_request_count += 1
+                    else:
+                        reused_raw_object_count += 1
+                    raw_objects.append(raw_object)
+                    grid_objects.append(raw_object)
+                    checkpoint_state[(raw_object.nx, raw_object.ny, raw_object.page_no)] = raw_object
+                    self._save_checkpoint(
+                        run, request, list(checkpoint_state.values()), landing_load_date=landing_load_date
+                    )
+                total_count = max(item.total_count for item in grid_objects)
+                parsed_rows = sum(item.row_count for item in grid_objects)
+                if parsed_rows < total_count:
+                    raise KmaLandingIncompleteError(
+                        "KMA landing incomplete: "
+                        f"nx={grid.nx}, ny={grid.ny}, "
+                        f"total_count={total_count}, parsed_rows={parsed_rows}"
+                    )
+            except Exception as exc:
+                if self._defer_source_failure is None or not self._defer_source_failure(exc):
+                    raise
+                deferred_source_errors.append(exc)
+        if deferred_source_errors:
+            # Preserve all validated pages, but never publish an incomplete
+            # manifest when even one grid/page is unavailable.
+            raise deferred_source_errors[0]
         manifest_key = self._write_manifest(run, raw_objects, landing_load_date)
         return KmaLandingBatch(
             raw_objects=tuple(raw_objects),

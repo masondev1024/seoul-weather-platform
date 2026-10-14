@@ -584,3 +584,24 @@ def test_explicit_issue_outside_release_window_is_rejected_without_requests_or_w
     with pytest.raises(HostedCollectionError,match='source_issue_outside_window'):
         collect_hosted(client,'bucket',source=source,grids=GRIDS,clock=lambda:NOW,source_issue=issue)
     assert not source.calls and not client.calls
+
+
+def test_no_data_grid_does_not_block_other_grids_or_create_complete_manifest():
+    class NoData(Source):
+        def fetch_page(self,**args):
+            if args['nx'] in (4,6):
+                self.calls.append(args)
+                return 200,json.dumps({'response':{'header':{'resultCode':'03','resultMsg':'NO_DATA'}}}).encode()
+            return super().fetch_page(**args)
+    client,source = Client(),NoData()
+    result = run(client,source)
+    assert result['status']=='degraded' and result['cycles_completed']==0
+    assert len(source.calls)==80
+    failure = result['failures'][0]
+    assert failure['checkpoint_pages']==78
+    assert {p['nx'] for p in failure['unavailable_source_pages']}=={4,6}
+    assert not any(k.endswith('/_manifest.json') for k in client.files)
+    recovered = Source()
+    result = run(client,recovered)
+    assert result['cycles_completed']==1 and result['raw_objects_reused']==78
+    assert [c['nx'] for c in recovered.calls]==[4,6]
