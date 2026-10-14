@@ -152,6 +152,7 @@ def fetch_url(
     retry_base_delay_seconds: float = 1.0,
     retry_429_backoff_seconds: tuple[float, ...] | None = None,
     before_attempt: Callable[[int], object] | None = None,
+    retry_network_errors: bool = False,
     http_client: HttpCore | None = None,
     sleep: Callable[[float], None] | None = None,
 ) -> tuple[int, bytes]:
@@ -175,8 +176,14 @@ def fetch_url(
                 auth=NoAuth(),
                 expected_status=tuple(range(200, 600)),
             )
-        except HttpProblemError:
-            raise
+        except HttpProblemError as exc:
+            if (not retry_network_errors or attempt >= max_attempts or exc.status is not None
+                    or exc.problem.type not in (error_types.API_TIMEOUT.urn, error_types.CONNECTION_ERROR.urn)):
+                raise
+            # The reservation callback above runs again before the next actual
+            # request. HttpCore must stay at one attempt to avoid uncharged retries.
+            pause(http_retry_delay(None, attempt, retry_base_delay_seconds))
+            continue
 
         if response.status in OK_2XX:
             return response.status, response.content

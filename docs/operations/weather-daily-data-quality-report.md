@@ -157,6 +157,10 @@ manifest 최대 64개, 개별 본문 256 KiB, 본문 합계 4 MiB까지 읽는�
 검증 경로로 반영한다. 보고서 브랜치는 운영 DAG나 배포 코드의 source가 아니다.
 
 작성자는 `269997727+masondev1024@users.noreply.github.com`으로 고정한다.
+Git 명령의 `TZ=Asia/Seoul`로 실제 작성 시각을 `+09:00`에 기록한다. report 날짜를
+커밋 시각으로 소급하지 않는다. GitHub 기여 날짜는 author timestamp의 시간대를
+사용하므로 UTC runner에서 생성한 새벽 리포트가 한국 기준 전날로 잡히는 차이를
+방지한다. 기존 커밋을 재작성하지 않는다.
 프로젝트 GitHub Pages를 `gh-pages`에서 활성화하여 기여 집계 요건을 충족하고,
 `GITHUB_TOKEN` push 후에는 Pages build API를 명시 호출한다. 공개 리포트에는
 집계·시각·고정 사유 코드·생성 코드 SHA만 포함한다. 버킷명·원본 키·run ID·SQL·
