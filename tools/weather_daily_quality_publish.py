@@ -34,6 +34,9 @@ def report_day(value: str | None = None) -> str:
 
 def _git(checkout: Path, *args: str, check: bool = True):
     env = os.environ.copy()
+    # Use the owner's local date without backdating: Git still records the
+    # actual commit instant, with KST as its timestamp offset.
+    env['TZ'] = 'Asia/Seoul'
     token = env.get('GITHUB_TOKEN')
     if token:
         auth = base64.b64encode(f'x-access-token:{token}'.encode()).decode()

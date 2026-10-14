@@ -45,6 +45,8 @@ def test_publish_preserves_history_and_skips_same_day(tmp_path):
     assert publish_report(sample(tmp_path / 'next', '2026-10-13'), third, '2026-10-13') is True
     assert git(third, 'rev-list', '--count', 'HEAD') == '2'
     assert git(third, 'log', '-1', '--format=%ae') == '269997727+masondev1024@users.noreply.github.com'
+    assert git(third, 'log', '-1', '--format=%aI').endswith('+09:00')
+    assert git(third, 'log', '-1', '--format=%cI').endswith('+09:00')
     assert git(third, 'show', 'HEAD:reports/2026-10-12.md').startswith('# 서울 기상 수집 품질')
 
 
