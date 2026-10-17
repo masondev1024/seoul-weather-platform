@@ -204,7 +204,7 @@ def test_corrupt_old_complete_manifest_does_not_block_latest_collection():
     original = client.files[old_key]
     result = run(client, Source(), only_latest=False)
     assert result["status"] == "degraded" and result["cycles_blocked"] == 1
-    assert result["cycles_completed"] == 2
+    assert result["cycles_completed"] == 1
     assert result["source_issues_completed"][0] == "2026-10-13T08:00:00+09:00"
     assert client.files[old_key] == original
 
@@ -408,7 +408,7 @@ def test_old_raw_source_schema_error_does_not_block_fresh_latest():
     del doc["response"]["header"]
     client.files[raw_key] = json.dumps(doc).encode()
     result = run(client, Source(), only_latest=False)
-    assert result["cycles_blocked"] == 1 and result["cycles_completed"] == 2
+    assert result["cycles_blocked"] == 1 and result["cycles_completed"] == 1
     assert result["source_issues_completed"][0] == "2026-10-13T08:00:00+09:00"
 
 
@@ -423,7 +423,7 @@ def test_invalid_old_raw_key_clock_is_isolated_from_latest_collection():
     doc["object_keys"][0] = bad_raw_key
     client.files[key] = json.dumps(doc).encode()
     result = run(client, Source(), only_latest=False)
-    assert result["cycles_blocked"] == 1 and result["cycles_completed"] == 2
+    assert result["cycles_blocked"] == 1 and result["cycles_completed"] == 1
     assert result["source_issues_completed"][0] == "2026-10-13T08:00:00+09:00"
     assert json.loads(client.files[key])["object_keys"][0] == bad_raw_key
 
@@ -443,7 +443,7 @@ def test_page_failure_identifies_safe_rule_and_request_context():
     assert 'secret' not in json.dumps(diagnostic) and 'private.example' not in json.dumps(diagnostic)
 
 
-def test_latest_source_contract_failure_keeps_progress_and_collects_oldest():
+def test_latest_source_contract_failure_keeps_progress_without_second_cycle():
     class InvalidLatest(Source):
         def fetch_page(self, **args):
             status, raw = super().fetch_page(**args)
@@ -455,8 +455,8 @@ def test_latest_source_contract_failure_keeps_progress_and_collects_oldest():
     client = Client()
     result = run(client, InvalidLatest(), only_latest=False)
     assert result['status'] == 'degraded' and result['cycles_failed'] == 1
-    assert result['cycles_completed'] == 1
-    assert result['source_issues_completed'] == ['2026-10-12T11:00:00+09:00']
+    assert result['cycles_completed'] == 0
+    assert result['source_issues_completed'] == []
     failure = result['failures'][0]
     assert failure['validation_rule'] == 'page_number'
     assert failure['checkpoint_pages'] == 3
@@ -466,19 +466,14 @@ def test_latest_source_contract_failure_keeps_progress_and_collects_oldest():
     assert recovered['raw_objects_reused'] == 3
 
 
-def test_deadline_failure_retains_completed_cycle_summary():
-    class StopAfterLatest(Deadline):
-        def check(self, headroom=40):
-            if any(k.endswith('/_manifest.json') for k in client.files):
-                raise HostedCollectionError('run_deadline')
+def test_default_stops_after_one_cycle_instead_of_starting_second():
     client = Client()
-    with pytest.raises(HostedCollectionError) as caught:
-        collect_hosted(client, 'bucket', source=Source(), grids=GRIDS,
-            clock=lambda: NOW, deadline=StopAfterLatest(), only_latest=False)
-    result = caught.value.summary
+    source = Source()
+    result = collect_hosted(client, 'bucket', source=source, grids=GRIDS,
+        clock=lambda: NOW, only_latest=False)
     assert result['cycles_completed'] == 1
     assert result['source_issues_completed'] == ['2026-10-13T08:00:00+09:00']
-    assert result['status'] == 'failed'
+    assert result['status'] == 'success' and len(source.calls) == 80
 
 
 def test_connection_timeout_retries_each_reserved_physical_attempt(monkeypatch):
@@ -504,7 +499,7 @@ def test_connection_timeout_retries_each_reserved_physical_attempt(monkeypatch):
     source = module._hosted_source(budget, deadline)
     assert source.fetch_page(base_date='20261013',base_time='0800',nx=1,ny=127,
         page_no=1,num_of_rows=1000)[0] == 200
-    assert attempts == [1,2,3] and pauses == [30,60]
+    assert attempts == [1,2,3] and pauses == [5,10]
 
 
 def test_transport_guard_is_not_retried_as_a_connection_error(monkeypatch):
@@ -526,7 +521,7 @@ def test_transport_guard_is_not_retried_as_a_connection_error(monkeypatch):
     assert budget.attempts == 1
 
 
-def test_network_retries_stop_at_four_and_report_safe_context(monkeypatch):
+def test_network_retries_stop_at_three_and_report_safe_context(monkeypatch):
     import tools.weather_collect_hosted as module
     from requests.exceptions import ConnectTimeout
     module._domain_imports()
@@ -543,7 +538,7 @@ def test_network_retries_stop_at_four_and_report_safe_context(monkeypatch):
     source = module.ValidatedSource(module._hosted_source(budget,deadline),eligible_issues(NOW)[-1])
     with pytest.raises(HostedCollectionError,match='source_http_failure') as caught:
         source.fetch_page(base_date='20261013',base_time='0800',nx=1,ny=127,page_no=1,num_of_rows=1000)
-    assert budget.attempts == 4 and pauses == [30,60,120]
+    assert budget.attempts == 3 and pauses == [5,10]
     assert caught.value.diagnostics['source_http_kind'] == 'timeout'
     assert caught.value.diagnostics['page_no'] == 1
     assert 'secret' not in json.dumps(caught.value.diagnostics)
@@ -605,3 +600,253 @@ def test_no_data_grid_does_not_block_other_grids_or_create_complete_manifest():
     result = run(client,recovered)
     assert result['cycles_completed']==1 and result['raw_objects_reused']==78
     assert [c['nx'] for c in recovered.calls]==[4,6]
+
+
+def test_repair_excludes_latest_and_failed_oldest_rotates_durably():
+    class NoData(Source):
+        def fetch_page(self, **args):
+            self.calls.append(args)
+            return 200, b'{"response":{"header":{"resultCode":"03"}}}'
+    client, first = Client(), NoData()
+    result = collect_hosted(client, 'bucket', source=first, grids=GRIDS, clock=lambda: NOW, repair_oldest=True)
+    oldest = eligible_issues(NOW)[0]
+    assert result['status'] == 'degraded' and result['cycles_failed'] == 1
+    assert {call['base_date'] + call['base_time'] for call in first.calls} == {oldest.strftime('%Y%m%d%H%M')}
+    next_source = Source()
+    result = collect_hosted(client, 'bucket', source=next_source, grids=GRIDS, clock=lambda: NOW, repair_oldest=True)
+    assert result['source_issues_completed'] == [eligible_issues(NOW)[1].isoformat()]
+    assert result['source_issues_deferred'] == [oldest.isoformat()]
+    assert eligible_issues(NOW)[-1].isoformat() not in result['source_issues_completed']
+
+
+def test_repair_complete_repeat_has_no_storage_mutation_or_source_calls():
+    client = Client()
+    for issue in eligible_issues(NOW)[:-1]:
+        collect_hosted(client, 'bucket', source=Source(), grids=GRIDS, clock=lambda: NOW, source_issue=issue)
+    before = len([call for call in client.calls if call[0] == 'put'])
+    source = Source()
+    result = collect_hosted(client, 'bucket', source=source, grids=GRIDS, clock=lambda: NOW, repair_oldest=True)
+    assert result['cycles_completed'] == 0 and result['cycles_reused'] == 7
+    assert not source.calls and len([call for call in client.calls if call[0] == 'put']) == before
+
+
+def test_mixed_no_data_timeout_success_share_three_physical_attempts(monkeypatch):
+    import tools.weather_collect_hosted as module
+    module._domain_imports()
+    from common.http.contract import TransportResponse
+    from requests.exceptions import ConnectTimeout
+    client, pauses = Client(), []
+    deadline = Deadline(sleep=pauses.append)
+    budget = AttemptBudget(client, 'bucket', clock=lambda: NOW, deadline=deadline)
+    attempts = []
+    class Transport:
+        def __init__(self, _deadline):
+            pass
+        def send(self, *args, **kwargs):
+            attempts.append(budget.attempts)
+            if len(attempts) == 1:
+                return TransportResponse(status=200, content=b'{"response":{"header":{"resultCode":"03"}}}')
+            if len(attempts) == 2:
+                raise ConnectTimeout('private')
+            return TransportResponse(status=200, content=payload(eligible_issues(NOW)[-1], 1))
+    monkeypatch.setenv('KMA_SERVICE_KEY', 'test')
+    monkeypatch.setattr(module, 'BoundedTransport', Transport)
+    source = module.ValidatedSource(module._hosted_source(budget, deadline), eligible_issues(NOW)[-1])
+    source.fetch_page(base_date='20261013', base_time='0800', nx=1, ny=127, page_no=1, num_of_rows=1000)
+    assert attempts == [1, 2, 3] and pauses == [5, 10]
+
+
+def test_manifest_verification_uses_at_most_four_read_workers():
+    import threading
+    import time
+    class ConcurrentClient(Client):
+        def __init__(self):
+            super().__init__()
+            self.lock = threading.Lock()
+            self.active = self.maximum = 0
+        def get_object(self, **args):
+            if '/nx=' not in args['Key']:
+                return super().get_object(**args)
+            with self.lock:
+                self.active += 1
+                self.maximum = max(self.maximum, self.active)
+            try:
+                time.sleep(.002)
+                return super().get_object(**args)
+            finally:
+                with self.lock:
+                    self.active -= 1
+    client = ConcurrentClient()
+    run(client, Source())
+    assert 1 < client.maximum <= 4
+    client.maximum = 0
+    assert run(client, Source())['cycles_reused'] == 1
+    assert 1 < client.maximum <= 4
+
+
+@pytest.mark.parametrize('status,body', [(200,b''), (200,b'not-json'), (200,b'null'),
+    (200,b'{"response":{"header":{"resultCode":"30"}}}'), (401,b'')])
+def test_hosted_retries_no_schema_empty_or_auth_failures(monkeypatch,status,body):
+    import tools.weather_collect_hosted as module
+    module._domain_imports()
+    from common.http.contract import TransportResponse
+    client = Client()
+    deadline = Deadline(sleep=lambda _: pytest.fail('must not retry'))
+    budget = AttemptBudget(client,'bucket',clock=lambda:NOW,deadline=deadline)
+    class Transport:
+        def __init__(self,_deadline):
+            pass
+        def send(self,*args,**kwargs):
+            return TransportResponse(status=status,content=body)
+    monkeypatch.setenv('KMA_SERVICE_KEY','test')
+    monkeypatch.setattr(module,'BoundedTransport',Transport)
+    with pytest.raises(HostedCollectionError):
+        module.ValidatedSource(module._hosted_source(budget,deadline),eligible_issues(NOW)[-1]).fetch_page(
+            base_date='20261013',base_time='0800',nx=1,ny=127,page_no=1,num_of_rows=1000)
+    assert budget.attempts == 1
+
+
+def test_retry_after_longer_than_deadline_stops_before_second_reservation(monkeypatch):
+    import tools.weather_collect_hosted as module
+    module._domain_imports()
+    from common.http.contract import TransportResponse
+    client = Client()
+    deadline = Deadline(sleep=lambda _:pytest.fail('cannot sleep beyond deadline'))
+    budget = AttemptBudget(client,'bucket',clock=lambda:NOW,deadline=deadline)
+    class Transport:
+        def __init__(self,_deadline):
+            pass
+        def send(self,*args,**kwargs):
+            return TransportResponse(status=429,headers={'Retry-After':'3600'})
+    monkeypatch.setenv('KMA_SERVICE_KEY','test')
+    monkeypatch.setattr(module,'BoundedTransport',Transport)
+    with pytest.raises(HostedCollectionError,match='run_deadline'):
+        module._hosted_source(budget,deadline).fetch_page(base_date='20261013',base_time='0800',
+            nx=1,ny=127,page_no=1,num_of_rows=1000)
+    assert budget.attempts == 1
+
+
+def test_persistent_no_data_uses_only_three_physical_attempts(monkeypatch):
+    import tools.weather_collect_hosted as module
+    module._domain_imports()
+    from common.http.contract import TransportResponse
+    client,pauses = Client(),[]
+    deadline = Deadline(sleep=pauses.append)
+    budget = AttemptBudget(client,'bucket',clock=lambda:NOW,deadline=deadline)
+    class Transport:
+        def __init__(self,_deadline):
+            pass
+        def send(self,*args,**kwargs):
+            return TransportResponse(status=200,content=b'{"response":{"header":{"resultCode":"03"}}}')
+    monkeypatch.setenv('KMA_SERVICE_KEY','test')
+    monkeypatch.setattr(module,'BoundedTransport',Transport)
+    with pytest.raises(HostedCollectionError,match='source_page_contract') as caught:
+        module.ValidatedSource(module._hosted_source(budget,deadline),eligible_issues(NOW)[-1]).fetch_page(
+            base_date='20261013',base_time='0800',nx=1,ny=127,page_no=1,num_of_rows=1000)
+    assert budget.attempts==3 and pauses==[5,10]
+    assert caught.value.diagnostics['source_result_code']=='03'
+
+
+def test_repair_retry_corruption_and_forbidden_reads_fail_closed():
+    from tools.weather_collect_hosted import REPAIR_RETRY_PREFIX
+    issue = eligible_issues(NOW)[0]
+    key = f'{REPAIR_RETRY_PREFIX}/{run_id_for(issue)}.json'
+    client,source = Client(),Source()
+    client.files[key]=b'{"schema_version":true}'
+    with pytest.raises(HostedCollectionError,match='repair_retry_invalid'):
+        collect_hosted(client,'bucket',source=source,grids=GRIDS,clock=lambda:NOW,repair_oldest=True)
+    assert not source.calls and not any(method=='put' for method,_ in client.calls)
+    class Forbidden(Client):
+        def get_object(self,**options):
+            raise error('AccessDenied',403)
+    with pytest.raises(ClientError):
+        collect_hosted(Forbidden(),'bucket',source=source,grids=GRIDS,clock=lambda:NOW,repair_oldest=True)
+    assert not source.calls
+
+
+def test_partial_two_page_hosted_grid_refetches_only_its_grid_after_no_data():
+    class ChangedSource(Source):
+        def __init__(self,second_attempt=False):
+            super().__init__()
+            self.second_attempt=second_attempt
+        def fetch_page(self,**args):
+            self.calls.append(args)
+            issue = eligible_issues(NOW)[-1]
+            if args['nx']==4 and not self.second_attempt:
+                if args['page_no']==2:
+                    return 200,b'{"response":{"header":{"resultCode":"03"}}}'
+                return 200,payload(issue,4,total=1001,rows=1000)
+            return 200,payload(issue,args['nx'])
+    client = Client()
+    failed = run(client,ChangedSource())
+    assert failed['status']=='degraded' and failed['failures'][0]['checkpoint_pages']==80
+    raw_before = {key:body for key,body in client.files.items() if '/nx=' in key}
+    recovered = ChangedSource(second_attempt=True)
+    result = run(client,recovered)
+    assert result['cycles_completed']==1 and result['raw_objects_reused']==79
+    assert [(call['nx'],call['page_no']) for call in recovered.calls]==[(4,1)]
+    assert all(client.files[key]==body for key,body in raw_before.items())
+
+
+def test_repair_cooldown_expires_and_refetches_same_oldest_issue():
+    from tools.weather_collect_hosted import RepairRetry
+    client = Client()
+    issue = eligible_issues(NOW)[0]
+    earlier = NOW - timedelta(hours=4)
+    state = RepairRetry(client,'bucket',issue,clock=lambda:earlier,deadline=Deadline())
+    assert state.deferred() is False
+    state.defer('source_http_failure')
+    source = Source()
+    result = collect_hosted(client,'bucket',source=source,grids=GRIDS,clock=lambda:NOW,repair_oldest=True)
+    assert result['source_issues_completed']==[issue.isoformat()]
+    assert result['source_issues_deferred']==[] and len(source.calls)==80
+
+
+def test_repair_retry_compare_and_swap_conflict_fails_closed():
+    from tools.weather_collect_hosted import RepairRetry
+    client = Client()
+    state = RepairRetry(client,'bucket',eligible_issues(NOW)[0],clock=lambda:NOW,deadline=Deadline())
+    assert not state.deferred()
+    client.collisions=1
+    with pytest.raises(HostedCollectionError,match='repair_retry_conflict'):
+        state.defer('source_page_contract')
+    assert not client.files
+
+
+def test_repair_write_failure_keeps_original_source_failure():
+    class NoData(Source):
+        def fetch_page(self,**args):
+            self.calls.append(args)
+            return 200,b'{"response":{"header":{"resultCode":"03"}}}'
+    class FailedWrite(Client):
+        def put_object(self,**args):
+            if '/repair-retry/' in args['Key']:
+                raise error('AccessDenied',403)
+            return super().put_object(**args)
+    with pytest.raises(HostedCollectionError,match='source_page_contract') as caught:
+        collect_hosted(FailedWrite(),'bucket',source=NoData(),grids=GRIDS,clock=lambda:NOW,repair_oldest=True)
+    failure = caught.value.summary['failures'][0]
+    assert failure['reason_code']=='source_page_contract'
+    assert failure['source_result_code']=='03' and failure['repair_retry_persisted'] is False
+    assert failure['repair_retry_write_reason']=='storage_failure'
+
+
+def test_hosted_repeated_interruption_preserves_unvisited_grids_without_checkpoint_rewrites():
+    class NoData(Source):
+        def fetch_page(self,**args):
+            if args['nx']==4:
+                return 200,b'{"response":{"header":{"resultCode":"03"}}}'
+            return super().fetch_page(**args)
+    client = Client()
+    assert run(client,NoData())['status']=='degraded'
+    key = next(key for key in client.files if '/checkpoints/' in key)
+    original = client.files[key]
+    before = sum(method=='put' for method,_ in client.calls)
+    with pytest.raises(HostedCollectionError,match='collection_failed'):
+        run(client,Source(fail_nx=4))
+    assert client.files[key]==original
+    assert sum(method=='put' for method,_ in client.calls)==before
+    source = Source()
+    result = run(client,source)
+    assert result['raw_objects_reused']==79 and [call['nx'] for call in source.calls]==[4]
+    assert result['phase_seconds']['checkpoint_resume_validation'] >= 0

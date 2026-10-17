@@ -79,7 +79,7 @@ class ScriptedKmaSource:
         return 200, self.pages[key]
 
 
-def landing_for(source, store, request_ids=None):
+def landing_for(source, store, request_ids=None, **options):
     request_ids = request_ids or iter(("request-1", "request-2", "request-3"))
     return KmaLanding(
         source=source,
@@ -87,6 +87,7 @@ def landing_for(source, store, request_ids=None):
         raw_prefix="raw",
         clock=lambda: datetime(2026, 7, 5, 8, 20, tzinfo=timezone.utc),
         request_id=lambda: next(request_ids),
+        **options,
     )
 
 
@@ -606,3 +607,36 @@ def test_retry_interruption_keeps_unconsumed_checkpoint_pages():
     batch = landing_for(resumed, MemoryRawObjectStore(interrupted.objects)).collect(run, request)
     assert resumed.requests == [(58, 130, 1)]
     assert batch.reused_raw_object_count == 2
+
+
+def test_partial_grid_retry_refetches_page_one_when_source_page_count_shrinks():
+    request = KmaLandingRequest('20260705', '1700', (KmaGrid('first', 56, 130),), 1000)
+    run = RunIdentity('weather_vilage_fcst_bronze', 'mutable-pages')
+    store = MemoryRawObjectStore()
+    first = ScriptedKmaSource({(56, 130, 1): kma_payload(total_count=1001, item_count=1000)})
+    with pytest.raises(KeyError):
+        landing_for(first, store).collect(run, request)
+    original_keys = {key for key in store.objects if '/nx=' in key}
+    source = ScriptedKmaSource({(56, 130, 1): kma_payload(total_count=944, item_count=944)})
+    batch = landing_for(source, store, iter(('new-page',)), refetch_incomplete_grids=True).collect(run, request)
+    assert source.requests == [(56, 130, 1)] and batch.api_request_count == 1
+    assert len(batch.raw_objects) == 1 and batch.raw_objects[0].total_count == 944
+    assert original_keys.issubset(store.objects)
+
+
+def test_grid_changed_total_does_not_save_mixed_complete_checkpoint():
+    request = KmaLandingRequest('20260705', '1700', (KmaGrid('first', 56, 130),), 1000)
+    run = RunIdentity('weather_vilage_fcst_bronze', 'mixed-pages')
+    store = MemoryRawObjectStore()
+    source = ScriptedKmaSource({
+        (56, 130, 1): kma_payload(total_count=1001, item_count=1000),
+        (56, 130, 2): kma_payload(total_count=1100, item_count=100, page_no=2),
+    })
+    with pytest.raises(RuntimeError, match='incomplete'):
+        landing_for(source, store).collect(run, request)
+    checkpoint = json.loads(next(value for key, value in store.objects.items() if '/_checkpoints/' in key))
+    assert len(checkpoint['raw_objects']) <= 1
+    assert not any(key.endswith('/_manifest.json') for key in store.objects)
+    recovered = ScriptedKmaSource({(56, 130, 1): kma_payload(total_count=944, item_count=944)})
+    batch = landing_for(recovered, store, iter(('new-page',)), refetch_incomplete_grids=True).collect(run, request)
+    assert batch.raw_objects[0].total_count == 944

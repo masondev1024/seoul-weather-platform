@@ -4,6 +4,7 @@ import re
 import urllib.parse
 import time
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Callable
 
 from common.errors import types as error_types
@@ -129,7 +130,13 @@ def http_retry_delay(
         if key.lower() == "retry-after":
             try:
                 return max(0.0, float(value))
-            except ValueError:
+            except (TypeError, ValueError):
+                try:
+                    retry_at = parsedate_to_datetime(value)
+                    if retry_at.tzinfo is not None:
+                        return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+                except (TypeError, ValueError, OverflowError):
+                    pass
                 break
     if status_429_backoff_seconds:
         if 0 <= attempt - 1 < len(status_429_backoff_seconds):
@@ -155,6 +162,7 @@ def fetch_url(
     retry_network_errors: bool = False,
     http_client: HttpCore | None = None,
     sleep: Callable[[float], None] | None = None,
+    retry_response: Callable[[bytes], bool] | None = None,
 ) -> tuple[int, bytes]:
     client = _HTTP if http_client is None else http_client
     pause = time.sleep if sleep is None else sleep
@@ -186,6 +194,9 @@ def fetch_url(
             continue
 
         if response.status in OK_2XX:
+            if retry_response is not None and attempt < max_attempts and retry_response(response.content):
+                pause(http_retry_delay(response.headers, attempt, retry_base_delay_seconds))
+                continue
             return response.status, response.content
         if response.status not in retry_codes:
             break
