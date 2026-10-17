@@ -24,6 +24,7 @@ concurrency:
 
 jobs:
   collect:
+    name: Latest source issue
     if: >-
       github.repository == 'masondev1024/seoul-weather-platform' &&
       github.ref == 'refs/heads/main' &&
@@ -41,7 +42,7 @@ jobs:
           python-version: 3.11.15
       - name: Install pinned collection clients
         run: python -m pip install boto3==1.43.0 requests==2.32.5
-      - name: Resume bounded source issues into R2
+      - name: Collect one latest or explicitly selected issue into R2
         env:
           KMA_SERVICE_KEY: ${{ secrets.WEATHER_COLLECTION_KMA_SERVICE_KEY }}
           R2_ENDPOINT: ${{ secrets.WEATHER_QUALITY_R2_ENDPOINT }}
@@ -51,9 +52,11 @@ jobs:
           ONLY_LATEST: ${{ inputs.only_latest }}
           SOURCE_ISSUE: ${{ inputs.source_issue }}
         run: |
-          args=()
-          if [ "$ONLY_LATEST" = "true" ]; then args+=(--only-latest); fi
-          if [ -n "$SOURCE_ISSUE" ]; then args+=(--source-issue "$SOURCE_ISSUE"); fi
+          args=(--only-latest)
+          if [ -n "$SOURCE_ISSUE" ]; then
+            args=(--source-issue "$SOURCE_ISSUE")
+            if [ "$ONLY_LATEST" = "true" ]; then args+=(--only-latest); fi
+          fi
           python -m tools.weather_collect_hosted "${args[@]}" --summary-file "$RUNNER_TEMP/weather-collection-summary.json"
       - name: Show collection outcome
         if: always()
@@ -62,4 +65,43 @@ jobs:
             cat "$RUNNER_TEMP/weather-collection-summary.json" >> "$GITHUB_STEP_SUMMARY"
           else
             echo 'Collection stopped before a verified summary was produced.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  repair:
+    name: Repair one older source issue
+    needs: collect
+    if: >-
+      always() && !cancelled() && needs.collect.result != 'cancelled' &&
+      github.repository == 'masondev1024/seoul-weather-platform' &&
+      github.ref == 'refs/heads/main' &&
+      vars.WEATHER_COLLECTION_ENABLED == 'enabled' &&
+      !inputs.only_latest && !inputs.source_issue
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout trusted collector
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: 3.11.15
+      - name: Install pinned collection clients
+        run: python -m pip install boto3==1.43.0 requests==2.32.5
+      - name: Resume one eligible older issue with its own time budget
+        env:
+          KMA_SERVICE_KEY: ${{ secrets.WEATHER_COLLECTION_KMA_SERVICE_KEY }}
+          R2_ENDPOINT: ${{ secrets.WEATHER_QUALITY_R2_ENDPOINT }}
+          R2_BUCKET_NAME: ${{ secrets.WEATHER_QUALITY_R2_BUCKET_NAME }}
+          R2_ACCESS_KEY_ID: ${{ secrets.WEATHER_COLLECTION_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.WEATHER_COLLECTION_R2_SECRET_ACCESS_KEY }}
+        run: python -m tools.weather_collect_hosted --repair-oldest --summary-file "$RUNNER_TEMP/weather-collection-summary.json"
+      - name: Show repair outcome
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/weather-collection-summary.json" ]; then
+            cat "$RUNNER_TEMP/weather-collection-summary.json" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Repair stopped before a verified summary was produced.' >> "$GITHUB_STEP_SUMMARY"
           fi

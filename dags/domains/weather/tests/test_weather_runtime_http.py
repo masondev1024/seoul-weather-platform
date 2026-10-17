@@ -140,3 +140,27 @@ def test_fetch_url_budget_rejection_performs_no_physical_http(monkeypatch):
         )
 
     assert transport.calls == []
+
+
+def test_fetch_url_optional_response_retry_uses_single_attempt_envelope(monkeypatch):
+    transport = FakeTransport([
+        TransportResponse(status=200, content=b'no-data'),
+        TransportResponse(status=503),
+        TransportResponse(status=200, content=b'ok'),
+    ])
+    monkeypatch.setenv('KMA_SERVICE_KEY', 'test')
+    monkeypatch.setattr(runtime._HTTP, '_transport', transport)
+    pauses, attempts = [], []
+    result = runtime.fetch_url('https://example.test/data', 'test', max_attempts=3,
+        retry_statuses=(503,), retry_base_delay_seconds=5,
+        before_attempt=attempts.append, sleep=pauses.append,
+        retry_response=lambda payload: payload == b'no-data')
+    assert result == (200, b'ok') and attempts == [1, 2, 3] and pauses == [5, 10]
+
+
+def test_retry_after_http_date_is_respected():
+    from datetime import datetime, timedelta, timezone
+    from email.utils import format_datetime
+    retry_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    delay = runtime.http_retry_delay({'Retry-After':format_datetime(retry_at)},1,5)
+    assert 595 <= delay <= 600
