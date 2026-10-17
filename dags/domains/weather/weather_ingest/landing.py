@@ -6,6 +6,8 @@ import hashlib
 import json
 import math
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Callable, Protocol
@@ -224,6 +226,9 @@ class KmaLanding:
         checkpoint_prefix: str | None = None,
         raw_spool: RawPayloadSpool | None = None,
         defer_source_failure: Callable[[Exception], bool] | None = None,
+        checkpoint_validation_workers: int = 1,
+        skip_unchanged_checkpoints: bool = False,
+        refetch_incomplete_grids: bool = False,
     ) -> None:
         self._source = source
         self._raw_store = raw_store
@@ -236,6 +241,12 @@ class KmaLanding:
         self._request_id = request_id
         self._raw_spool = raw_spool
         self._defer_source_failure = defer_source_failure
+        if type(checkpoint_validation_workers) is not int or not 1 <= checkpoint_validation_workers <= 4:
+            raise ValueError('checkpoint_validation_workers must be between 1 and 4')
+        self._checkpoint_validation_workers = checkpoint_validation_workers
+        self._skip_unchanged_checkpoints = skip_unchanged_checkpoints
+        self._refetch_incomplete_grids = refetch_incomplete_grids
+        self.checkpoint_validation_seconds = 0.0
 
     @staticmethod
     def _safe_key_segment(value: str) -> str:
@@ -467,11 +478,29 @@ class KmaLanding:
         landing_load_date = self._resolve_landing_load_date(
             run, checkpoint_load_date, saved_checkpoint_objects
         )
-        checkpoint_objects = [
-            item
-            for item in saved_checkpoint_objects
-            if self._checkpoint_object_is_trustworthy(item)
-        ]
+        # A provider may change totalCount between attempts. Reusing page one
+        # from an incomplete grid can permanently combine different snapshots.
+        # Retain immutable RAW evidence, but refetch that grid from page one.
+        grouped = {}
+        for item in saved_checkpoint_objects:
+            grouped.setdefault((item.nx, item.ny), []).append(item)
+        complete_objects = ([item for group in grouped.values() if self._grid_complete(group) for item in group]
+                            if self._refetch_incomplete_grids else saved_checkpoint_objects)
+        started = time.monotonic()
+        try:
+            if self._checkpoint_validation_workers == 1:
+                trusted = [self._checkpoint_object_is_trustworthy(item) for item in complete_objects]
+            else:
+                with ThreadPoolExecutor(max_workers=self._checkpoint_validation_workers) as executor:
+                    trusted = list(executor.map(self._checkpoint_object_is_trustworthy, complete_objects))
+        finally:
+            self.checkpoint_validation_seconds = time.monotonic() - started
+        trustworthy_objects = [item for item, valid in zip(complete_objects, trusted) if valid]
+        trusted_groups = {}
+        for item in trustworthy_objects:
+            trusted_groups.setdefault((item.nx, item.ny), []).append(item)
+        checkpoint_objects = ([item for group in trusted_groups.values() if self._grid_complete(group) for item in group]
+                              if self._refetch_incomplete_grids else trustworthy_objects)
         checkpoint_pages = {
             (item.nx, item.ny, item.page_no): item for item in checkpoint_objects
         }
@@ -480,9 +509,10 @@ class KmaLanding:
         # retry may stop after any checkpoint write; clearing unvisited pages
         # would lose durable progress and charge the source API again.
         checkpoint_state = {(item.nx, item.ny, item.page_no): item for item in checkpoint_objects}
-        self._save_checkpoint(
-            run, request, list(checkpoint_state.values()), landing_load_date=landing_load_date
-        )
+        if not self._skip_unchanged_checkpoints or checkpoint_objects != saved_checkpoint_objects:
+            self._save_checkpoint(
+                run, request, list(checkpoint_state.values()), landing_load_date=landing_load_date
+            )
         api_request_count = 0
         reused_raw_object_count = 0
         deferred_source_errors = []
@@ -499,14 +529,17 @@ class KmaLanding:
                         run_id=run.run_id,
                     )
                     api_request_count += 1
+                    first_page_fetched = True
                 else:
                     reused_raw_object_count += 1
+                    first_page_fetched = False
                 raw_objects.append(first_page)
                 grid_objects.append(first_page)
                 checkpoint_state[(first_page.nx, first_page.ny, first_page.page_no)] = first_page
-                self._save_checkpoint(
-                    run, request, list(checkpoint_state.values()), landing_load_date=landing_load_date
-                )
+                if not self._skip_unchanged_checkpoints or first_page_fetched:
+                    self._save_checkpoint(
+                        run, request, list(checkpoint_state.values()), landing_load_date=landing_load_date
+                    )
                 for page_no in range(2, first_page.page_count + 1):
                     raw_object = checkpoint_pages.get((grid.nx, grid.ny, page_no))
                     if raw_object is None:
@@ -518,17 +551,22 @@ class KmaLanding:
                             run_id=run.run_id,
                         )
                         api_request_count += 1
+                        page_fetched = True
                     else:
                         reused_raw_object_count += 1
+                        page_fetched = False
+                    if raw_object.total_count != first_page.total_count:
+                        raise KmaLandingIncompleteError('KMA landing incomplete: source pagination changed')
                     raw_objects.append(raw_object)
                     grid_objects.append(raw_object)
                     checkpoint_state[(raw_object.nx, raw_object.ny, raw_object.page_no)] = raw_object
-                    self._save_checkpoint(
-                        run, request, list(checkpoint_state.values()), landing_load_date=landing_load_date
-                    )
+                    if not self._skip_unchanged_checkpoints or page_fetched:
+                        self._save_checkpoint(
+                            run, request, list(checkpoint_state.values()), landing_load_date=landing_load_date
+                        )
                 total_count = max(item.total_count for item in grid_objects)
                 parsed_rows = sum(item.row_count for item in grid_objects)
-                if parsed_rows < total_count:
+                if not self._grid_complete(grid_objects):
                     raise KmaLandingIncompleteError(
                         "KMA landing incomplete: "
                         f"nx={grid.nx}, ny={grid.ny}, "
@@ -554,6 +592,19 @@ class KmaLanding:
             manifest_key=manifest_key,
             landing_load_date=landing_load_date,
         )
+
+    @staticmethod
+    def _grid_complete(objects: list[KmaRawObject]) -> bool:
+        if not objects:
+            return False
+        totals = {item.total_count for item in objects}
+        counts = {item.page_count for item in objects}
+        if len(totals) != 1 or len(counts) != 1:
+            return False
+        total, count = next(iter(totals)), next(iter(counts))
+        pages = [item.page_no for item in objects]
+        return (count >= 1 and len(pages) == count and set(pages) == set(range(1, count + 1))
+                and sum(item.row_count for item in objects) == total)
 
     def _checkpoint_object_is_trustworthy(self, item: KmaRawObject) -> bool:
         # R2 remains the canonical raw provenance boundary. A matching local

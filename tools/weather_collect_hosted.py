@@ -6,7 +6,6 @@ control objects, and never promotes data into Bronze or downstream tables.
 from __future__ import annotations
 
 import argparse
-import functools
 import hashlib
 import json
 import math
@@ -16,6 +15,7 @@ import sys
 import time
 import uuid
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
@@ -26,6 +26,8 @@ KST = ZoneInfo("Asia/Seoul")
 RAW_PREFIX = "raw/weather/kma_vilage_fcst"
 CHECKPOINT_PREFIX = "ops/control/checkpoints/weather-hosted"
 BUDGET_PREFIX = "ops/control/weather-hosted/api-budget"
+REPAIR_RETRY_PREFIX = "ops/control/weather-hosted/repair-retry"
+REPAIR_RETRY_DELAY = timedelta(hours=3)
 DAG_ID = "weather_hosted_collection"
 DAILY_ATTEMPT_LIMIT = 2400
 RUN_ATTEMPT_LIMIT = 1280
@@ -299,6 +301,7 @@ class ScopedStore:
         self._deadline = deadline or Deadline()
         self.checkpoint_pages = 0
         self.checkpoint_write_acknowledged = False
+        self.manifest_validation_seconds = 0.0
         self._store = R2RawObjectStore(client, bucket=bucket, sleep=self._deadline.pause)
         self._configured_grids = [dict(item) for item in grids]
         self._grids = {(item["nx"], item["ny"]) for item in grids}
@@ -442,8 +445,7 @@ class ScopedStore:
         except (TypeError, ValueError, AttributeError) as exc:
             raise HostedCollectionError("manifest_invalid") from exc
         _require(self._issue <= completed <= _aware(self._clock()), "manifest_invalid")
-        pages = defaultdict(dict)
-        for raw_key in keys:
+        def verify_object(raw_key):
             _require(self._kind(raw_key) == "raw" and raw_key.startswith(key.rsplit("/", 1)[0] + "/"), "manifest_invalid")
             match = _RAW_KEY.fullmatch(raw_key)
             nx, ny = int(match[3]), int(match[4])
@@ -457,12 +459,24 @@ class ScopedStore:
             response = raw_doc.get("response")
             _require(isinstance(response, dict) and isinstance(response.get("body"), dict), "manifest_invalid")
             page_no = response["body"].get("pageNo")
-            _require(type(page_no) is int and page_no not in pages[(nx, ny)], "manifest_invalid")
+            _require(type(page_no) is int, "manifest_invalid")
             try:
                 metadata, rows = validate_page(raw_payload, issue=self._issue, nx=nx, ny=ny, page_no=page_no)
             except (ValueError, KeyError, TypeError) as exc:
                 raise HostedCollectionError("manifest_invalid") from exc
-            pages[(nx, ny)][page_no] = (metadata["total_count"], len(rows))
+            return (nx, ny), page_no, metadata["total_count"], len(rows)
+
+        pages = defaultdict(dict)
+        started = time.monotonic()
+        try:
+            # Workers perform read-only validation. Aggregate in manifest order
+            # on the calling thread so duplicate detection is deterministic.
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                for grid, page_no, total_count, row_count in executor.map(verify_object, keys):
+                    _require(page_no not in pages[grid], "manifest_invalid")
+                    pages[grid][page_no] = (total_count, row_count)
+        finally:
+            self.manifest_validation_seconds += time.monotonic() - started
         _require(set(pages) == self._grids, "manifest_invalid")
         for group in pages.values():
             totals = {total for total, _rows in group.values()}
@@ -493,7 +507,7 @@ class BoundedTransport:
 
         self._deadline.check()
         chunks, size = [], 0
-        with self._session.request(method, url, params=params, headers=headers, timeout=timeout,
+        with self._session.request(method, url, params=params, headers=headers, timeout=(5, 20),
                                    stream=True, allow_redirects=False) as response:
             for chunk in response.iter_content(chunk_size=16 * 1024):
                 self._deadline.check(headroom=0)
@@ -526,19 +540,88 @@ def _hosted_source(budget: AttemptBudget, deadline: Deadline):
 
     http = GuardedHttp(source="weather_kma", transport=transport, timeout=30,
                        max_attempts=1, rate_limit=None, sleep=deadline.pause)
-    fetch = functools.partial(fetch_url, http_client=http, sleep=deadline.pause, retry_network_errors=True)
+    def retry_no_data(payload):
+        try:
+            doc = json.loads(payload)
+        except (ValueError, UnicodeError):
+            return False
+        if not isinstance(doc, dict):
+            return False
+        response = doc.get('response')
+        header = response.get('header') if isinstance(response, dict) else None
+        return isinstance(header, dict) and header.get('resultCode') == '03'
+
+    def fetch(url, user_agent, **options):
+        # The adapter supplies Airflow's defaults. Hosted runs use one shared
+        # physical-attempt envelope for status, transport and NO_DATA retries.
+        options.update(max_attempts=3, retry_base_delay_seconds=5,
+                       retry_429_backoff_seconds=(5, 10))
+        return fetch_url(url, user_agent, **options, http_client=http, sleep=deadline.pause,
+                         retry_network_errors=True, retry_response=retry_no_data)
     return KmaHttpAdapter(fetch, delay_seconds=1, sleep=deadline.pause,
                           before_attempt=budget.reserve, dag_run_id=DAG_ID)
+
+
+class RepairRetry:
+    """One bounded retry cooldown per source issue, updated with compare-and-swap."""
+    def __init__(self, client, bucket: str, issue: datetime, *, clock, deadline):
+        self.client, self.bucket, self.issue = client, bucket, issue
+        self.clock, self.deadline = clock, deadline
+        self.key = f'{REPAIR_RETRY_PREFIX}/{run_id_for(issue)}.json'
+        self.etag = None
+
+    def deferred(self) -> bool:
+        self.deadline.check()
+        try:
+            response = self.client.get_object(Bucket=self.bucket, Key=self.key)
+        except Exception as exc:
+            if _missing(exc):
+                self.etag = None
+                return False
+            raise
+        doc = _json(_read_response(response, 4096, 'repair_retry_invalid'), 'repair_retry_invalid')
+        _require(set(doc) == {'schema_version', 'source_issue', 'status', 'failed_at', 'retry_after', 'reason_code'}
+                 and type(doc['schema_version']) is int and doc['schema_version'] == 1
+                 and doc['source_issue'] == self.issue.isoformat() and doc['status'] == 'deferred'
+                 and doc['reason_code'] in {'source_page_contract', 'source_http_failure', 'source_pagination_changed'},
+                 'repair_retry_invalid')
+        try:
+            failed_at = _aware(datetime.fromisoformat(doc['failed_at']))
+            retry_after = _aware(datetime.fromisoformat(doc['retry_after']))
+        except (TypeError, ValueError) as exc:
+            raise HostedCollectionError('repair_retry_invalid') from exc
+        _require(self.issue <= failed_at <= _aware(self.clock()) and retry_after == failed_at + REPAIR_RETRY_DELAY,
+                 'repair_retry_invalid')
+        self.etag = response.get('ETag')
+        _require(isinstance(self.etag, str) and bool(self.etag), 'repair_retry_invalid')
+        return _aware(self.clock()) < retry_after
+
+    def defer(self, reason_code: str) -> None:
+        self.deadline.check()
+        now = _aware(self.clock())
+        document = {'schema_version': 1, 'source_issue': self.issue.isoformat(), 'status': 'deferred',
+                    'failed_at': now.isoformat(), 'retry_after': (now + REPAIR_RETRY_DELAY).isoformat(),
+                    'reason_code': reason_code}
+        condition = {'IfMatch': self.etag} if self.etag is not None else {'IfNoneMatch': '*'}
+        try:
+            self.client.put_object(Bucket=self.bucket, Key=self.key,
+                Body=json.dumps(document, sort_keys=True).encode(), ContentType='application/json', **condition)
+        except Exception as exc:
+            if not _conflict(exc):
+                raise
+            raise HostedCollectionError('repair_retry_conflict') from exc
 
 
 def collect_hosted(client, bucket: str, *, source=None, grids=None,
                    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                    only_latest: bool = False, deadline: Deadline | None = None,
-                   source_issue: datetime | None = None) -> dict:
+                   source_issue: datetime | None = None, repair_oldest: bool = False) -> dict:
     _domain_imports()
     from weather_ingest.kma import DEFAULT_GRID_CSV, load_kma_grids
-    from weather_ingest.landing import KmaGrid, KmaLanding, KmaLandingRequest, RunIdentity
+    from weather_ingest.landing import KmaGrid, KmaLanding, KmaLandingRequest, RunIdentity, KmaLandingIncompleteError
 
+    started = time.monotonic()
+    _require(sum((only_latest, repair_oldest, source_issue is not None)) <= 1, 'issue_selection_conflict')
     deadline = deadline or Deadline()
     deadline.check()
     grids = grids or load_kma_grids(path=str(DEFAULT_GRID_CSV), expected_grid_count=80)
@@ -554,8 +637,11 @@ def collect_hosted(client, bucket: str, *, source=None, grids=None,
         issues = [source_issue]
     if only_latest:
         issues = issues[-1:]
-    pending, reused, reused_issues, blocked_issues = [], 0, [], []
-    for issue in reversed(issues):
+    if repair_oldest:
+        issues = issues[:-1]
+    pending, reused, reused_issues, blocked_issues, deferred_issues = [], 0, [], [], []
+    prior_validation_seconds = 0.0
+    for issue in (issues if repair_oldest else reversed(issues)):
         store = ScopedStore(client, bucket, issue, grids, clock=clock, deadline=deadline)
         completed = False
         blocked = False
@@ -582,6 +668,7 @@ def collect_hosted(client, bucket: str, *, source=None, grids=None,
                 blocked = True
                 break
             completed = True
+        prior_validation_seconds += store.manifest_validation_seconds
         if blocked:
             blocked_issues.append(issue.isoformat())
             continue
@@ -589,19 +676,32 @@ def collect_hosted(client, bucket: str, *, source=None, grids=None,
             reused += 1
             reused_issues.append(issue.isoformat())
         else:
-            pending.append((issue, store))
+            retry = RepairRetry(client, bucket, issue, clock=clock, deadline=deadline) if repair_oldest else None
+            if retry is not None and retry.deferred():
+                deferred_issues.append(issue.isoformat())
+                continue
+            pending.append((issue, store, retry))
+            if repair_oldest:
+                # Once the oldest eligible gap is selected, later issues are
+                # outside this invocation's work and need no preflight reads.
+                break
     selected = pending[:1]
-    if len(pending) > 1:
-        selected.append(pending[-1])
-    result = {"schema_version": 1, "status": "degraded" if blocked_issues else "success",
+    result = {"schema_version": 1, "status": "degraded" if blocked_issues or deferred_issues else "success",
               "cycles_completed": 0, "cycles_reused": reused, "cycles_blocked": len(blocked_issues),
               "cycles_failed": 0, "failures": [],
               "raw_pages": 0, "raw_objects_reused": 0, "forecast_rows": 0, "physical_attempts": 0,
               "source_issues_completed": [], "source_issues_reused": reused_issues,
               "source_issues_blocked": blocked_issues,
+              "source_issues_deferred": deferred_issues,
+              "cycles_deferred": len(deferred_issues),
+              "phase_seconds": {"prior_manifest_validation": round(prior_validation_seconds, 3),
+                                "collection": 0.0, "final_manifest_validation": 0.0,
+                                "checkpoint_resume_validation": 0.0},
               "blocked_reason_code": "manifest_integrity_failure" if blocked_issues else None}
-    for issue, store in selected:
+    for issue, store, repair_retry in selected:
         unavailable_pages = []
+        collection_started = time.monotonic()
+        landing = None
 
         def defer_no_data(exc):
             if (isinstance(exc, HostedCollectionError) and str(exc) == 'source_page_contract'
@@ -618,9 +718,12 @@ def collect_hosted(client, bucket: str, *, source=None, grids=None,
             landing = KmaLanding(source=ValidatedSource(source, issue), raw_store=store, raw_prefix="raw",
                                  checkpoint_prefix=CHECKPOINT_PREFIX, clock=clock,
                                  request_id=lambda: uuid.uuid4().hex, raw_spool=None,
-                                 defer_source_failure=defer_no_data)
+                                 defer_source_failure=defer_no_data, checkpoint_validation_workers=4,
+                                 skip_unchanged_checkpoints=True, refetch_incomplete_grids=True)
             batch = landing.collect(RunIdentity(DAG_ID, store.run_id), request)
         except Exception as exc:
+            if isinstance(exc, KmaLandingIncompleteError):
+                exc = HostedCollectionError('source_pagination_changed')
             failure = {'source_issue': issue.isoformat(),
                        'reason_code': str(exc) if isinstance(exc, HostedCollectionError) else 'collection_failed',
                        'checkpoint_pages': store.checkpoint_pages,
@@ -633,9 +736,21 @@ def collect_hosted(client, bucket: str, *, source=None, grids=None,
             result['cycles_failed'] += 1
             result['physical_attempts'] = budget.attempts
             result['status'] = 'degraded'
-            if isinstance(exc, HostedCollectionError) and str(exc) == 'source_page_contract':
-                # One invalid source issue must not prevent another selected
-                # issue from making durable progress. Keep the failed checkpoint.
+            if isinstance(exc, HostedCollectionError) and str(exc) in {
+                    'source_page_contract', 'source_http_failure', 'source_pagination_changed'}:
+                if repair_retry is not None:
+                    try:
+                        repair_retry.defer(str(exc))
+                    except Exception as persistence_error:
+                        failure['repair_retry_persisted'] = False
+                        failure['repair_retry_write_reason'] = (str(persistence_error)
+                            if isinstance(persistence_error, HostedCollectionError) else 'storage_failure')
+                        result['status'] = 'failed'
+                        exc.summary = result
+                        raise exc from persistence_error
+                    failure['repair_retry_persisted'] = True
+                # Keep partial progress and report the failure. A later repair
+                # can choose another issue while this issue is cooling down.
                 continue
             result['status'] = 'failed'
             if not isinstance(exc, HostedCollectionError):
@@ -644,12 +759,19 @@ def collect_hosted(client, bucket: str, *, source=None, grids=None,
                 raise wrapped from exc
             exc.summary = result
             raise
+        finally:
+            result['phase_seconds']['collection'] += round(time.monotonic() - collection_started, 3)
+            result['phase_seconds']['final_manifest_validation'] += round(store.manifest_validation_seconds, 3)
+            if landing is not None:
+                result['phase_seconds']['checkpoint_resume_validation'] += round(landing.checkpoint_validation_seconds, 3)
+            result['phase_seconds']['total'] = round(time.monotonic() - started, 3)
         result["cycles_completed"] += 1
         result["source_issues_completed"].append(issue.isoformat())
         result["raw_pages"] += len(batch.raw_objects)
         result["raw_objects_reused"] += batch.reused_raw_object_count
         result["forecast_rows"] += sum(item.row_count for item in batch.raw_objects)
     result["physical_attempts"] = budget.attempts
+    result['phase_seconds']['total'] = round(time.monotonic() - started, 3)
     return result
 
 
@@ -677,6 +799,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--only-latest", action="store_true")
+    selection.add_argument('--repair-oldest', action='store_true', help='Repair one oldest pending issue, excluding latest')
     selection.add_argument('--source-issue', help='Resume one issued timestamp inside the existing 24-hour window')
     parser.add_argument("--summary-file", type=Path)
     args = parser.parse_args(argv)
@@ -690,7 +813,8 @@ def main(argv=None) -> int:
             except (TypeError, ValueError) as exc:
                 raise HostedCollectionError('source_issue_invalid') from exc
         client, bucket = _client_from_env()
-        result = collect_hosted(client, bucket, only_latest=args.only_latest, source_issue=issue)
+        result = collect_hosted(client, bucket, only_latest=args.only_latest, source_issue=issue,
+                                repair_oldest=args.repair_oldest)
         serialized = json.dumps(result, sort_keys=True)
         if args.summary_file:
             args.summary_file.parent.mkdir(parents=True, exist_ok=True)
