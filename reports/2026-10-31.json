@@ -1,0 +1,56 @@
+{
+  "checks": {
+    "collection": {
+      "raw_objects": 800,
+      "reason_code": "raw_objects_present",
+      "status": "pass"
+    },
+    "duplicates": {
+      "duplicate_references": 0,
+      "reason_code": "manifest_references_unique",
+      "status": "pass"
+    },
+    "freshness": {
+      "latest_collected_at": "2026-10-31T14:05:08+00:00",
+      "latest_issue_at": "2026-10-31T05:00:00+00:00",
+      "measured_grids": 80,
+      "missing_grids": 0,
+      "reason_code": "source_issue_stale",
+      "stale_grids": 80,
+      "status": "fail"
+    },
+    "missing": {
+      "expected_slots": 640,
+      "missing_slots": 320,
+      "observed_slots": 320,
+      "reason_code": "contract_slots_missing",
+      "scheduled_population_verified": false,
+      "status": "fail"
+    }
+  },
+  "contract": {
+    "coverage_basis": "configured_forecast_contract",
+    "duplicate_basis": "manifest_object_references",
+    "freshness_error_minutes": 360,
+    "grid_count": 80,
+    "issue_cycle_count": 8,
+    "source": "kma_vilage_fcst"
+  },
+  "evaluation_as_of": "2026-10-31T17:22:04.764666+00:00",
+  "evidence": {
+    "accepted_manifests": 9,
+    "invalid_manifests": 0,
+    "listed_objects": 809,
+    "manifest_count": 9,
+    "unverified_raw_objects": 0,
+    "verified_raw_objects": 800
+  },
+  "measurement_window": {
+    "load_date_end_kst": "2026-11-01",
+    "load_date_start_kst": "2026-10-31"
+  },
+  "report_date_kst": "2026-10-31",
+  "schema_version": "weather-raw-quality/v1",
+  "source_revision": "e89dfc1a8949dc79a08c99c4f3a86a4f3579f227",
+  "status": "fail"
+}
