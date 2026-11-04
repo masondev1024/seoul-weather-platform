@@ -1,14 +1,30 @@
-# Seoul Weather Platform
+# ASK Seoul · 기상 데이터 파이프라인
 
-ASK Seoul 팀 프로젝트의 기상 코드를 이관해 발전시킨 개인 저장소입니다. 기상청 예보·실황을 R2와 Iceberg에 적재하고, 가공한 예보는 D1과 K-Skill로 제공합니다. 예보 품질 평가는 별도 경로로 구현했습니다.
+기관마다 시간·지역 기준이 다른 서울 공공데이터를 함께 조회하기 위한 팀 프로젝트. 기상·교통 수집과 게시 전 검사를 맡았고, 이 저장소에서는 **기상 코드를 이관해 예보 품질 평가와 재처리 판단을 보강**했습니다.
 
-- **팀에서 맡은 일** · 기상·교통 수집, KST·행정동 기준 정리, 게시 전 검사. 예보 적재에서 기존 데이터 삭제와 새 데이터 추가를 PyIceberg 한 번의 커밋으로 묶었습니다. [적재 PR #178](https://github.com/ASAC-DE-bigkk/ASAC-DAG/pull/178)
-- **확인한 결과** · 7월 3~7일 정기 실행 20건이 Trino 쿼리 크기 제한에 걸렸습니다. 전환 뒤 7월 8일 14:20 KST부터 확인한 정기 실행에서 같은 오류가 재발하지 않았습니다. [팀 설계 기록 DL-001](https://github.com/ASAC-DE-bigkk/ASK-Seoul/blob/ba162272133c416da36ab4d07d35e25ffbff0c6e/engineering-decision-log.md#dl-001-trino-insert-쿼리-크기-한계--pyiceberg-1커밋-로더-전환)
-- **개인 후속 개발** · 수집 비용 비교 기준과 복구 계획을 정리하고, 예보 품질 평가와 장소별 조회를 추가했습니다. [K-Skill 기여 PR #552](https://github.com/NomaDamas/k-skill/pull/552)
+## 맡은 범위
 
-**주요 기술** · Python, SQL, Airflow, dbt, Trino, Iceberg, Cloudflare R2·D1·Workers, GitHub Actions.
+- **팀 프로젝트** · 기상청·TOPIS 수집, KST·행정동 기준 정리, 게시 전 검사. 예보 적재의 삭제·추가를 PyIceberg 한 번의 커밋으로 묶어 부분 갱신 방지.
+- **개인 후속 개발** · 기상 코드 이관, 원본·수집 기록 관리, 예보와 실황 비교, 복구 후보 판단, 장소별 기상 위험 조회 연동.
 
-[ASK Seoul 팀 서비스](https://ask-seoul.kr/) · [원본 커밋 목록](provenance/source-refs.lock.json) · [파일별 변경 이력](provenance/source-files.jsonl) · [NOTICE](NOTICE)
+## 구조 요약
+
+```text
+기상청 → Airflow → R2 원본·Iceberg → dbt·Trino → 검사 → D1
+D1 → API·프록시 → k-skill / 예보·실황 → 내부 품질 평가
+```
+
+Airflow·dbt·Trino는 로컬 Docker 환경, 저장·조회 연결은 Cloudflare R2·D1·Workers 구성. 이 저장소는 기상 처리·발행과 프록시 코드를 관리하며, API 원본 서비스와 upstream k-skill 실행 환경은 별도 관리합니다. [구성·관리 범위](docs/architecture/platform-boundaries.md)
+
+## 확인한 결과
+
+| 검증 대상 | 결과와 범위 |
+|---|---|
+| 예보 적재 오류 | 팀 정기 실행 20건에서 발생한 Trino 쿼리 크기 제한에 대응. PyIceberg 전환 후 2026.07.08부터 확인한 실행에서 같은 오류 미재발. [적재 PR #178](https://github.com/ASAC-DE-bigkk/ASAC-DAG/pull/178) · [팀 설계 기록](https://github.com/ASAC-DE-bigkk/ASK-Seoul/blob/ba162272133c416da36ab4d07d35e25ffbff0c6e/engineering-decision-log.md) |
+| 교통 변환 주기 | 팀 작업에서 수집·변환 주기를 분리해 dbt 변환 **하루 288회 → 24회**. API 호출 수가 아닌 변환 실행 횟수. [실행 기록](https://jungseongheon.org/portfolio/#ask-seoul) |
+| 외부 조회 연동 | 장소별 기상 위험 제품 **1개**를 k-skill에 기여, 공개 PR 병합. [기여 PR #552](https://github.com/NomaDamas/k-skill/pull/552) |
+
+[포트폴리오 상세](https://jungseongheon.org/portfolio/#ask-seoul) · [ASK Seoul 팀 서비스](https://ask-seoul.kr/) · [원본 커밋 목록](provenance/source-refs.lock.json) · [파일별 출처](provenance/source-files.jsonl) · [NOTICE](NOTICE)
 
 ## 데이터 처리 흐름
 
@@ -212,3 +228,4 @@ dbt를 직접 검증할 때는 [dbt 의존성 목록](runtime/requirements-dbt.l
 기능·문서 변경은 `feat/` 브랜치에서 `dev` 대상 PR로 반영하고, 검증된 `dev`를 별도 PR로 `main`에 반영한다. 필수 CI와 검토를 거친 뒤 병합하며 보호 규칙을 우회하지 않는다.
 
 `dev`는 선형 이력을 유지하므로 동기화 여부는 커밋 번호만으로 판단하지 않는다. 두 브랜치의 파일 내용은 `git diff origin/main origin/dev`로 확인한다.
+
