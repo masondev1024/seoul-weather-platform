@@ -1,10 +1,14 @@
 # Seoul Weather Platform
 
-기상청 예보와 시간별 실황을 수집해 R2·Iceberg에 적재하고, dbt로 가공한 데이터를 D1과 K-Skill에 제공하는 기상 데이터 플랫폼이다. 예보를 제공하는 처리 경로와 예보의 정확도를 평가하는 처리 경로를 분리해 관리한다.
+ASK Seoul 팀 프로젝트의 기상 코드를 이관해 발전시킨 개인 저장소입니다. 기상청 예보·실황을 R2와 Iceberg에 적재하고, 가공한 예보는 D1과 K-Skill로 제공합니다. 예보 품질 평가는 별도 경로로 구현했습니다.
 
-ASK Seoul 팀 프로젝트의 Weather 코드를 고정된 커밋에서 이관한 뒤, 개인 저장소에서 수집 비용 관리, 장애 복구 계획, 예보 품질 평가와 장소별 품질 조회를 추가했다. 팀 코드의 출처와 개인 후속 변경은 [원본 커밋 목록](provenance/source-refs.lock.json), [파일별 변경 이력](provenance/source-files.jsonl), [NOTICE](NOTICE)에 남긴다.
+- **팀에서 맡은 일** · 기상·교통 수집, KST·행정동 기준 정리, 게시 전 검사. 예보 적재에서 기존 데이터 삭제와 새 데이터 추가를 PyIceberg 한 번의 커밋으로 묶었습니다. [적재 PR #178](https://github.com/ASAC-DE-bigkk/ASAC-DAG/pull/178)
+- **확인한 결과** · 7월 3~7일 정기 실행 20건이 Trino 쿼리 크기 제한에 걸렸습니다. 전환 뒤 7월 8일 14:20 KST부터 확인한 정기 실행에서 같은 오류가 재발하지 않았습니다. [팀 설계 기록 DL-001](https://github.com/ASAC-DE-bigkk/ASK-Seoul/blob/ba162272133c416da36ab4d07d35e25ffbff0c6e/engineering-decision-log.md#dl-001-trino-insert-쿼리-크기-한계--pyiceberg-1커밋-로더-전환)
+- **개인 후속 개발** · 수집 비용 비교 기준과 복구 계획을 정리하고, 예보 품질 평가와 장소별 조회를 추가했습니다. [K-Skill 기여 PR #552](https://github.com/NomaDamas/k-skill/pull/552)
 
-**주요 기술**: Python, SQL, Airflow, dbt, Trino, Apache Iceberg, Cloudflare R2·D1·Workers, GitHub Actions.
+**주요 기술** · Python, SQL, Airflow, dbt, Trino, Iceberg, Cloudflare R2·D1·Workers, GitHub Actions.
+
+[ASK Seoul 팀 서비스](https://ask-seoul.kr/) · [원본 커밋 목록](provenance/source-refs.lock.json) · [파일별 변경 이력](provenance/source-files.jsonl) · [NOTICE](NOTICE)
 
 ## 데이터 처리 흐름
 
