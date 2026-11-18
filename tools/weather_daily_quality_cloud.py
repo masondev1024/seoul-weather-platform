@@ -3,6 +3,11 @@
 Raw completion manifests prove landing coverage, not Bronze row uniqueness or
 forecast accuracy. Every output field is constructed explicitly; private object
 keys, run identifiers, bucket names and provider errors never enter the report.
+
+Historical cutoffs reconstruct *retained immutable* landing evidence. An object
+must have been present by the cutoff according to R2, and a manifest must also
+be complete by then. Current listings cannot recover deleted or overwritten
+versions; a dangling manifest cannot prove coverage.
 """
 from __future__ import annotations
 
@@ -47,7 +52,7 @@ def _window(report_date: date, as_of: datetime) -> tuple[datetime, tuple[str, st
     return as_of, (report_date.isoformat(), evaluation_day.isoformat())
 
 
-def _list_objects(client, bucket: str, days: tuple[str, str]) -> dict[str, int]:
+def _list_objects(client, bucket: str, days: tuple[str, str], *, stored_by: datetime | None = None) -> dict[str, int]:
     objects = {}
     consumed = 0
     requests = 0
@@ -71,6 +76,12 @@ def _list_objects(client, bucket: str, days: tuple[str, str]) -> dict[str, int]:
                 key, size = item.get("Key"), item.get("Size")
                 if not isinstance(key, str) or not key.startswith(prefix) or type(size) is not int or size < 0:
                     raise EvidenceUnavailable("listing_invalid")
+                if stored_by is not None:
+                    modified = item.get("LastModified")
+                    if not isinstance(modified, datetime) or modified.utcoffset() is None:
+                        raise EvidenceUnavailable("historical_object_time_unavailable")
+                    if modified > stored_by:
+                        continue
                 objects[key] = size
             if page.get("IsTruncated") is False:
                 break
@@ -81,8 +92,11 @@ def _list_objects(client, bucket: str, days: tuple[str, str]) -> dict[str, int]:
     return objects
 
 
-def _read_manifest_bytes(client, bucket: str, key: str, remaining_bytes: int) -> bytes:
-    response = client.get_object(Bucket=bucket, Key=key)
+def _read_manifest_bytes(client, bucket: str, key: str, remaining_bytes: int, *, stored_by: datetime | None = None) -> bytes:
+    options = {"Bucket": bucket, "Key": key}
+    if stored_by is not None:
+        options["IfUnmodifiedSince"] = stored_by
+    response = client.get_object(**options)
     body = response["Body"]
     try:
         payload = body.read(min(MAX_MANIFEST_BYTES, remaining_bytes) + 1)
@@ -105,7 +119,8 @@ def _parse_raw(key: str, days: tuple[str, str], as_of: datetime, grids: set) -> 
     return grid, issue.astimezone(timezone.utc), collected.astimezone(timezone.utc)
 
 
-def _validate_manifest(document: dict, key: str, objects: dict, days: tuple[str, str], as_of: datetime, grids: set) -> list:
+def _validate_manifest(document: dict, key: str, objects: dict, days: tuple[str, str], as_of: datetime, grids: set,
+                       *, historical_cutoff: bool = False) -> list | None:
     match = MANIFEST_KEY.fullmatch(key)
     run = document.get("run_id")
     safe_run = "".join(char if char.isalnum() or char in "._=-" else "_" for char in run) if isinstance(run, str) else ""
@@ -121,7 +136,11 @@ def _validate_manifest(document: dict, key: str, objects: dict, days: tuple[str,
             or document["actual_count"] != len(unique) or document["expected_count"] != len(unique)):
         raise ValueError("manifest_counts_invalid")
     completed = datetime.fromisoformat(str(document.get("completed_at")).replace("Z", "+00:00"))
-    if completed.tzinfo is None or completed > as_of:
+    if completed.utcoffset() is None:
+        raise ValueError("manifest_time_invalid")
+    if completed > as_of:
+        if historical_cutoff:
+            return None
         raise ValueError("manifest_time_invalid")
     evidence = []
     for raw_key in unique:
@@ -138,11 +157,12 @@ def _validate_manifest(document: dict, key: str, objects: dict, days: tuple[str,
     return evidence
 
 
-def _collect(client, bucket: str, days: tuple[str, str], as_of: datetime, grids: set) -> dict:
+def _collect(client, bucket: str, days: tuple[str, str], as_of: datetime, grids: set, *, historical_cutoff: bool = False) -> dict:
     result = {"reason": None, "objects": None, "raw_objects": None, "manifests": 0,
               "accepted_manifests": 0, "invalid_manifests": 0, "duplicate_references": 0, "rows": []}
     try:
-        objects = _list_objects(client, bucket, days)
+        stored_by = as_of if historical_cutoff else None
+        objects = _list_objects(client, bucket, days, stored_by=stored_by)
         result["objects"] = len(objects)
         result["raw_objects"] = sum(bool(RAW_KEY.fullmatch(key)) for key in objects)
         manifests = sorted(key for key in objects if key.endswith("/_manifest.json"))
@@ -156,7 +176,7 @@ def _collect(client, bucket: str, days: tuple[str, str], as_of: datetime, grids:
                 result["invalid_manifests"] += 1
                 continue
             try:
-                payload = _read_manifest_bytes(client, bucket, key, MAX_TOTAL_BYTES - bytes_read)
+                payload = _read_manifest_bytes(client, bucket, key, MAX_TOTAL_BYTES - bytes_read, stored_by=stored_by)
                 bytes_read += len(payload)
                 document = json.loads(payload)
                 if not isinstance(document, dict):
@@ -164,7 +184,10 @@ def _collect(client, bucket: str, days: tuple[str, str], as_of: datetime, grids:
                 keys = document.get("object_keys")
                 if isinstance(keys, list) and all(isinstance(item, str) for item in keys):
                     result["duplicate_references"] += len(keys) - len(set(keys))
-                result["rows"].extend(_validate_manifest(document, key, objects, days, as_of, grids))
+                rows = _validate_manifest(document, key, objects, days, as_of, grids, historical_cutoff=historical_cutoff)
+                if rows is None:
+                    continue
+                result["rows"].extend(rows)
                 result["accepted_manifests"] += 1
             except (ValueError, TypeError, KeyError):
                 result["invalid_manifests"] += 1
@@ -183,12 +206,13 @@ def _check(status: str, reason: str, **values) -> dict:
     return {"status": status, "reason_code": reason, **values}
 
 
-def build_report(client, bucket: str, report_date: date, as_of: datetime, *, grids=None, unavailable_reason=None) -> dict:
+def build_report(client, bucket: str, report_date: date, as_of: datetime, *, grids=None, unavailable_reason=None,
+                 historical_cutoff: bool = False) -> dict:
     as_of, days = _window(report_date, as_of)
     grid_set = set(grids if grids is not None else ((nx, ny) for _, nx, ny in load_grids(DEFAULT_GRID_CSV)))
     if not grid_set or any(type(nx) is not int or type(ny) is not int or nx < 1 or ny < 1 for nx, ny in grid_set):
         raise ValueError("grid_population_invalid")
-    evidence = _collect(client, bucket, days, as_of, grid_set) if unavailable_reason is None else {
+    evidence = _collect(client, bucket, days, as_of, grid_set, historical_cutoff=historical_cutoff) if unavailable_reason is None else {
         "reason": "credentials_missing", "objects": None, "raw_objects": None, "manifests": 0,
         "accepted_manifests": 0, "invalid_manifests": 0, "duplicate_references": 0, "rows": []}
     reason, rows = evidence["reason"], evidence["rows"]
@@ -224,11 +248,14 @@ def build_report(client, bucket: str, report_date: date, as_of: datetime, *, gri
     status = next(state for state in ("fail", "unmeasured", "warn", "pass") if any(check["status"] == state for check in checks.values()))
     revision = os.environ.get("GITHUB_SHA", "local")
     verified_keys = {row[0] for row in rows}
+    window = {"load_date_start_kst": days[0], "load_date_end_kst": days[1]}
+    if historical_cutoff:
+        window["reconstruction"] = "retained_objects_last_modified_and_manifest_completed_at_lte_cutoff"
     return {"schema_version": "weather-raw-quality/v1", "report_date_kst": days[0], "evaluation_as_of": as_of.isoformat(),
             "source_revision": revision if re.fullmatch(r"[0-9a-f]{40}", revision) else "local", "status": status,
             "contract": {"source": SOURCE, "grid_count": len(grid_set), "issue_cycle_count": len(DEFAULT_ISSUE_TIMES),
                          "freshness_error_minutes": 360, "coverage_basis": "configured_forecast_contract", "duplicate_basis": "manifest_object_references"},
-            "measurement_window": {"load_date_start_kst": days[0], "load_date_end_kst": days[1]}, "checks": checks,
+            "measurement_window": window, "checks": checks,
             "evidence": {"listed_objects": evidence["objects"], "manifest_count": evidence["manifests"],
                          "accepted_manifests": evidence["accepted_manifests"], "invalid_manifests": evidence["invalid_manifests"],
                          "verified_raw_objects": len(verified_keys), "unverified_raw_objects": max(0, raw_count - len(verified_keys)) if raw_count is not None else None}}

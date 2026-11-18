@@ -850,3 +850,120 @@ def test_hosted_repeated_interruption_preserves_unvisited_grids_without_checkpoi
     result = run(client,source)
     assert result['raw_objects_reused']==79 and [call['nx'] for call in source.calls]==[4]
     assert result['phase_seconds']['checkpoint_resume_validation'] >= 0
+
+
+def test_scheduled_repair_collects_two_oldest_distinct_issues_and_resumes():
+    client, source = Client(), Source()
+    eligible = eligible_issues(NOW)
+    first = collect_hosted(client, 'bucket', source=source, grids=GRIDS,
+                           clock=lambda: NOW, repair_oldest=True, repair_limit=2)
+    assert first['source_issues_completed'] == [issue.isoformat() for issue in eligible[:2]]
+    assert first['cycles_completed'] == 2 and len(source.calls) == 160
+    assert not any(run_id_for(eligible[2]) in key for _, key in client.calls)
+
+    resumed = collect_hosted(client, 'bucket', source=Source(), grids=GRIDS,
+                             clock=lambda: NOW, repair_oldest=True, repair_limit=2)
+    assert resumed['source_issues_reused'] == first['source_issues_completed']
+    assert resumed['source_issues_completed'] == [issue.isoformat() for issue in eligible[2:4]]
+
+
+@pytest.mark.parametrize('repair,limit', [(False, 2), (True, 0), (True, 3), (True, True)])
+def test_multi_issue_repair_cannot_expand_other_modes_or_exceed_bound(repair, limit):
+    client, source = Client(), Source()
+    with pytest.raises(HostedCollectionError, match='repair_limit'):
+        collect_hosted(client, 'bucket', source=source, grids=GRIDS, clock=lambda: NOW,
+                       repair_oldest=repair, repair_limit=limit)
+    assert not source.calls and not client.calls
+
+
+def test_repair_selection_failure_retains_already_completed_issue():
+    oldest, second = eligible_issues(NOW)[:2]
+
+    class RejectedSecond(Client):
+        def head_object(self, **args):
+            if run_id_for(second) in args['Key']:
+                raise error("AccessDenied", 403)
+            return super().head_object(**args)
+
+    client = RejectedSecond()
+    with pytest.raises(HostedCollectionError) as failed:
+        collect_hosted(client, 'bucket', source=Source(), grids=GRIDS,
+                       clock=lambda: NOW, repair_oldest=True, repair_limit=2)
+    assert failed.value.summary['status'] == 'failed'
+    assert failed.value.summary['source_issues_completed'] == [oldest.isoformat()]
+    assert not any(run_id_for(second) in key for key in client.files)
+
+
+def test_expired_candidate_never_calls_source_and_eligible_neighbor_can_repair():
+    oldest, second, third = eligible_issues(NOW)[:3]
+    now = [oldest + timedelta(hours=24) - timedelta(seconds=5)]
+
+    class SlowRead(Client):
+        def head_object(self, **args):
+            if run_id_for(oldest) in args['Key']:
+                now[0] = oldest + timedelta(hours=24)
+            return super().head_object(**args)
+
+    source = Source()
+    result = collect_hosted(SlowRead(), 'bucket', source=source, grids=GRIDS,
+                            clock=lambda: now[0], repair_oldest=True, repair_limit=2)
+    assert result['source_issues_expired'] == [oldest.isoformat()]
+    assert result['source_issues_completed'] == [second.isoformat(), third.isoformat()]
+    assert result['status'] == 'degraded' and len(source.calls) == 160
+
+
+def test_repair_source_failure_defers_oldest_and_can_finish_next_issue():
+    oldest, second = eligible_issues(NOW)[:2]
+
+    class FailsOldest(Source):
+        def fetch_page(self, **args):
+            if args['base_date'] + args['base_time'] == oldest.strftime('%Y%m%d%H%M'):
+                return 200, b'{"response":{"header":{"resultCode":"03"}}}'
+            return super().fetch_page(**args)
+
+    client = Client()
+    result = collect_hosted(client, 'bucket', source=FailsOldest(), grids=GRIDS,
+                            clock=lambda: NOW, repair_oldest=True, repair_limit=2)
+    assert result['status'] == 'degraded' and result['cycles_failed'] == 1
+    assert result['failures'][0]['repair_retry_persisted'] is True
+    assert result['source_issues_completed'] == [second.isoformat()]
+    resumed = collect_hosted(client, 'bucket', source=Source(), grids=GRIDS,
+                             clock=lambda: NOW, repair_oldest=True)
+    assert resumed['source_issues_deferred'] == [oldest.isoformat()]
+    assert resumed['source_issues_reused'] == [second.isoformat()]
+
+
+@pytest.mark.parametrize('limit', ['daily_budget_exhausted', 'run_budget_exhausted', 'run_deadline'])
+def test_two_repair_issues_share_source_and_time_budgets(monkeypatch, limit):
+    import tools.weather_collect_hosted as module
+
+    client = Client()
+    clock_seconds = [0]
+    deadline = Deadline(monotonic=lambda: clock_seconds[0], minutes=30)
+    day_key = f'{module.BUDGET_PREFIX}/{NOW.date()}.json'
+    starting_attempts = module.DAILY_ATTEMPT_LIMIT - 83 if limit == 'daily_budget_exhausted' else 0
+    if limit == 'run_budget_exhausted':
+        monkeypatch.setattr(module, 'RUN_ATTEMPT_LIMIT', 83)
+    client.files[day_key] = json.dumps({'schema_version': 1, 'budget_date': NOW.date().isoformat(),
+                                       'attempts': starting_attempts}).encode()
+
+    def reserving_source(budget, stage_deadline):
+        assert stage_deadline is deadline
+
+        class ChargedSource(Source):
+            def fetch_page(self, **args):
+                if limit == 'run_deadline' and budget.attempts == 83:
+                    clock_seconds[0] = 30 * 60
+                budget.reserve(None)
+                return super().fetch_page(**args)
+
+        return ChargedSource()
+
+    monkeypatch.setattr(module, '_hosted_source', reserving_source)
+    with pytest.raises(HostedCollectionError, match=limit) as failed:
+        collect_hosted(client, 'bucket', grids=GRIDS, clock=lambda: NOW, deadline=deadline,
+                       repair_oldest=True, repair_limit=2)
+    assert failed.value.summary['source_issues_completed'] == [eligible_issues(NOW)[0].isoformat()]
+    assert failed.value.summary['physical_attempts'] == 83
+    assert len([key for key in client.files if key.endswith('/_manifest.json')]) == 1
+    assert json.loads(client.files[day_key])['attempts'] == starting_attempts + 83

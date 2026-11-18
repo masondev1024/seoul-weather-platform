@@ -37,8 +37,9 @@ def test_repair_has_its_own_budget_after_latest_finishes(outcome):
     jobs = workflow()['jobs']
     assert jobs['repair']['needs'] == 'collect'
     assert repair_allowed(**{'needs.collect.result': outcome})
+    assert jobs['collect']['timeout-minutes'] == '25'
+    assert jobs['repair']['timeout-minutes'] == '34'
     for job in jobs.values():
-        assert job['timeout-minutes'] == '25'
         assert job['runs-on'] == 'ubuntu-latest'
 
 
@@ -52,7 +53,7 @@ def test_repair_respects_cancellation_protection_and_explicit_single_issue(overr
     assert not repair_allowed(**overrides)
 
 
-def test_only_r2_validation_is_parallel_and_each_stage_requests_one_issue():
+def test_serial_latest_then_bounded_oldest_repair():
     doc = workflow()
     assert doc['concurrency']['cancel-in-progress'] == 'false'
     assert doc['permissions'] == {'contents': 'read'}
@@ -60,7 +61,7 @@ def test_only_r2_validation_is_parallel_and_each_stage_requests_one_issue():
     commands = {name: '\n'.join(step.get('run', '') for step in job['steps'])
                 for name, job in doc['jobs'].items()}
     assert '--only-latest' in commands['collect']
-    assert '--repair-oldest' in commands['repair']
+    assert '--repair-oldest --repair-limit 2' in commands['repair']
     for job in doc['jobs'].values():
         assert 'strategy' not in job
         assert any(step.get('if') == 'always()' and 'GITHUB_STEP_SUMMARY' in step.get('run', '')
