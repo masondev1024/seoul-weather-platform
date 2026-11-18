@@ -68,7 +68,7 @@ jobs:
           fi
 
   repair:
-    name: Repair one older source issue
+    name: Repair oldest source issues
     needs: collect
     if: >-
       always() && !cancelled() && needs.collect.result != 'cancelled' &&
@@ -77,7 +77,7 @@ jobs:
       vars.WEATHER_COLLECTION_ENABLED == 'enabled' &&
       !inputs.only_latest && !inputs.source_issue
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 34
     steps:
       - name: Checkout trusted collector
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -89,14 +89,14 @@ jobs:
           python-version: 3.11.15
       - name: Install pinned collection clients
         run: python -m pip install boto3==1.43.0 requests==2.32.5
-      - name: Resume one eligible older issue with its own time budget
+      - name: Resume up to two eligible older issues with one shared budget
         env:
           KMA_SERVICE_KEY: ${{ secrets.WEATHER_COLLECTION_KMA_SERVICE_KEY }}
           R2_ENDPOINT: ${{ secrets.WEATHER_QUALITY_R2_ENDPOINT }}
           R2_BUCKET_NAME: ${{ secrets.WEATHER_QUALITY_R2_BUCKET_NAME }}
           R2_ACCESS_KEY_ID: ${{ secrets.WEATHER_COLLECTION_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.WEATHER_COLLECTION_R2_SECRET_ACCESS_KEY }}
-        run: python -m tools.weather_collect_hosted --repair-oldest --summary-file "$RUNNER_TEMP/weather-collection-summary.json"
+        run: python -m tools.weather_collect_hosted --repair-oldest --repair-limit 2 --summary-file "$RUNNER_TEMP/weather-collection-summary.json"
       - name: Show repair outcome
         if: always()
         run: |

@@ -2,7 +2,7 @@ import io
 import json
 import sys
 import types
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -51,6 +51,89 @@ class Store:
 
 def report(store):
     return build_report(store, "private-bucket", DAY, AS_OF, grids=GRIDS)
+
+
+def historical_store(objects):
+    files = {key: payload for key, (payload, _) in objects.items()}
+    pages = []
+    for day in (DAY, DAY + timedelta(days=1)):
+        entries = [{"Key": key, "Size": len(payload), "LastModified": modified}
+                   for key, (payload, modified) in objects.items() if key.startswith(f"{PREFIX}{day}/")]
+        pages.append({"Contents": entries, "IsTruncated": False})
+    return Store(files, pages)
+
+
+def historical_report(store):
+    return build_report(store, "private-bucket", DAY, AS_OF, grids=GRIDS, historical_cutoff=True)
+
+
+def test_historical_cutoff_excludes_late_objects_and_accepts_the_inclusive_boundary():
+    early = raw()
+    m1, payload1 = manifest([early])
+    late = raw(run="late", nx=61)
+    m2, payload2 = manifest([late], run="late")
+    after = AS_OF + timedelta(milliseconds=1)
+    store = historical_store({early: (b"", AS_OF), m1: (payload1, AS_OF),
+                              late: (b"", after), m2: (payload2, after)})
+    result = historical_report(store)
+    assert result["checks"]["missing"]["observed_slots"] == 1
+    assert result["checks"]["missing"]["missing_slots"] == 15
+    assert result["checks"]["collection"]["raw_objects"] == 1
+    assert result["evidence"]["listed_objects"] == 2
+    assert store.get_calls == [{"Bucket": "private-bucket", "Key": m1, "IfUnmodifiedSince": AS_OF}]
+
+
+@pytest.mark.parametrize("metadata", [None, AS_OF.replace(tzinfo=None), "2026-10-13T00:17:00Z"])
+def test_historical_unknown_object_age_is_unmeasured(metadata):
+    key = raw()
+    mkey, payload = manifest([key])
+    result = historical_report(historical_store({key: (b"", metadata), mkey: (payload, AS_OF)}))
+    assert result["checks"]["missing"]["status"] == "unmeasured"
+    assert result["checks"]["missing"]["reason_code"] == "historical_object_time_unavailable"
+    assert result["checks"]["collection"]["raw_objects"] is None
+
+
+def test_historical_pre_cutoff_manifest_cannot_prove_a_later_raw_version():
+    key = raw()
+    mkey, payload = manifest([key])
+    result = historical_report(historical_store({
+        key: (b"replacement", AS_OF + timedelta(seconds=1)), mkey: (payload, AS_OF),
+    }))
+    assert result["checks"]["missing"]["observed_slots"] == 0
+    assert result["checks"]["missing"]["missing_slots"] is None
+    assert result["evidence"]["invalid_manifests"] == 1
+
+
+def test_historical_manifest_replacement_during_list_get_is_unmeasured(monkeypatch):
+    key = raw()
+    mkey, payload = manifest([key])
+    store = historical_store({key: (b"", AS_OF), mkey: (payload, AS_OF)})
+
+    def replaced(**options):
+        assert options["IfUnmodifiedSince"] == AS_OF
+        raise RuntimeError("412 Precondition Failed")
+
+    monkeypatch.setattr(store, "get_object", replaced)
+    result = historical_report(store)
+    assert result["checks"]["missing"]["status"] == "unmeasured"
+    assert result["checks"]["missing"]["missing_slots"] is None
+    assert result["evidence"]["accepted_manifests"] == 0
+
+
+def test_historical_uses_completion_time_and_does_not_hide_invalid_manifests():
+    key = raw()
+    mkey, payload = manifest([key])
+    future_key, future = manifest([key], run="staged", completed_at=(AS_OF + timedelta(seconds=1)).isoformat())
+    objects = {key: (b"", AS_OF), mkey: (payload, AS_OF), future_key: (future, AS_OF)}
+    result = historical_report(historical_store(objects))
+    assert result["checks"]["missing"]["observed_slots"] == 1
+    assert result["checks"]["missing"]["missing_slots"] == 15
+    assert result["evidence"]["accepted_manifests"] == 1
+    assert result["evidence"]["invalid_manifests"] == 0
+    objects[future_key] = (b"not-json", AS_OF)
+    result = historical_report(historical_store(objects))
+    assert result["checks"]["missing"]["status"] == "unmeasured"
+    assert result["evidence"]["invalid_manifests"] == 1
 
 
 def test_zero_listing_is_collection_failure_without_fabricated_quality():
