@@ -1,0 +1,131 @@
+{
+  "baseline": {
+    "aggregate": {
+      "coverage_percent": 73.2143,
+      "expected_slots": 4480,
+      "missing_slots": 1200,
+      "observed_slots": 3280
+    },
+    "days": [
+      {
+        "cutoff_kst": "2026-11-12T09:17:00+09:00",
+        "date_kst": "2026-11-11",
+        "expected_slots": 640,
+        "freshness": {
+          "measured_grids": 80,
+          "stale_grids": 80,
+          "status": "fail"
+        },
+        "missing_slots": 320,
+        "observed_slots": 320,
+        "status": "measured"
+      },
+      {
+        "cutoff_kst": "2026-11-13T09:17:00+09:00",
+        "date_kst": "2026-11-12",
+        "expected_slots": 640,
+        "freshness": {
+          "measured_grids": 80,
+          "stale_grids": 0,
+          "status": "pass"
+        },
+        "missing_slots": 160,
+        "observed_slots": 480,
+        "status": "measured"
+      },
+      {
+        "cutoff_kst": "2026-11-14T09:17:00+09:00",
+        "date_kst": "2026-11-13",
+        "expected_slots": 640,
+        "freshness": {
+          "measured_grids": 80,
+          "stale_grids": 0,
+          "status": "pass"
+        },
+        "missing_slots": 160,
+        "observed_slots": 480,
+        "status": "measured"
+      },
+      {
+        "cutoff_kst": "2026-11-15T09:17:00+09:00",
+        "date_kst": "2026-11-14",
+        "expected_slots": 640,
+        "freshness": {
+          "measured_grids": 80,
+          "stale_grids": 0,
+          "status": "pass"
+        },
+        "missing_slots": 80,
+        "observed_slots": 560,
+        "status": "measured"
+      },
+      {
+        "cutoff_kst": "2026-11-16T09:17:00+09:00",
+        "date_kst": "2026-11-15",
+        "expected_slots": 640,
+        "freshness": {
+          "measured_grids": 80,
+          "stale_grids": 0,
+          "status": "pass"
+        },
+        "missing_slots": 80,
+        "observed_slots": 560,
+        "status": "measured"
+      },
+      {
+        "cutoff_kst": "2026-11-17T09:17:00+09:00",
+        "date_kst": "2026-11-16",
+        "expected_slots": 640,
+        "freshness": {
+          "measured_grids": 80,
+          "stale_grids": 0,
+          "status": "pass"
+        },
+        "missing_slots": 160,
+        "observed_slots": 480,
+        "status": "measured"
+      },
+      {
+        "cutoff_kst": "2026-11-18T09:17:00+09:00",
+        "date_kst": "2026-11-17",
+        "expected_slots": 640,
+        "freshness": {
+          "measured_grids": 80,
+          "stale_grids": 0,
+          "status": "pass"
+        },
+        "missing_slots": 240,
+        "observed_slots": 400,
+        "status": "measured"
+      }
+    ],
+    "end_kst": "2026-11-17",
+    "start_kst": "2026-11-11"
+  },
+  "delta": null,
+  "followup": null,
+  "generated_at": "2026-11-18T03:30:24.669286+00:00",
+  "method": {
+    "cutoff_day_offset": 1,
+    "cutoff_kst": "09:17",
+    "expected_slots_daily": 640,
+    "freshness_error_minutes": 360,
+    "grid_count": 80,
+    "grid_sha256": "eb8d9e7efa694d06aa4bb69722245f21da402ffe15bb1f7cb950ae04e806402d",
+    "issue_times_kst": [
+      "0200",
+      "0500",
+      "0800",
+      "1100",
+      "1400",
+      "1700",
+      "2000",
+      "2300"
+    ],
+    "reader_sha256": "100f2ec0790937a7f8c5ee24fb32878d26e09240942b51570d611895f69419b2",
+    "source": "kma_vilage_fcst",
+    "timezone": "Asia/Seoul"
+  },
+  "rollout_at": null,
+  "schema_version": "weather-coverage-comparison/v1"
+}

@@ -72,3 +72,87 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh api --method POST "repos/$GITHUB_REPOSITORY/pages/builds" --jq '.status'
+
+  coverage-observation:
+    name: Measure fixed-cutoff coverage
+    if: >-
+      github.repository == 'masondev1024/seoul-weather-platform' &&
+      github.ref == 'refs/heads/main' && github.event_name == 'schedule' &&
+      vars.WEATHER_COVERAGE_ROLLOUT_AT != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    env:
+      ROLLOUT_AT: ${{ vars.WEATHER_COVERAGE_ROLLOUT_AT }}
+      FIRST_RUN_ID: ${{ vars.WEATHER_COVERAGE_FIRST_RUN_ID }}
+    steps:
+      - name: Checkout trusted reader
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: 3.11.15
+      - name: Find mature cohort days
+        id: plan
+        run: |
+          [[ "$FIRST_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          python -m tools.weather_coverage_schedule
+      - name: Check for an existing measured snapshot
+        if: steps.plan.outputs.name != ''
+        id: archive
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SNAPSHOT_NAME: ${{ steps.plan.outputs.name }}
+        run: |
+          count=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/artifacts" -f "name=$SNAPSHOT_NAME" --paginate \
+            | jq -s --arg name "$SNAPSHOT_NAME" --argjson repo "$GITHUB_REPOSITORY_ID" \
+            '[.[].artifacts[] | select(.name == $name and (.expired | not) and .workflow_run.head_branch == "main" and .workflow_run.head_repository_id == $repo)] | length')
+          if [[ "$count" == 0 ]]; then echo "due=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Install pinned read client
+        if: steps.archive.outputs.due == 'true'
+        run: python -m pip install boto3==1.43.0
+      - name: Compare retained evidence at each day’s cutoff
+        id: compare
+        if: steps.archive.outputs.due == 'true'
+        env:
+          SNAPSHOT_PREFIX: ${{ steps.plan.outputs.prefix }}
+          R2_ENDPOINT: ${{ secrets.WEATHER_QUALITY_R2_ENDPOINT }}
+          R2_BUCKET_NAME: ${{ secrets.WEATHER_QUALITY_R2_BUCKET_NAME }}
+          R2_ACCESS_KEY_ID: ${{ secrets.WEATHER_QUALITY_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.WEATHER_QUALITY_R2_SECRET_ACCESS_KEY }}
+        run: |
+          out="$RUNNER_TEMP/weather-coverage"
+          mkdir -p "$out"
+          rc=0
+          python -m tools.weather_coverage_comparison \
+            --baseline-file docs/operations/evidence/weather-coverage-baseline-20261111.json \
+            --rollout-at "$ROLLOUT_AT" --output "$out/comparison.json" || rc=$?
+          case "$rc" in 0|1|4) ;; *) exit "$rc";; esac
+          test -s "$out/comparison.json"
+          # Derive the artifact date from the measurement, even if setup crossed 09:17.
+          mature=$(jq '[.followup.days[] | select(.status != "pending_cutoff")] | length' "$out/comparison.json")
+          name="$SNAPSHOT_PREFIX-${mature}of7"
+          if [[ "$rc" == 1 ]]; then name="$name-unmeasured-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"; fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "code=$rc" >> "$GITHUB_OUTPUT"
+          jq -n --arg first "$FIRST_RUN_ID" --arg rollout "$ROLLOUT_AT" --arg sha "$GITHUB_SHA" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            '{first_natural_run_id:$first,rollout_at:$rollout,reader_commit:$sha,measurement_run_id:$run,measurement_attempt:$attempt}' > "$out/provenance.json"
+          echo "First natural collection: https://github.com/$GITHUB_REPOSITORY/actions/runs/$FIRST_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.followup.days[] | "\(.date_kst)  \(.status)  \(.observed_slots // "—")/\(.expected_slots)  "' "$out/comparison.json" >> "$GITHUB_STEP_SUMMARY"
+          jq -r 'if .delta then "Coverage change: \(.delta.coverage_percentage_points) pp" else "Seven-day change pending." end' "$out/comparison.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain cohort evidence for 90 days
+        if: steps.compare.outputs.name != ''
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ${{ steps.compare.outputs.name }}
+          path: ${{ runner.temp }}/weather-coverage/*.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Surface evidence gaps for retry on the next schedule
+        if: steps.compare.outputs.code == '1'
+        run: exit 1

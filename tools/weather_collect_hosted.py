@@ -17,6 +17,7 @@ import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from itertools import islice
 from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
@@ -112,10 +113,10 @@ def run_id_for(issue: datetime) -> str:
 
 class Deadline:
     def __init__(self, *, monotonic: Callable[[], float] = time.monotonic,
-                 sleep: Callable[[float], None] = time.sleep) -> None:
+                 sleep: Callable[[float], None] = time.sleep, minutes: int = 20) -> None:
         self._monotonic = monotonic
         self._sleep = sleep
-        self._end = monotonic() + 20 * 60
+        self._end = monotonic() + minutes * 60
 
     def check(self, headroom: float = 40) -> None:
         _require(self._monotonic() + headroom <= self._end, "run_deadline")
@@ -612,17 +613,84 @@ class RepairRetry:
             raise HostedCollectionError('repair_retry_conflict') from exc
 
 
+def _pending_issues(client, bucket, issues, grids, clock, deadline, repair_oldest, result):
+    """Read each manifest at most once per pass. Walk repairs oldest first."""
+    try:
+        for issue in (issues if repair_oldest else reversed(issues)):
+            store = ScopedStore(client, bucket, issue, grids, clock=clock, deadline=deadline)
+            completed = False
+            blocked = False
+            for day in store.load_dates:
+                key = store.manifest_key(day)
+                if not store.exists(key):
+                    continue
+                try:
+                    store.validate_manifest(key, store.read_bytes(key))
+                except HostedCollectionError as exc:
+                    if str(exc) not in {"manifest_invalid", "source_page_contract", "source_size_limit",
+                                        "storage_scope", "storage_size_limit", "raw_timestamp_contract", "invalid_timestamp"}:
+                        raise
+                    blocked = True
+                    break
+                except Exception as exc:
+                    if not _missing(exc):
+                        raise
+                    # A complete manifest that references a missing raw object is
+                    # immutable bad evidence; preserve it for investigation.
+                    blocked = True
+                    break
+                if completed:
+                    blocked = True
+                    break
+                completed = True
+            result["phase_seconds"]["prior_manifest_validation"] += round(store.manifest_validation_seconds, 3)
+            if blocked:
+                result["source_issues_blocked"].append(issue.isoformat())
+                result["cycles_blocked"] += 1
+                result["blocked_reason_code"] = "manifest_integrity_failure"
+                result["status"] = "degraded"
+                continue
+            if completed:
+                result["cycles_reused"] += 1
+                result["source_issues_reused"].append(issue.isoformat())
+            else:
+                retry = RepairRetry(client, bucket, issue, clock=clock, deadline=deadline) if repair_oldest else None
+                if retry is not None and retry.deferred():
+                    result["source_issues_deferred"].append(issue.isoformat())
+                    result["cycles_deferred"] += 1
+                    result["status"] = "degraded"
+                    continue
+                if repair_oldest and issue not in eligible_issues(clock()):
+                    result["source_issues_expired"].append(issue.isoformat())
+                    result["status"] = "degraded"
+                    continue
+                yield issue, store, retry
+    except Exception as exc:
+        if not result["cycles_completed"] and not result["cycles_failed"]:
+            raise
+        # Keep the first issue's durable outcome when inspecting the next one fails.
+        result["status"] = "failed"
+        if isinstance(exc, HostedCollectionError):
+            exc.summary = result
+            raise
+        failure = HostedCollectionError("repair_preflight_failed")
+        failure.summary = result
+        raise failure from exc
+
+
 def collect_hosted(client, bucket: str, *, source=None, grids=None,
                    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                    only_latest: bool = False, deadline: Deadline | None = None,
-                   source_issue: datetime | None = None, repair_oldest: bool = False) -> dict:
+                   source_issue: datetime | None = None, repair_oldest: bool = False,
+                   repair_limit: int = 1) -> dict:
     _domain_imports()
     from weather_ingest.kma import DEFAULT_GRID_CSV, load_kma_grids
     from weather_ingest.landing import KmaGrid, KmaLanding, KmaLandingRequest, RunIdentity, KmaLandingIncompleteError
 
     started = time.monotonic()
     _require(sum((only_latest, repair_oldest, source_issue is not None)) <= 1, 'issue_selection_conflict')
-    deadline = deadline or Deadline()
+    _integer(repair_limit, 1, 2 if repair_oldest else 1, "repair_limit_invalid")
+    deadline = deadline or Deadline(minutes=30 if repair_limit == 2 else 20)
     deadline.check()
     grids = grids or load_kma_grids(path=str(DEFAULT_GRID_CSV), expected_grid_count=80)
     _require(len(grids) == 80, "grid_contract")
@@ -639,65 +707,22 @@ def collect_hosted(client, bucket: str, *, source=None, grids=None,
         issues = issues[-1:]
     if repair_oldest:
         issues = issues[:-1]
-    pending, reused, reused_issues, blocked_issues, deferred_issues = [], 0, [], [], []
-    prior_validation_seconds = 0.0
-    for issue in (issues if repair_oldest else reversed(issues)):
-        store = ScopedStore(client, bucket, issue, grids, clock=clock, deadline=deadline)
-        completed = False
-        blocked = False
-        for day in store.load_dates:
-            key = store.manifest_key(day)
-            if not store.exists(key):
-                continue
-            try:
-                store.validate_manifest(key, store.read_bytes(key))
-            except HostedCollectionError as exc:
-                if str(exc) not in {"manifest_invalid", "source_page_contract", "source_size_limit",
-                                    "storage_scope", "storage_size_limit", "raw_timestamp_contract", "invalid_timestamp"}:
-                    raise
-                blocked = True
-                break
-            except Exception as exc:
-                if not _missing(exc):
-                    raise
-                # A complete manifest that references a missing raw object is
-                # immutable bad evidence; preserve it for investigation.
-                blocked = True
-                break
-            if completed:
-                blocked = True
-                break
-            completed = True
-        prior_validation_seconds += store.manifest_validation_seconds
-        if blocked:
-            blocked_issues.append(issue.isoformat())
-            continue
-        if completed:
-            reused += 1
-            reused_issues.append(issue.isoformat())
-        else:
-            retry = RepairRetry(client, bucket, issue, clock=clock, deadline=deadline) if repair_oldest else None
-            if retry is not None and retry.deferred():
-                deferred_issues.append(issue.isoformat())
-                continue
-            pending.append((issue, store, retry))
-            if repair_oldest:
-                # Once the oldest eligible gap is selected, later issues are
-                # outside this invocation's work and need no preflight reads.
-                break
-    selected = pending[:1]
-    result = {"schema_version": 1, "status": "degraded" if blocked_issues or deferred_issues else "success",
-              "cycles_completed": 0, "cycles_reused": reused, "cycles_blocked": len(blocked_issues),
+    result = {"schema_version": 1, "status": "success",
+              "cycles_completed": 0, "cycles_reused": 0, "cycles_blocked": 0,
               "cycles_failed": 0, "failures": [],
               "raw_pages": 0, "raw_objects_reused": 0, "forecast_rows": 0, "physical_attempts": 0,
-              "source_issues_completed": [], "source_issues_reused": reused_issues,
-              "source_issues_blocked": blocked_issues,
-              "source_issues_deferred": deferred_issues,
-              "cycles_deferred": len(deferred_issues),
-              "phase_seconds": {"prior_manifest_validation": round(prior_validation_seconds, 3),
+              "source_issues_completed": [], "source_issues_reused": [],
+              "source_issues_blocked": [],
+              "source_issues_deferred": [], "source_issues_expired": [],
+              "cycles_deferred": 0,
+              "phase_seconds": {"prior_manifest_validation": 0.0,
                                 "collection": 0.0, "final_manifest_validation": 0.0,
                                 "checkpoint_resume_validation": 0.0},
-              "blocked_reason_code": "manifest_integrity_failure" if blocked_issues else None}
+              "blocked_reason_code": None}
+    candidates = _pending_issues(client, bucket, issues, grids, clock, deadline, repair_oldest, result)
+    # Legacy latest-first selection checks the full window before writing. Repair
+    # starts each gap as soon as it is found, without probing it again on this pass.
+    selected = islice(candidates, repair_limit) if repair_oldest else list(candidates)[:1]
     for issue, store, repair_retry in selected:
         unavailable_pages = []
         collection_started = time.monotonic()
@@ -765,6 +790,7 @@ def collect_hosted(client, bucket: str, *, source=None, grids=None,
             if landing is not None:
                 result['phase_seconds']['checkpoint_resume_validation'] += round(landing.checkpoint_validation_seconds, 3)
             result['phase_seconds']['total'] = round(time.monotonic() - started, 3)
+        result["physical_attempts"] = budget.attempts
         result["cycles_completed"] += 1
         result["source_issues_completed"].append(issue.isoformat())
         result["raw_pages"] += len(batch.raw_objects)
@@ -799,8 +825,10 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--only-latest", action="store_true")
-    selection.add_argument('--repair-oldest', action='store_true', help='Repair one oldest pending issue, excluding latest')
+    selection.add_argument('--repair-oldest', action='store_true', help='Repair the oldest pending issues, excluding latest')
     selection.add_argument('--source-issue', help='Resume one issued timestamp inside the existing 24-hour window')
+    parser.add_argument("--repair-limit", type=int, choices=(1, 2), default=1,
+                        help="Maximum issues per --repair-oldest pass (default: 1)")
     parser.add_argument("--summary-file", type=Path)
     args = parser.parse_args(argv)
     try:
@@ -814,7 +842,7 @@ def main(argv=None) -> int:
                 raise HostedCollectionError('source_issue_invalid') from exc
         client, bucket = _client_from_env()
         result = collect_hosted(client, bucket, only_latest=args.only_latest, source_issue=issue,
-                                repair_oldest=args.repair_oldest)
+                                repair_oldest=args.repair_oldest, repair_limit=args.repair_limit)
         serialized = json.dumps(result, sort_keys=True)
         if args.summary_file:
             args.summary_file.parent.mkdir(parents=True, exist_ok=True)
