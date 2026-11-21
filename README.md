@@ -1,166 +1,105 @@
-# ASK Seoul · 기상 데이터 파이프라인
+# ASK Seoul · 서울의 날씨와 교통을 함께 조회하기
 
-기관마다 시간·지역 기준이 다른 서울 공공데이터를 함께 조회하기 위한 팀 프로젝트. 기상·교통 수집과 게시 전 검사를 맡았고, 이 저장소에서는 **기상 코드를 이관해 예보 품질 평가와 재처리 판단을 보강**했습니다.
+기업 연계 팀 프로젝트에서 기상청 예보와 서울교통정보센터(TOPIS)의 교통 돌발 정보를 수집하고, 게시 전에 누락된 자료가 있는지 검사하는 일을 맡았습니다. 두 자료를 함께 조회할 수 있도록 시간은 한국 시간으로, 지역은 행정동 기준으로 맞췄습니다.
+
+팀 프로젝트가 끝난 뒤 예보 수집을 이어가다 보니, 예약 작업이 성공해도 일부 발표가 빠진 날이 있었습니다. 수집기를 고친 뒤 **11월 18일 첫 예약 실행에서 누락 예보 두 회분을 다시 받았습니다.** 전날 23시와 당일 02시 예보였습니다. R2의 원본과 완료 기록을 맞춰 보니 두 발표 모두 서울 80개 격자의 자료가 들어왔습니다. [예약 실행 기록](https://github.com/masondev1024/seoul-weather-platform/actions/runs/44314324485) · [포트폴리오의 복구 기록](https://jungseongheon.org/portfolio/#ask-seoul-recovery)
 
 ## 맡은 범위
 
-- **팀 프로젝트** · 기상청·TOPIS 수집, KST·행정동 기준 정리, 게시 전 검사. 예보 적재의 삭제·추가를 PyIceberg 한 번의 커밋으로 묶어 부분 갱신 방지.
-- **개인 후속 개발** · 기상 코드 이관, 원본·수집 기록 관리, 예보와 실황 비교, 복구 후보 판단, 장소별 기상 위험 조회 연동.
+**팀 프로젝트에서 고친 적재 문제.** 한 번에 예보 8만 행 이상을 SQL 한 문장에 넣으려다 Trino의 쿼리 크기 제한에 걸렸습니다. 7월 3일부터 7일까지 정기 작업이 20번 실패했습니다. 예보는 나눠 읽고, 같은 실행에서 저장한 행을 지우고 새 행을 넣는 작업은 PyIceberg 트랜잭션 하나로 묶었습니다. 중간에 끊겨도 일부만 바뀐 상태가 남지 않습니다. 7월 8일 이후 팀이 확인한 실행에서는 같은 오류가 다시 나오지 않았습니다. [적재 변경 PR #178](https://github.com/ASAC-DE-bigkk/ASAC-DAG/pull/178) · [팀 설계 기록](https://github.com/ASAC-DE-bigkk/ASK-Seoul/blob/ba162272133c416da36ab4d07d35e25ffbff0c6e/engineering-decision-log.md)
 
-## 구조 요약
+교통 돌발 정보는 5분마다 수집할 때 dbt 변환 전체가 돌고 있었습니다. 팀에서는 수집 주기를 유지하고 변환만 한 시간에 한 번으로 바꿨습니다. 이때 하루 288회에서 24회로 줄어든 것은 dbt 실행 횟수입니다. [팀 실행 기록](https://jungseongheon.org/portfolio/#ask-seoul)
 
-```text
-기상청 → Airflow → R2 원본·Iceberg → dbt·Trino → 검사 → D1
-D1 → API·프록시 → k-skill / 예보·실황 → 내부 품질 평가
-```
-
-Airflow·dbt·Trino는 로컬 Docker 환경, 저장·조회 연결은 Cloudflare R2·D1·Workers 구성. 이 저장소는 기상 처리·발행과 프록시 코드를 관리하며, API 원본 서비스와 upstream k-skill 실행 환경은 별도 관리합니다. [구성·관리 범위](docs/architecture/platform-boundaries.md)
+**개인 후속 작업.** 날씨 쪽에서는 빠진 예보를 보충하는 일 외에도, 어제 발표한 예보가 실제 관측값과 얼마나 달랐는지 확인하는 기능을 만들었습니다. 외부에서 장소별 기상 위험 시간대를 조회할 수 있도록 K-Skill에도 조회 기능 하나를 기여했습니다. [품질 평가 설계](docs/architecture/weather-forecast-quality.md) · [K-Skill 기여 PR #552](https://github.com/NomaDamas/k-skill/pull/552) · [ASK Seoul 팀 서비스](https://ask-seoul.kr/)
 
 ## 확인한 결과
 
-| 검증 대상 | 결과와 범위 |
-|---|---|
-| 예보 적재 오류 | 팀 정기 실행 20건에서 발생한 Trino 쿼리 크기 제한에 대응. PyIceberg 전환 후 2026.07.08부터 확인한 실행에서 같은 오류 미재발. [적재 PR #178](https://github.com/ASAC-DE-bigkk/ASAC-DAG/pull/178) · [팀 설계 기록](https://github.com/ASAC-DE-bigkk/ASK-Seoul/blob/ba162272133c416da36ab4d07d35e25ffbff0c6e/engineering-decision-log.md) |
-| 교통 변환 주기 | 팀 작업에서 수집·변환 주기를 분리해 dbt 변환 **하루 288회 → 24회**. API 호출 수가 아닌 변환 실행 횟수. [실행 기록](https://jungseongheon.org/portfolio/#ask-seoul) |
-| 외부 조회 연동 | 장소별 기상 위험 제품 **1개**를 k-skill에 기여, 공개 PR 병합. [기여 PR #552](https://github.com/NomaDamas/k-skill/pull/552) |
+기상청은 하루 여덟 번 단기예보를 발표합니다. 발표 때마다 서울 80개 격자를 받기로 했으므로, 하루 수집 기준은 **발표 시각과 격자의 조합 640개**입니다. 날짜별로 다음 날 오전 9시 17분(한국 시간)까지 저장된 조합을 셉니다.
 
-[포트폴리오 상세](https://jungseongheon.org/portfolio/#ask-seoul) · [ASK Seoul 팀 서비스](https://ask-seoul.kr/) · [원본 커밋 목록](provenance/source-refs.lock.json) · [파일별 출처](provenance/source-files.jsonl) · [NOTICE](NOTICE)
+예를 들어 11월 17일 예보는 18일 오전 9시 17분까지 400개가 들어왔습니다. 17일 23시 예보는 18일 밤 예약 실행에서 복구됐으므로 17일의 마감 기록은 400/640으로 남습니다. 나중에 다시 받은 양도 확인하면서, 제시간에 얼마나 들어왔는지 따로 볼 수 있습니다. [수집 누락 조사와 날짜별 집계](docs/operations/weather-coverage-20261117.md) · [보충 수집을 반영한 PR #110](https://github.com/masondev1024/seoul-weather-platform/pull/110)
 
-## 데이터 처리 흐름
+## 구조 요약
+
+로컬 Docker Compose에서 Airflow가 수집을 조율하고, dbt와 Trino로 예보를 가공합니다. 개인용 GitHub Actions 예약 수집기는 별도로 기상청 예보 원본을 R2에 저장합니다. [환경별 관리 범위](docs/architecture/platform-boundaries.md) · [예약 수집 워크플로](.github/workflows/weather-collection.yml)
+
+### 데이터 처리 흐름
 
 ```mermaid
-flowchart TB
-    F["기상청 단기예보"] --> R["Airflow 수집·원본 검증"]
-    O["기상청 시간별 실황"] --> R
-    R --> RAW["R2 Raw<br/>원본 응답·수집 시각·해시"]
-    RAW --> B["Iceberg Bronze<br/>예보와 실황을 별도 테이블로 적재"]
-
-    B -->|"예보"| S["dbt Silver·Gold<br/>예보 기반 공개 제품 4개"]
-    S --> P["계약·행 수·신선도 검사"]
-    P --> D["D1 게시·Weather API"]
-    D --> K["제한된 경로의 개인 프록시"]
-    K --> SK["K-Skill<br/>장소별 기상 위험 제품 1개"]
-
-    B -->|"예보·실황"| Q["내부 품질 평가<br/>예보 시점과 실황 비교"]
-    Q --> G["품질 Gold<br/>D-1·D-2·D-3 평가 결과"]
-    G --> REPORT["품질 리포트"]
-    G --> PLACE["장소·격자 조인<br/>장소별 품질 결과"]
-    MAP["기존 장소·기상 격자 매핑"] --> PLACE
+flowchart TD
+    Source["기상청 단기예보 · 실황"] --> Collect["Airflow 수집"]
+    Collect --> Raw["R2 원본 보관"]
+    Raw --> Forecast["Iceberg 예보 테이블"]
+    Raw --> Observed["Iceberg 실황 테이블"]
+    Forecast --> Transform["dbt · Trino 변환과 게시 전 검사"]
+    Transform --> Public["D1 → Weather API → 장소별 기상 위험 조회"]
+    Forecast --> Quality["같은 격자·시각의 예보와 실황 대조"]
+    Observed --> Quality
+    Quality --> Report["내부 품질 리포트와 장소별 평가"]
 ```
 
-위 그림은 논리적인 데이터 흐름이다. 수집 직후 Bronze로 넘기는 원본은 검증된 로컬 임시 파일을 재사용해 같은 R2 객체를 불필요하게 다시 읽지 않도록 했다.
-
-공개 예보 제품은 예보 데이터를 사용하고, 내부 품질 평가는 저장된 예보와 실황을 함께 읽는다. 품질 평가 결과를 D1이나 K-Skill에 게시하는 경로는 없으며, 품질 평가 실패가 공개 제품의 데이터 의존성으로 이어지지 않도록 분리했다. 다만 같은 로컬 Trino 자원을 사용하므로 실행 시간과 동시 실행 수는 별도로 제한한다.
+공개 API에는 예보로 만든 제품 4종을 게시합니다. 내부 품질 평가는 과거 예보와 그 시각의 실제 관측값을 함께 읽습니다. 두 작업은 같은 Trino를 쓰므로 쿼리 수와 실행 시간을 제한합니다.
 
 ## 주요 구현
 
 ### 1. 원본 보존과 재실행 가능한 수집
 
-- 원본 응답과 함께 수집 시각, 요청 결과, 원본 객체 경로와 해시를 보존한다.
-- 실황 수집은 80개 기상 격자의 필수 항목과 기준 시각을 검사한다. 일부 격자나 항목이 빠진 응답을 정상 데이터로 취급하지 않는다.
-- 예보와 실황 요청은 공유 호출 횟수 기록을 사용한다. 재시도도 실제 요청 횟수에 포함하며, 일시적인 통신 오류와 인증·스키마 오류를 구분한다.
-- 원본에서 표준화·중복 제거를 거쳐 제품을 만드는 Bronze → Silver → Gold 구조를 유지한다. 작업 재시도와 데이터 중복 방지는 별개의 문제로 다룬다.
-
-관련 코드: [실황 수집 DAG](dags/domains/weather/weather_ultra_srt_ncst_bronze.py), [실황 데이터 계약](docs/architecture/kma-observation-truth.md), [수집·Bronze 적재 코드](dags/domains/weather/weather_ingest).
+R2에 API 응답과 함께 수집 시각, 요청 결과, 원본 경로와 해시를 남깁니다. 실황을 받을 때는 80개 격자에 필수 항목과 기준 시각이 모두 있는지 확인합니다. 예보와 실황은 호출 예산을 공유하며, 재시도할 때 쓴 호출도 횟수에 넣습니다. [실황 수집 DAG](dags/domains/weather/weather_ultra_srt_ncst_bronze.py) · [실황 입력 기준](docs/architecture/kma-observation-truth.md) · [원본 수집과 Bronze 적재](dags/domains/weather/weather_ingest)
 
 ### 2. 외부 읽기와 메모리 사용 제한
 
-- 원본을 수집한 뒤 해시가 검증된 로컬 임시 파일로 다음 작업에 전달한다. 임시 파일이 없거나 손상됐을 때는 원격 원본을 읽는 경로를 유지한다.
-- Bronze 적재와 변환은 처리 범위와 메모리 사용을 제한한다. 전체 이력을 매번 다시 읽는 방식과 구분해 관리한다.
-- Trino 메모리 상한, 실행 중인 쿼리 수, 대기열과 Airflow 실행 제한을 함께 사용한다. 자원 설정과 쿼리의 읽기 범위를 함께 확인한다.
-- 비용 확인은 운영체제의 전체 네트워크 사용량만으로 판단하지 않고, 쿼리 읽기량·R2 요청·캐시 재사용·대기 시간을 구분하도록 기준을 정리했다.
-
-관련 코드와 기록: [원본 재사용](dags/domains/weather/weather_ingest/raw_spool.py), [중복 원격 읽기 회귀 테스트](dags/domains/weather/tests/test_weather_raw_transfer_budget.py), [읽기 비용 측정 기준](docs/operations/weather-trino-read-measurement.md), [로컬 자원 설정](docker-compose.local.yml), [Trino 동시 실행 제한](trino/resource-groups.json).
-
-여기에 적힌 설정값은 현재 저장소의 구성이다. 비용 절감률이나 처리 속도 개선률을 의미하지 않으며, 그런 수치는 같은 데이터·환경·측정 구간으로 비교한 기록이 있어야 한다.
+수집 직후에 같은 원본을 R2에서 한 번 더 받는 일을 줄이려고 Bronze 적재에는 로컬 임시 파일을 재사용합니다. 해시가 다르거나 파일이 사라졌으면 R2 원본을 읽어 다시 검사합니다. 어떤 변경이 비용에 영향을 줬는지 볼 때는 Trino가 읽은 바이트, R2 요청 횟수, 캐시에서 읽은 양과 쿼리 대기 시간을 따로 기록합니다. [원본 재사용 코드](dags/domains/weather/weather_ingest/raw_spool.py) · [원격 읽기 회귀 테스트](dags/domains/weather/tests/test_weather_raw_transfer_budget.py) · [측정 기준](docs/operations/weather-trino-read-measurement.md)
 
 ### 3. 수집 장애의 복구 계획
 
-수집 결과와 원본 보존 여부를 확인해 다음 행동을 결정한다.
+GitHub Actions는 최신 발표를 수집하고, 이어서 24시간 안에 빠진 발표를 오래된 순서로 최대 두 회분까지 실제로 받습니다. 두 발표를 차례로 처리하며 일일 기상청 호출 한도 2,400회를 공유합니다. [예약 수집 코드](.github/workflows/weather-collection.yml) · [보충 한도와 되돌리는 기준](docs/operations/weather-coverage-20261117.md)
 
-- `RAW_REPLAY`: 검증된 원본을 이용한 재처리 후보
-- `RECOLLECT`: 허용된 기간과 호출 예산 안에서 재수집할 후보
-- `DEFERRED`: 실행 중인 작업이나 자원 제한 때문에 보류
-- `BLOCKED`: 필요한 근거나 안전 조건이 부족해 차단
-
-기본 정책은 한 번에 최대 3개 작업, 그중 API 재수집 최대 1개, 복구 대상 기간 24시간이다. 이 값들은 [복구 판단 로직](dags/common/recovery/planner.py)에 정의돼 있다.
-
-[Coordinator DAG](dags/domains/weather/weather_recovery_coordinator.py)는 수집 기록을 읽어 계획을 생성하는 단계까지 연결돼 있다. DAG를 실행해도 복구 대상 DAG를 직접 호출하거나 R2·Trino·D1에 복구 데이터를 쓰지 않는다. 판단 로직의 구현과 실제 복구 실행을 같은 완료 상태로 표현하지 않는다.
+Airflow 쪽 복구 DAG는 담당하는 일이 다릅니다. 실행 기록을 읽어 검증된 원본으로 재처리할 수 있는 건(`RAW_REPLAY`), API에서 다시 받아야 할 건(`RECOLLECT`), 보류할 건(`DEFERRED`), 근거가 부족해 막을 건(`BLOCKED`)을 나눠 **복구 계획**을 남깁니다. 기본 계획 범위는 최근 24시간, 한 번에 최대 3건이며 그중 API 재수집 후보는 1건까지입니다. [복구 계획 DAG](dags/domains/weather/weather_recovery_coordinator.py) · [판단 로직](dags/common/recovery/planner.py)
 
 ### 4. 예보 시점을 보존하는 품질 평가
 
-예보가 나중에 갱신됐다는 이유로 과거 평가 결과를 새 예보로 바꾸지 않도록, 예보 발표 시점과 평가 기준 시각을 분리한다.
+내일 비가 올 확률을 평가하려면, 비가 온 뒤에 수정된 예보가 섞이지 않아야 합니다. 그래서 평가마다 실행 ID(`evaluation_run_id`)와 기준 시각(`evaluation_as_of`)을 남깁니다. 관측 시각보다 1·2·3일 앞서 발표된 예보를 골라 기온 오차, 강수 확률의 Brier 점수, 강수 형태 정확도와 비교 가능한 표본 수를 구합니다. 예보나 관측값이 빠진 곳은 결측으로, 잠정 관측값으로 계산한 결과는 잠정 상태로 남깁니다.
 
-- D-1·D-2·D-3 예보를 해당 시각의 실황과 연결한다.
-- 평가마다 `evaluation_run_id`와 `evaluation_as_of`를 고정하고 결과 이력을 남긴다.
-- 결측 예보, 결측 실황, 잘못된 입력과 계약 불일치를 구분한다. 값이 없다는 이유로 강수 없음이나 오차 0으로 채우지 않는다.
-- 기온 오차, 강수 확률의 Brier score, 강수 형태 정확도와 표본 커버리지를 계산한다.
-- 실황이 잠정값이면 평가 결과도 그 상태를 유지한다. 표본이 부족한 결과를 충분한 근거가 있는 결과처럼 표시하지 않는다.
-- 품질 후보 결과는 검증을 마친 뒤 `SUCCESS` 매니페스트로 게시한다. 실패하거나 중단된 후보는 최신 결과 조회에서 제외한다.
-
-관련 문서와 코드: [예보 품질 설계](docs/architecture/weather-forecast-quality.md), [품질 Gold 구조](docs/architecture/forecast-quality-gold.md), [리포트 생성](tools/forecast_quality_report.py), [품질 모델](dbt/domains/traffic_weather/models/weather/quality), [운영 절차](docs/operations/weather-forecast-quality-runbook.md).
+계산과 검사를 마친 결과에만 `SUCCESS` 완료 기록을 붙입니다. 최신 리포트는 이 기록을 보고 결과를 고릅니다. [품질 모델](dbt/domains/traffic_weather/models/weather/quality) · [평가 결과 테이블](docs/architecture/forecast-quality-gold.md) · [리포트 생성 코드](tools/forecast_quality_report.py)
 
 ### 5. 장소별 품질 결과와 공개 제품 보호
 
-격자별 품질 결과를 기존 장소 매핑과 연결해 장소별로 확인할 수 있도록 했다. 지표가 없는 장소는 `NO_METRICS`로 남겨 커버리지 공백이 사라지지 않게 한다. 장소와 연결되지 않은 품질 결과를 임의의 장소에 배정하지 않는다.
-
-공개 제품 게시에서는 데이터 계약, 행 수와 신선도를 확인하고 기존 정상 결과를 보존하는 경계를 유지한다. 적재 작업이 성공했다는 사실만으로 사용자에게 제공할 데이터가 정상이라고 판단하지 않는다.
-
-관련 코드와 검증: [장소·격자 조인](tools/spatial_quality_product.py), [공간 제품 설계](docs/architecture/forecast-quality-spatial-product.md), [조인 테스트](tests/forecast_quality/test_spatial_product.py), [게시 계약](dags/common/serving).
+장소별 평가에는 기존 장소·격자 매핑을 사용합니다. 연결된 지표가 없는 장소는 `NO_METRICS`로 남겨 어디가 비었는지 볼 수 있습니다. 공개 제품은 D1에 올리기 전에 데이터 계약, 행 수, 최신성을 검사합니다. 검사를 통과해야 이전 정상 결과를 교체합니다. [장소별 평가 설계](docs/architecture/forecast-quality-spatial-product.md) · [조인 코드](tools/spatial_quality_product.py) · [조인 테스트](tests/forecast_quality/test_spatial_product.py) · [게시 계약](dags/common/serving)
 
 ## 운영 중 확인한 문제와 설계 변경
 
-[2026-08-23 장애 기록](docs/data-engineering-decision.md)에 남긴 사례다. 현재 서비스 상태를 뜻하는 기록은 아니다.
+8월 23일에는 Iceberg 유지보수가 하나뿐인 Trino 작업 슬롯을 약 10시간 점유했습니다. 뒤따르던 수집과 게시가 밀렸고, 오래된 결과는 게시 전 최신성 검사에서 걸렸습니다. 이후 유지보수의 기본 예약을 해제하고 작업 시간과 우선순위를 조정했습니다.
 
-- **유지보수 작업의 장시간 자원 점유**: Iceberg 유지보수가 약 10시간 동안 단일 Trino 작업 슬롯을 점유했다. 정기 유지보수보다 수집·게시를 우선하도록 기본 예약 실행을 없애고 작업 시간과 우선순위를 제한했다.
-- **긴 작업 종료 뒤 인증 오류**: dbt 작업이 끝난 뒤 Airflow 내부 API에 결과를 보고하면서 JWT 만료로 403이 발생했다. 사용자 로그인 토큰과 작업 실행 API 토큰을 구분해 해당 설정을 수정했다.
-- **R2 일시적 연결 실패**: 원본과 체크포인트 쓰기가 DNS 오류로 중단됐다. 중복·덮어쓰기 방지 조건 안에서만 통신 오류 재시도를 허용하고, 인증·계약 오류는 재시도하지 않도록 분리했다.
-- **오래된 결과의 게시 차단**: 신선도 검사와 D1 게시 실패를 독립적인 원인으로 보지 않고, 앞단의 처리 지연을 차단한 결과로 구분했다. 게시를 통과시키기 위해 검사를 완화하지 않았다.
-
-판단 과정과 기각한 대안은 [설계 판단 기록](docs/data-engineering-decision.md), 장애 흐름과 복기 내용은 [장애 기록](docs/lessonrun.md)에 정리했다.
+같은 기간에 오래 걸린 dbt 작업의 결과를 Airflow에 보고할 때 내부 API 토큰 만료로 403이 발생해 해당 토큰 설정을 수정했습니다. R2에 원본과 체크포인트를 쓰다가 DNS 오류로 멈춘 건은 중복 쓰기를 방지할 수 있는 조건에서만 재시도하도록 했습니다. 인증 오류나 데이터 형식 오류는 원인을 바로 확인하도록 남깁니다. [설계 변경 기록](docs/data-engineering-decision.md) · [장애 경과](docs/lessonrun.md)
 
 ## 공개 제품과 평가 대상
 
-공개 Weather 제품은 다음 4개다. 내부 예보 품질 Gold는 이 목록에 포함하지 않는다.
+| 조회할 수 있는 내용 | 제품 식별자 |
+|---|---|
+| 장소별 현재 예보 | `weather_place_current_outlook` |
+| 비가 올 것으로 예상되는 시간대 | `weather_place_precipitation_window` |
+| 장소별 기상 위험 예상 시간대 | `weather_place_risk_window` |
+| 같은 날짜의 최신 예보와 직전 예보 간 변화 | `weather_place_forecast_change_daily` |
 
-| 용도 | 제품 식별자 | 현재 K-Skill 제공 |
-|---|---|---|
-| 장소별 현재 예보 | `weather_place_current_outlook` | 아니오 |
-| 장소별 강수 예상 시간대 | `weather_place_precipitation_window` | 아니오 |
-| 장소별 기상 위험 시간대 | `weather_place_risk_window` | 예 |
-| 일 단위 예보 변화 | `weather_place_forecast_change_daily` | 아니오 |
-
-- **80개 격자**는 예보 품질 평가에 사용하는 기상 격자 집합이다.
-- **427개 장소**는 기존 제공 방식과 K-Skill 입력의 호환성을 유지하기 위한 장소 목록이다. 공식 행정동 수와 동일한 의미가 아니다.
-- 현재 `seoul-weather-risk` K-Skill은 `weather_place_risk_window` 하나만 제공한다. K-Skill 실행 코드의 기준 저장소는 [NomaDamas/k-skill](https://github.com/NomaDamas/k-skill)이다.
-
-개인 프록시는 허용된 세 경로만 개인 Weather API에 연결한다. K-Skill의 기본 프록시 대신 개인 프록시를 사용할 때는 `KSKILL_PROXY_BASE_URL`을 설정하며, 서비스 토큰은 Worker의 비밀값으로만 보관한다.
+80개는 날씨를 수집하고 평가하는 **기상 격자 수**, 427개는 기존 조회 방식과 호환되는 **장소 목록의 크기**입니다. K-Skill의 `seoul-weather-risk`가 제공하는 제품은 표의 `weather_place_risk_window`입니다. 개인 프록시는 Weather API의 허용된 세 경로에만 연결합니다. 개인 프록시 주소는 `KSKILL_PROXY_BASE_URL`로 지정하며 서비스 토큰은 Worker의 비밀값으로 보관합니다. [프록시 설정](k-skill-proxy/README.md) · [K-Skill 실행 코드](https://github.com/NomaDamas/k-skill)
 
 ## 저장소 구성
 
-```text
-dags/                      기상 수집·변환·게시 DAG와 공통 처리
-dbt/domains/traffic_weather/  Weather 모델·테스트·장소 및 격자 기준
-weather_quality/           예보·실황 연결과 품질 평가 로직
-contracts/                 데이터 계약·검증용 입력·결과
-release/weather/           K-Skill 장소 산출물 생성과 검증
-k-skill-proxy/             개인 Weather API 연결 프록시
-tools/                     검증·리포트·복구 계획 도구
-tests/                     저장소·제품·운영 계약 회귀 테스트
-provenance/                고정 원본·파일별 출처·체크섬
-docs/                      설계·운영 절차·장애 기록
-```
-
-이 저장소는 Weather 코드와 계약을 관리한다. 다른 ASK Seoul 도메인, 범용 Marketplace·OAuth 기능, K-Skill의 전체 실행 코드는 관리하지 않는다. 실제 R2·Iceberg·D1 데이터, 자격증명, Airflow 메타데이터와 실행 로그도 공개 저장소에 넣지 않는다.
+| 경로 | 내용 |
+|---|---|
+| [dags](dags) · [dbt](dbt/domains/traffic_weather) | 기상 수집·적재·게시 DAG, 변환 모델과 검사 |
+| [weather_quality](weather_quality) · [contracts](contracts) | 예보·실황 평가 로직, 데이터 계약과 검증용 자료 |
+| [release/weather](release/weather) · [k-skill-proxy](k-skill-proxy) | K-Skill 장소 목록 생성, 개인 Weather API 연결 |
+| [tools](tools) · [tests](tests) | 수집·복구·리포트 도구, 계약과 회귀 테스트 |
+| [provenance](provenance) · [docs](docs) | 이관한 파일의 출처와 체크섬, 설계·운영 기록 |
 
 ## 검증 방법
 
 ### 운영 자원에 접근하지 않는 기본 검증
 
-저장소 루트에서 Python 3.11 환경을 활성화한 뒤 실행한다. 세부 버전은 [도구 버전 목록](runtime/toolchain.lock.json)에 고정돼 있다.
+저장소 루트에서 Python 3.11 가상환경을 활성화한 뒤 실행합니다. 아래 명령은 로컬 입력과 합성 격자 자료로 검사합니다. 실제 예보의 수집 상태는 발표 시각별 원본과 완료 기록을 대조합니다. [고정 도구 버전](runtime/toolchain.lock.json)
 
 ```bash
-python -m pip install pytest==9.0.3 jsonschema==4.26.0 PyYAML==6.0.2
+python -m pip install pytest==9.0.3 jsonschema==4.26.0 PyYAML==6.0.2 boto3==1.43.0 requests==2.32.5
 
 python -m tools.repository_policy --repo-root .
 python -m tools.verify_provenance --repo-root .
@@ -169,63 +108,34 @@ python -m tools.workflow_policy --repo-root .
 
 python -m pytest tests/repository tests/deploy \
   tests/forecast_quality tests/contracts release/weather/tests -q
+python -m pytest tests/tools/test_weather_collect_hosted.py \
+  tests/tools/test_weather_daily_quality*.py tests/tools/test_weather_coverage_comparison.py -q
 ```
 
-이 검사는 운영 자격증명을 사용하지 않고 Airflow 서비스나 DAG를 가동하지 않는다. 저장소 정책·출처·체크섬·제품 계약·품질 평가·장소 산출물의 재현성을 확인한다. PowerShell 환경에서는 [기본 검증 스크립트](tools/verify_repository.ps1)도 사용할 수 있다.
+PowerShell에서는 다음 명령으로 정책·출처 검사와 `tests/repository`, `tests/deploy` 테스트를 실행할 수 있습니다. 예보 품질과 제품 검사는 위의 pytest 명령에 포함돼 있습니다. [검증 스크립트](tools/verify_repository.ps1)
 
 ```powershell
 pwsh -NoProfile -File tools/verify_repository.ps1 -PythonExecutable python
 ```
 
-위 스크립트는 정책·체크섬 검증과 `tests/repository`, `tests/deploy`를 실행한다. 품질·제품·장소 검증은 앞의 pytest 명령에 별도로 포함돼 있다.
-
 ### CI에서 추가로 확인하는 항목
 
-[GitHub Actions 설정](.github/workflows/ci.yml)은 다음 검사를 통과해야 병합할 수 있도록 구성했다.
-
-- 고정된 dbt 의존성으로 모델 구문을 해석하고 공개 제품 계약을 검증한다.
-- Airflow 관련 코드의 문법·DAG 경계·회귀 테스트를 실행한다.
-- 운영 자원 없이 DAG의 불러오기 정책과 저장소 범위를 검사한다.
-- 프록시 테스트와 main 반영 PR의 출처를 확인한다.
-
-dbt를 직접 검증할 때는 [dbt 의존성 목록](runtime/requirements-dbt.lock.txt)을 사용하는 격리 환경을 준비한다. DAG를 고정된 Airflow 이미지 안에서 불러오는 검사는 [별도 검사 도구](tools/verify_dagbag.ps1)로 구분하며, 서비스 재시작이나 DAG 실행 검증과 혼동하지 않는다.
-
-검증용 80개 격자 데이터는 합성 데이터다. 테스트 통과는 실제 서울 예보 정확도, 현재 서비스 가동 여부나 데이터 신선도를 증명하지 않는다. 실제 운영 검증에는 기준 시각, DAG 실행 결과, 데이터 행 수·커버리지·신선도와 확인 범위가 별도로 필요하다.
+CI는 고정한 dbt 버전으로 모델 구문과 공개 제품 계약을 검사합니다. Airflow DAG·프록시의 회귀 테스트도 실행하고, `main`으로 반영할 때에는 PR의 출발 브랜치를 확인합니다. 고정 Airflow 이미지에서 DAG를 불러오는 검사는 별도 도구로 실행합니다. [CI 설정](.github/workflows/ci.yml) · [dbt 의존성](runtime/requirements-dbt.lock.txt) · [DAG 불러오기 검사](tools/verify_dagbag.ps1)
 
 ## 로컬 운영과 배포 기준
 
-공통 `docker-compose.yml`에 `docker-compose.local.yml`을 조합하는 구성이다. 명령과 자원 설정은 [로컬 실행 문서](README-LOCAL.md), 리소스 소유 관계는 [현재 운영 의존성](docs/operations/current-resource-dependencies.md)을 따른다.
+로컬에서는 공통 `docker-compose.yml`에 `docker-compose.local.yml`을 함께 적용합니다. 예시 환경 파일에는 실황 수집 주기가 비어 있고 공유 호출 제한이 꺼져 있습니다. 로컬 설정은 공유 호출 제한을 켜고 실황을 매시 45분에 수집하도록 설정합니다. 이미 등록된 DAG의 활성 상태는 Airflow에서 확인합니다. [로컬 실행 방법](README-LOCAL.md) · [로컬 설정](docker-compose.local.yml) · [Trino 동시 실행 제한](trino/resource-groups.json)
 
-설정 예제와 로컬 설정은 다음처럼 다르다.
+예보 품질 DAG에는 기본 예약 시각이 없습니다. 이 DAG는 Weather 작업 풀의 두 슬롯을 모두 쓰고, 작업 하나는 15분, DAG 전체는 45분으로 제한합니다. [품질 DAG 설정](dags/domains/weather/weather_quality_dag_factory.py) · [품질 평가 운영 절차](docs/operations/weather-forecast-quality-runbook.md)
 
-- `.env.example`: 공유 호출 제한 설정은 `false`, 관측 수집 스케줄은 비어 있다.
-- [`docker-compose.local.yml`](docker-compose.local.yml): 공유 호출 제한을 켜고 관측 수집을 매시 45분(`45 * * * *`)으로 설정한다.
-- 예보 품질 DAG의 스케줄은 로컬 설정에서도 비어 있다. 별도 품질 검증과 활성화 승인이 필요하다.
-- 현재 [품질 DAG](dags/domains/weather/weather_quality_dag_factory.py)의 제한은 작업당 15분, DAG 실행당 45분이다. 품질 작업은 Weather 작업 풀의 2개 슬롯을 모두 요청한다.
-- DAG의 최초 생성 시 정지 설정은 기존 DAG의 활성 상태를 바꾸지 않는다. 코드와 스케줄만 보고 현재 수집이 멈춰 있다고 판단하지 않는다.
-
-이미지 빌드·서비스 재시작·DAG 활성화·수동 실행·과거 데이터 재처리는 운영 환경을 바꾸는 작업이다. 실행 전에 아래를 확인하고 운영 승인을 받는다.
-
-1. 반영할 커밋과 영향을 받는 서비스·DAG
-2. 실행·대기 중인 작업과 일시 중지·종료 대기 계획
-3. 배포, 정상 동작 확인과 이전 상태 복구 순서
-4. R2·Iceberg·Trino·D1의 읽기·쓰기 대상과 예상 영향
-
-저장소 검증이나 PR 병합만으로 운영 변경이 승인되지는 않는다. 자세한 절차는 [Airflow 배포 전 확인 사항](docs/operations/predeployment-approval-gate.md)과 [품질 평가 운영 절차](docs/operations/weather-forecast-quality-runbook.md)를 따른다.
+서비스 재시작, DAG 활성화·수동 실행, 과거 자료 재처리에 앞서 반영할 커밋, 실행 중인 작업, 읽고 쓸 R2·Iceberg·Trino·D1 대상과 복구 순서를 확인하고 운영 승인을 받습니다. [운영 자원 목록](docs/operations/current-resource-dependencies.md) · [배포 전 확인 사항](docs/operations/predeployment-approval-gate.md) · [실황 수집 활성화 절차](docs/operations/kma-observation-predeployment-plan.md)
 
 ## 설계와 구현 근거
 
-- [원본 커밋 목록](provenance/source-refs.lock.json) · [이관 파일 목록](provenance/source-inventory.json) · [파일별 출처와 체크섬](provenance/source-files.jsonl)
-- [용어와 제품 범위](CONTEXT.md) · [저장소 분리 설계](docs/superpowers/specs/2026-08-14-weather-repository-separation-design.md) · [코드·운영 환경의 관리 범위](docs/architecture/platform-boundaries.md)
-- [예보 품질 평가 설계](docs/architecture/weather-forecast-quality.md) · [품질 Gold 구조](docs/architecture/forecast-quality-gold.md) · [장소별 품질 제품](docs/architecture/forecast-quality-spatial-product.md)
-- [초기 품질 리포트·재처리 설계](docs/runbooks/WEATHER_FORECAST_QUALITY_RUNBOOK.md) · [현재 품질 평가 운영 절차](docs/operations/weather-forecast-quality-runbook.md) · [관측 수집 활성화 전 확인 사항](docs/operations/kma-observation-predeployment-plan.md)
-- [설계 판단과 근거](docs/data-engineering-decision.md) · [장애 기록](docs/lessonrun.md)
+팀 코드는 출처 목록에 고정한 커밋에서 가져왔습니다. 이관한 파일을 고치면 목록과 체크섬을 함께 갱신합니다. [원본 커밋](provenance/source-refs.lock.json) · [파일 목록](provenance/source-inventory.json) · [파일별 출처와 체크섬](provenance/source-files.jsonl) · [NOTICE](NOTICE)
 
-원본 코드는 현재 작업 폴더를 복사하지 않고, 출처 목록에 고정된 커밋에서 가져온다. 원본을 바꾸거나 파일을 수정하면 이관 목록·체크섬·검증 결과를 함께 갱신한다. 예전 설계 문서의 당시 설정과 현재 코드가 다를 수 있으므로 현재 구성은 설정 파일과 계약 테스트를 우선해 확인한다.
+제품 이름과 저장소 분리 과정, 초기 품질 리포트의 재처리 기준도 기록해 두었습니다. [용어와 제품 범위](CONTEXT.md) · [저장소 분리 설계](docs/superpowers/specs/2026-08-14-weather-repository-separation-design.md) · [초기 품질 리포트와 재처리](docs/runbooks/WEATHER_FORECAST_QUALITY_RUNBOOK.md)
 
 ## 변경 반영 절차
 
-기능·문서 변경은 `feat/` 브랜치에서 `dev` 대상 PR로 반영하고, 검증된 `dev`를 별도 PR로 `main`에 반영한다. 필수 CI와 검토를 거친 뒤 병합하며 보호 규칙을 우회하지 않는다.
-
-`dev`는 선형 이력을 유지하므로 동기화 여부는 커밋 번호만으로 판단하지 않는다. 두 브랜치의 파일 내용은 `git diff origin/main origin/dev`로 확인한다.
-
+기능과 문서는 `feat/` 브랜치에서 `dev` 대상 PR로 검토합니다. 필수 CI와 검토를 통과한 `dev` 변경을 별도 PR로 `main`에 반영합니다. `dev`는 선형 이력을 유지하므로 두 브랜치의 실제 파일 차이는 `git diff origin/main origin/dev`로 확인합니다.
